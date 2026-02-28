@@ -1,0 +1,10 @@
+{
+  "name": "vista-ai-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Placeholder for the Vista AI React front‑end.",
+  "scripts": {
+    "start": "echo 'To develop the front‑end, create a React app here and point it at the backend'"
+  },
+  "dependencies": {}
+}

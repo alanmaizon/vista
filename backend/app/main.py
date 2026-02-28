@@ -175,6 +175,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         system_prompt=settings.system_instructions,
         skill=state.skill,
         goal=session.goal,
+        user_key=user["uid"],
+        session_key=str(session_id),
+        prefer_adk=settings.use_adk,
     )
 
     try:

@@ -1,15 +1,8 @@
-"""Pydantic schemas for input and output validation.
-
-These schemas mirror the SQLAlchemy models and are used by FastAPI to
-validate and serialize request/response bodies for session creation and
-updates.  The `SessionSummary` allows arbitrary structures to be
-stored in the summary field using the `Any` type.
-"""
-
 import uuid
+from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SessionCreate(BaseModel):
@@ -23,7 +16,7 @@ class SessionUpdate(BaseModel):
     """Schema for updating an existing session."""
 
     risk_mode: Optional[str] = Field(None, description="Risk mode (NORMAL, CAUTION, REFUSE)")
-    ended: Optional[bool] = Field(False, description="Whether to mark the session as ended")
+    ended: Optional[bool] = Field(None, description="Whether to mark the session as ended")
     success: Optional[bool] = Field(None, description="Whether the session completed successfully")
     summary: Optional[Any] = Field(None, description="Structured summary of the session")
 
@@ -31,11 +24,16 @@ class SessionUpdate(BaseModel):
 class SessionOut(BaseModel):
     """Schema for session retrieval responses."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
+    user_id: str
+    started_at: datetime
+    ended_at: Optional[datetime]
     mode: str
     risk_mode: str
     goal: Optional[str]
     summary: Optional[Any]
-
-    class Config:
-        orm_mode = True
+    success: Optional[bool]
+    model_id: Optional[str]
+    region: Optional[str]

@@ -1,4 +1,4 @@
-# Vista AI Project
+# Vista AI
 
 Vista AI is a proof‑of‑concept assistive application designed to help blind and low‑vision users navigate real‑world tasks using Google’s Gemini Live API.  The application consists of a Python backend powered by FastAPI and a React front‑end.  It supports multiple **skills**—such as finding doors, verifying products, reading text, locating objects, and assisting with simple form input—while enforcing strict safety protocols and one‑step guidance loops.
 

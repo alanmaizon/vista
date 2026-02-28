@@ -1,138 +1,254 @@
-"""Main FastAPI application entry point.
+"""Main FastAPI application entry point."""
 
-This file creates a FastAPI app, registers routers, sets up startup
-events to initialise Firebase, and defines a WebSocket endpoint for
-real‑time interactions.  The WebSocket endpoint relies on a
-`GeminiLiveBridge` instance to handle the connection to the Gemini Live
-API; the actual implementation of the bridge is left for future
-development in `live/bridge.py`.
-"""
+from __future__ import annotations
 
-import json
+import asyncio
+import base64
+import binascii
+import contextlib
 import logging
-import os
-from typing import Dict, Any
+from datetime import datetime, timezone
+from pathlib import Path
+from uuid import UUID
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select
 
-from .auth import init_firebase, get_current_user
-from .sessions import router as sessions_router
+from .auth import init_firebase, verify_firebase_token
+from .db import AsyncSessionLocal, init_db
 from .live.bridge import GeminiLiveBridge
+from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_STOP, CLIENT_VIDEO
+from .live.state import LiveSessionState
+from .models import Session
+from .sessions import router as sessions_router
 from .settings import settings
 
 
 logger = logging.getLogger("vista-ai")
 
-app = FastAPI(title="Vista AI Backend", version="0.1.0")
+app = FastAPI(title="Vista AI Backend", version="0.2.0")
 app.include_router(sessions_router)
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Initialise resources on application startup."""
-    # Initialise Firebase once per instance
+    """Initialise Firebase and create the sessions table if needed."""
     init_firebase()
-    logger.info("Firebase initialised")
+    await init_db()
+    logger.info("Firebase and database initialised")
+
+
+@app.get("/")
+async def index() -> FileResponse:
+    """Serve the minimal browser client."""
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health")
-async def health_check() -> Dict[str, str]:
+async def health_check() -> dict[str, str]:
     """Health endpoint to confirm the service is up."""
     return {"status": "ok"}
 
 
+async def _load_owned_session(session_id: UUID, user_id: str) -> Session:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Session).where(Session.id == session_id))
+        session = result.scalar_one_or_none()
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Not authorised to access this session")
+        return session
+
+
+async def _update_session_start_metadata(
+    session_id: UUID,
+    *,
+    model_id: str,
+    region: str,
+) -> None:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Session).where(Session.id == session_id))
+        session = result.scalar_one_or_none()
+        if session is None:
+            return
+        session.model_id = model_id
+        session.region = region
+        await db.commit()
+
+
+async def _persist_session_completion(
+    session_id: UUID,
+    *,
+    state: LiveSessionState,
+    bridge: GeminiLiveBridge,
+) -> None:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Session).where(Session.id == session_id))
+        session = result.scalar_one_or_none()
+        if session is None:
+            return
+        summary = state.summary_payload()
+        session.summary = summary
+        session.risk_mode = state.risk_mode
+        session.ended_at = datetime.now(timezone.utc)
+        session.success = state.completed and state.risk_mode != "REFUSE"
+        session.model_id = bridge.model_id
+        session.region = bridge.active_location
+        await db.commit()
+
+
+def _decode_b64_payload(message: dict, field_name: str = "data_b64") -> bytes:
+    data_b64 = message.get(field_name)
+    if not isinstance(data_b64, str) or not data_b64:
+        raise ValueError(f"Missing {field_name}")
+    try:
+        return base64.b64decode(data_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError(f"Invalid base64 payload in {field_name}") from exc
+
+
+async def _forward_bridge_events(
+    ws: WebSocket,
+    bridge: GeminiLiveBridge,
+    state: LiveSessionState,
+) -> None:
+    async for event in bridge.receive():
+        if event.get("type") == "server.text":
+            text = str(event.get("text", ""))
+            extra_events = state.on_model_text(text)
+            for extra_event in extra_events:
+                await ws.send_json(extra_event)
+        elif event.get("type") == "server.status":
+            event = {
+                **event,
+                "mode": state.risk_mode,
+                "skill": state.skill,
+            }
+        await ws.send_json(event)
+
+
 @app.websocket("/ws/live")
 async def websocket_endpoint(ws: WebSocket) -> None:
-    """Handle live WebSocket connections for Vista AI.
-
-    The client should supply three query parameters:
-
-    - `token`: A Firebase ID token for the user
-    - `session_id`: The session identifier returned from the REST API
-    - `mode`: The selected skill (NAV_FIND, SHOP_VERIFY, etc.)
-
-    Once connected, the server will delegate the stream of audio and
-    optional JPEG frames to a `GeminiLiveBridge`.  Messages from the
-    model are forwarded back to the client.  The connection is
-    closed when the session ends or if an error occurs.
-    """
+    """Handle live websocket connections for audio-first Vista sessions."""
     await ws.accept()
-    # Extract query parameters
-    token = ws.query_params.get("token")
-    session_id = ws.query_params.get("session_id")
-    mode = ws.query_params.get("mode", "NAV_FIND")
-    if not token or not session_id:
+
+    token = ws.query_params.get("token", "").strip()
+    session_id_raw = ws.query_params.get("session_id", "").strip()
+    skill = ws.query_params.get("mode", "NAV_FIND").strip().upper() or "NAV_FIND"
+    if not token or not session_id_raw:
         await ws.send_json({"type": "error", "message": "Missing token or session_id"})
-        await ws.close()
+        await ws.close(code=1008)
         return
-    # Verify token synchronously (Firebase Admin requires a blocking call)
+
     try:
-        user = get_current_user.__wrapped__(authorization=f"Bearer {token}")  # type: ignore[attr-defined]
-        # user info can be used to enforce per-user limits here
-    except Exception as exc:
-        await ws.send_json({"type": "error", "message": str(exc)})
-        await ws.close()
+        session_id = UUID(session_id_raw)
+    except ValueError:
+        await ws.send_json({"type": "error", "message": "session_id must be a valid UUID"})
+        await ws.close(code=1008)
         return
-    # Initialise the live bridge with system instructions
+
+    try:
+        user = await asyncio.to_thread(verify_firebase_token, token)
+        session = await _load_owned_session(session_id, user["uid"])
+    except HTTPException as exc:
+        await ws.send_json({"type": "error", "message": exc.detail})
+        await ws.close(code=1008)
+        return
+    except Exception as exc:
+        logger.exception("Failed to validate websocket session: %s", exc)
+        await ws.send_json({"type": "error", "message": "Unable to validate the live session"})
+        await ws.close(code=1011)
+        return
+
+    state = LiveSessionState(skill=skill, goal=session.goal)
     bridge = GeminiLiveBridge(
         model_id=settings.model_id,
         location=settings.location,
+        fallback_location=settings.fallback_location,
+        project_id=settings.project_id,
         system_prompt=settings.system_instructions,
+        skill=state.skill,
+        goal=session.goal,
     )
+
     try:
         await bridge.connect()
-    except Exception as exc:
-        await ws.send_json({"type": "error", "message": f"Failed to connect: {exc}"})
-        await ws.close()
-        return
-    # Notify client that the connection is established
-    await ws.send_json({"type": "status", "state": "connected", "mode": "NORMAL", "skill": mode})
-    try:
+        await _update_session_start_metadata(
+            session_id,
+            model_id=bridge.model_id,
+            region=bridge.active_location,
+        )
+        await ws.send_json(
+            {
+                "type": "server.status",
+                "state": "connected",
+                "mode": state.risk_mode,
+                "skill": state.skill,
+            }
+        )
+        for event in state.on_connect_events():
+            await ws.send_json(event)
+        await bridge.send_text(state.opening_prompt(), role="user")
+
+        forward_task = asyncio.create_task(_forward_bridge_events(ws, bridge, state))
+        stop_requested = False
+
         while True:
-            data = await ws.receive()
-            if "type" not in data:
-                # Unexpected message type, ignore or log
+            try:
+                message = await ws.receive_json()
+            except WebSocketDisconnect:
+                break
+            except (ValueError, TypeError):
+                await ws.send_json({"type": "error", "message": "Malformed JSON message"})
                 continue
-            # Client messages come as JSON text or bytes; decode accordingly
-            if isinstance(data, str):
-                try:
-                    message = json.loads(data)
-                except json.JSONDecodeError:
-                    await ws.send_json({"type": "error", "message": "Invalid JSON message"})
-                    continue
-            elif isinstance(data, bytes):
-                # We expect audio bytes encoded in base64 or raw; for now we ignore
+
+            if not isinstance(message, dict):
+                await ws.send_json({"type": "error", "message": "Messages must be JSON objects"})
                 continue
-            else:
-                # WebSocket accepts dict but returns dict differently; we treat as bytes
-                message = data
-            mtype = message.get("type")
-            if mtype == "client.audio":
-                # Base64 decode audio
-                import base64
 
-                b64 = message.get("data_b64")
-                if b64:
-                    audio_bytes = base64.b64decode(b64)
-                    await bridge.send_audio(audio_bytes)
-            elif mtype == "client.video":
-                import base64
+            message_type = str(message.get("type", "")).strip()
+            try:
+                if message_type == CLIENT_AUDIO:
+                    await bridge.send_audio(_decode_b64_payload(message))
+                elif message_type == CLIENT_VIDEO:
+                    state.on_client_video()
+                    await bridge.send_image_jpeg(_decode_b64_payload(message))
+                elif message_type == CLIENT_CONFIRM:
+                    confirm_prompt = state.on_client_confirm()
+                    if confirm_prompt:
+                        await bridge.send_text(confirm_prompt, role="user")
+                elif message_type == CLIENT_STOP:
+                    stop_requested = True
+                    await ws.send_json({"type": "server.summary", **state.summary_payload()})
+                    break
+                else:
+                    await ws.send_json({"type": "error", "message": f"Unsupported message type: {message_type}"})
+            except ValueError as exc:
+                await ws.send_json({"type": "error", "message": str(exc)})
+            except Exception as exc:
+                logger.exception("Live websocket message handling failed: %s", exc)
+                await ws.send_json({"type": "error", "message": "Failed to process live message"})
+                break
 
-                b64 = message.get("data_b64")
-                if b64:
-                    image_bytes = base64.b64decode(b64)
-                    await bridge.send_image_jpeg(image_bytes)
-            elif mtype == "client.confirm":
-                # Confirmation could be forwarded or handled locally depending on state machine
-                pass
-            # Forward events from model back to client
-            async for event in bridge.receive():
-                await ws.send_json(event)
-    except WebSocketDisconnect:
-        logger.info("WebSocket disconnected")
+        if not stop_requested and ws.client_state.name == "CONNECTED":
+            await ws.send_json({"type": "server.summary", **state.summary_payload()})
+
+        forward_task.cancel()
+        try:
+            await forward_task
+        except asyncio.CancelledError:
+            pass
     except Exception as exc:
-        logger.error(f"Unexpected error in WebSocket: {exc}")
+        logger.exception("Unexpected error in /ws/live: %s", exc)
+        await ws.send_json({"type": "error", "message": f"Live session error: {exc}"})
     finally:
+        await _persist_session_completion(session_id, state=state, bridge=bridge)
         await bridge.close()
-        await ws.close()
+        with contextlib.suppress(RuntimeError):
+            await ws.close()

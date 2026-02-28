@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vista AI</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel hero">
+        <p class="eyebrow">Vista AI MVP</p>
+        <h1>Real-time human-eyes assistant</h1>
+        <p class="lede">Audio first, optional 1 FPS camera frames, one instruction at a time.</p>
+      </section>
+
+      <section class="panel grid">
+        <div class="stack">
+          <label for="firebase-config">Firebase Config JSON</label>
+          <textarea id="firebase-config" rows="6" spellcheck="false" placeholder='{"apiKey":"","authDomain":"","projectId":"","appId":""}'></textarea>
+
+          <label for="email">Email (optional)</label>
+          <input id="email" type="email" autocomplete="username">
+
+          <label for="password">Password (optional)</label>
+          <input id="password" type="password" autocomplete="current-password">
+
+          <button id="sign-in" class="secondary">Sign In</button>
+          <p id="auth-status" class="hint" aria-live="polite">Signed out.</p>
+        </div>
+
+        <div class="stack">
+          <label for="mode">Skill</label>
+          <select id="mode">
+            <option value="REORIENT">REORIENT</option>
+            <option value="HOLD_STEADY">HOLD_STEADY</option>
+            <option value="FRAME_COACH">FRAME_COACH</option>
+            <option value="READ_TEXT">READ_TEXT</option>
+            <option value="NAV_FIND" selected>NAV_FIND</option>
+            <option value="QUEUE_AND_COUNTER">QUEUE_AND_COUNTER</option>
+            <option value="SHOP_VERIFY">SHOP_VERIFY</option>
+            <option value="PRICE_AND_DEAL_CHECK">PRICE_AND_DEAL_CHECK</option>
+            <option value="MONEY_HANDLING">MONEY_HANDLING</option>
+            <option value="OBJECT_LOCATE">OBJECT_LOCATE</option>
+            <option value="DEVICE_BUTTONS_AND_DIALS">DEVICE_BUTTONS_AND_DIALS</option>
+            <option value="SOCIAL_CONTEXT">SOCIAL_CONTEXT</option>
+            <option value="FACE_TO_SPEAKER">FACE_TO_SPEAKER</option>
+            <option value="FORM_FILL_HELP">FORM_FILL_HELP</option>
+            <option value="COOKING_ASSIST">COOKING_ASSIST</option>
+            <option value="STAIRS_ESCALATOR_ELEVATOR">STAIRS_ESCALATOR_ELEVATOR</option>
+            <option value="TRAFFIC_CROSSING">TRAFFIC_CROSSING</option>
+            <option value="MEDICATION_DOSING">MEDICATION_DOSING</option>
+          </select>
+
+          <label for="goal">Goal</label>
+          <input id="goal" type="text" placeholder="Find the exit sign">
+
+          <label class="checkbox-row" for="use-camera">
+            <input id="use-camera" type="checkbox">
+            <span>Send camera frames (max 1 FPS)</span>
+          </label>
+
+          <div class="button-row">
+            <button id="start" class="primary">Start</button>
+            <button id="confirm" class="accent" disabled>Confirm</button>
+            <button id="stop" class="danger" disabled>Stop</button>
+          </div>
+
+          <p id="session-status" class="hint" aria-live="polite">Idle.</p>
+        </div>
+      </section>
+
+      <section class="panel transcript-panel">
+        <div class="panel-head">
+          <h2>Captions</h2>
+          <span id="risk-badge" class="badge">NORMAL</span>
+        </div>
+        <div id="captions" class="captions" aria-live="polite"></div>
+      </section>
+
+      <section class="panel transcript-panel">
+        <div class="panel-head">
+          <h2>Summary</h2>
+        </div>
+        <ul id="summary" class="summary"></ul>
+      </section>
+
+      <section class="panel media-panel">
+        <div class="panel-head">
+          <h2>Camera Preview</h2>
+        </div>
+        <video id="preview" autoplay muted playsinline></video>
+      </section>
+    </main>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

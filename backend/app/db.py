@@ -1,19 +1,14 @@
-"""Database configuration and session management for FastAPI.
-
-This module uses SQLAlchemy’s asyncio support with asyncpg to connect to
-PostgreSQL.  The connection URL is assembled from environment
-variables.  In production on Cloud Run with Cloud SQL, the connector
-uses a Unix socket; in local development, it falls back to TCP.
-"""
-
 import os
 from typing import AsyncGenerator
+from urllib.parse import quote_plus
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+
+from .models import Base
 
 
 def _make_database_url() -> str:
@@ -32,7 +27,7 @@ def _make_database_url() -> str:
     - DB_PORT: Port number (used when not connecting via socket).
     """
     user = os.getenv("DB_USER", "postgres")
-    password = os.getenv("DB_PASSWORD", "")
+    password = quote_plus(os.getenv("DB_PASSWORD", ""))
     db_name = os.getenv("DB_NAME", "postgres")
     # Determine whether to use a Cloud SQL Unix socket
     instance_connection_name = os.getenv("CLOUDSQL_INSTANCE_CONNECTION_NAME")
@@ -52,6 +47,12 @@ engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(
     bind=engine, class_=AsyncSession, expire_on_commit=False
 )
+
+
+async def init_db() -> None:
+    """Create tables if they do not already exist."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

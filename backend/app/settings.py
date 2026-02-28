@@ -1,30 +1,38 @@
-"""Application settings using Pydantic.
+import os
 
-This module centralises configuration values that the application
-depends on.  It uses Pydantic’s BaseSettings so that values can be
-loaded from environment variables or a `.env` file when running
-locally.  These settings include the Vertex AI model ID, region, and
-any other global constants.
-"""
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from pydantic_settings import BaseSettings
+from .constitution import DEFAULT_SYSTEM_INSTRUCTIONS
+
+
+DEPRECATED_LIVE_MODEL_ID = "gemini-live-2.5-flash-preview-native-audio-09-2025"
 
 
 class Settings(BaseSettings):
-    """Global configuration for the Vista AI backend.
-
-    Attributes:
-        model_id: The ID of the Gemini Live model to use
-        location: The region/location of the model endpoint (e.g. europe-west4)
-        system_instructions: The long constitution/system prompt for the assistant
-    """
+    """Global configuration for the Vista AI backend."""
 
     model_id: str = "gemini-live-2.5-flash-native-audio"
     location: str = "us-central1"
-    system_instructions: str = ""
+    fallback_location: str = "us-central1"
+    project_id: str = Field(
+        default_factory=lambda: (
+            os.getenv("GOOGLE_CLOUD_PROJECT")
+            or os.getenv("GCLOUD_PROJECT")
+            or os.getenv("GOOGLE_CLOUD_PROJECT_ID")
+            or ""
+        )
+    )
+    system_instructions: str = DEFAULT_SYSTEM_INSTRUCTIONS
 
-    class Config:
-        env_prefix = "VISTA_"
+    model_config = SettingsConfigDict(env_prefix="VISTA_", extra="ignore")
+
+    @field_validator("model_id")
+    @classmethod
+    def validate_model_id(cls, value: str) -> str:
+        if value == DEPRECATED_LIVE_MODEL_ID:
+            raise ValueError("The deprecated preview Gemini Live model is not allowed.")
+        return value
 
 
 settings = Settings()  # type: ignore[call-arg]

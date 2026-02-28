@@ -18,6 +18,7 @@ from typing import List, Optional
 CLIENT_AUDIO = "client.audio"
 CLIENT_VIDEO = "client.video"
 CLIENT_CONFIRM = "client.confirm"
+CLIENT_STOP = "client.stop"
 
 # Types of events sent by the server
 SERVER_AUDIO = "server.audio"

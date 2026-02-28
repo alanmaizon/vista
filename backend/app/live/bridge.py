@@ -56,6 +56,24 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
+def adk_runtime_status() -> tuple[bool, str]:
+    """Return whether the optional ADK runtime is importable."""
+    required_modules = (
+        "google.adk.agents",
+        "google.adk.agents.live_request_queue",
+        "google.adk.agents.run_config",
+        "google.adk.runners",
+        "google.adk.sessions",
+        "google.genai.types",
+    )
+    try:
+        for module_name in required_modules:
+            importlib.import_module(module_name)
+        return True, "google-adk runtime is available"
+    except Exception as exc:
+        return False, str(exc)
+
+
 class _DirectGeminiLiveBridge:
     """Direct Vertex Live websocket implementation."""
 

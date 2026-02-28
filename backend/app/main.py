@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from .auth import init_firebase, verify_firebase_token
 from .db import AsyncSessionLocal, init_db
-from .live.bridge import GeminiLiveBridge
+from .live.bridge import GeminiLiveBridge, adk_runtime_status
 from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_STOP, CLIENT_VIDEO
 from .live.state import LiveSessionState
 from .models import Session
@@ -40,7 +40,13 @@ async def startup_event() -> None:
     """Initialise Firebase and create the sessions table if needed."""
     init_firebase()
     await init_db()
-    logger.info("Firebase and database initialised")
+    adk_available, adk_detail = adk_runtime_status()
+    logger.info(
+        "Firebase and database initialised; ADK enabled=%s; ADK importable=%s; detail=%s",
+        settings.use_adk,
+        adk_available,
+        adk_detail,
+    )
 
 
 @app.get("/")
@@ -182,6 +188,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
     try:
         await bridge.connect()
+        logger.info(
+            "Live bridge connected for session %s using %s mode",
+            session_id,
+            "ADK" if bridge.using_adk else "direct Vertex websocket",
+        )
         await _update_session_start_metadata(
             session_id,
             model_id=bridge.model_id,

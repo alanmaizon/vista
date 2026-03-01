@@ -49,8 +49,40 @@ def test_medication_label_read_is_allowed_and_frame_first() -> None:
     assert "one medication item at a time" in state.opening_prompt().lower()
 
 
+def test_frame_first_skill_stays_in_frame_until_readable() -> None:
+    state = LiveSessionState(skill="READ_TEXT", goal="Read this label")
+
+    events = state.on_model_text("Move closer until the label fills more of the frame.")
+
+    assert events == []
+    assert state.phase == "FRAME"
+    assert state.frame_ready is False
+    assert state.awaiting_confirmation is True
+
+
+def test_frame_first_confirm_requests_frame_verification_only() -> None:
+    state = LiveSessionState(skill="READ_TEXT", goal="Read this label")
+    state.awaiting_confirmation = True
+    state.last_assistant_text = "Move closer until the label fills more of the frame."
+
+    prompt = state.on_client_confirm()
+
+    assert state.phase == "FRAME"
+    assert "verify only the frame" in (prompt or "").lower()
+
+
+def test_frame_first_skill_can_clear_gate_when_readable() -> None:
+    state = LiveSessionState(skill="READ_TEXT", goal="Read this label")
+
+    state.on_model_text("Readable. The label says oat milk.")
+
+    assert state.frame_ready is True
+    assert state.phase in {"GUIDE", "COMPLETE"}
+
+
 def test_model_text_marks_completion_for_match_language() -> None:
     state = LiveSessionState(skill="SHOP_VERIFY", goal="Check the cereal")
+    state.frame_ready = True
 
     events = state.on_model_text("MATCH. This is the correct cereal box.")
 

@@ -13,10 +13,15 @@ const elements = {
   authStatus: document.getElementById("auth-status"),
   mode: document.getElementById("mode"),
   goal: document.getElementById("goal"),
-  useCamera: document.getElementById("use-camera"),
+  micToggle: document.getElementById("mic-toggle"),
+  cameraToggle: document.getElementById("camera-toggle"),
+  screenToggle: document.getElementById("screen-toggle"),
+  snapshot: document.getElementById("snapshot"),
   start: document.getElementById("start"),
   confirm: document.getElementById("confirm"),
   stop: document.getElementById("stop"),
+  captureHint: document.getElementById("capture-hint"),
+  cameraWarning: document.getElementById("camera-warning"),
   sessionStatus: document.getElementById("session-status"),
   captions: document.getElementById("captions"),
   summary: document.getElementById("summary"),
@@ -37,7 +42,11 @@ const appState = {
   processor: null,
   monitorGain: null,
   micStream: null,
+  micEnabled: true,
   camStream: null,
+  cameraEnabled: false,
+  screenStream: null,
+  screenEnabled: false,
   videoTimer: null,
   playbackCursor: 0,
 };
@@ -64,6 +73,49 @@ const skillHints = {
   MEDICATION_DOSING: "Medication dosing is blocked. Use MEDICATION_LABEL_READ for label text only.",
 };
 
+const skillCaptureRules = {
+  HOLD_STEADY: {
+    requiresCamera: true,
+    hint: "Point the camera at one target only. Hold it steady until the assistant says the frame is readable.",
+  },
+  FRAME_COACH: {
+    requiresCamera: true,
+    hint: "Show one label, sign, or object at a time. Center it, move closer, and keep it still for 2 seconds.",
+  },
+  READ_TEXT: {
+    requiresCamera: true,
+    hint: "Show one sign or label at a time. Move closer until the text fills about half the frame, then hold still.",
+  },
+  SHOP_VERIFY: {
+    requiresCamera: true,
+    hint: "Show one package at a time. If you need the price checked, show the price tag in a separate close frame.",
+  },
+  PRICE_AND_DEAL_CHECK: {
+    requiresCamera: true,
+    hint: "Show one item or one price tag at a time. Compare only after both prices have been captured clearly.",
+  },
+  MONEY_HANDLING: {
+    requiresCamera: true,
+    hint: "Use a plain background and show one note or coin at a time. Do not hold a pile in frame.",
+  },
+  OBJECT_LOCATE: {
+    requiresCamera: true,
+    hint: "Sweep one surface slowly, then stop when the target area is centered. Narrow the frame if the scene is cluttered.",
+  },
+  DEVICE_BUTTONS_AND_DIALS: {
+    requiresCamera: true,
+    hint: "Show one control panel or dial at a time. Move close enough that labels and indicators are easy to read.",
+  },
+  FORM_FILL_HELP: {
+    requiresCamera: true,
+    hint: "Show only the active field or button area. Center it, reduce glare, and hold steady before asking for help.",
+  },
+  MEDICATION_LABEL_READ: {
+    requiresCamera: true,
+    hint: "Show one medication item at a time. Start with the front label close-up. Do not compare two inhalers at once.",
+  },
+};
+
 function setAuthStatus(message) {
   elements.authStatus.textContent = message;
 }
@@ -87,6 +139,27 @@ function setRunningState(isRunning) {
   elements.start.disabled = isRunning;
   elements.confirm.disabled = !isRunning || !appState.assistantResponseReady;
   elements.stop.disabled = !isRunning;
+  refreshMediaButtons();
+}
+
+function sessionRunning() {
+  return Boolean(appState.ws && appState.ws.readyState === WebSocket.OPEN);
+}
+
+function hasVisualSourceEnabled() {
+  return appState.cameraEnabled || appState.screenEnabled;
+}
+
+function setToggleButton(button, enabled, onLabel, offLabel) {
+  button.textContent = enabled ? onLabel : offLabel;
+  button.classList.toggle("is-on", enabled);
+}
+
+function refreshMediaButtons() {
+  setToggleButton(elements.micToggle, appState.micEnabled, "Mic On", "Mic Off");
+  setToggleButton(elements.cameraToggle, appState.cameraEnabled, "Camera On", "Camera Off");
+  setToggleButton(elements.screenToggle, appState.screenEnabled, "Share Screen On", "Share Screen Off");
+  elements.snapshot.disabled = !sessionRunning() || !hasVisualSourceEnabled();
 }
 
 function markAssistantResponseReady() {
@@ -126,6 +199,44 @@ function renderSummary(bullets) {
 function updateGoalHint() {
   const hint = skillHints[elements.mode.value] || "Describe what you need help with.";
   elements.goal.placeholder = hint;
+}
+
+function getCaptureRule() {
+  return skillCaptureRules[elements.mode.value] || null;
+}
+
+function selectedSkillNeedsVisualSource() {
+  return Boolean(getCaptureRule()?.requiresCamera);
+}
+
+function updateCaptureGuidance() {
+  const rule = getCaptureRule();
+  if (rule) {
+    elements.captureHint.textContent = rule.hint;
+  } else {
+    elements.captureHint.textContent =
+      "Audio-first checks work without camera. Dense visual tasks need a clean close-up.";
+  }
+
+  if (selectedSkillNeedsVisualSource() && !hasVisualSourceEnabled()) {
+    elements.cameraWarning.textContent =
+      "Turn on camera or screen sharing for this skill. Audio-only mode cannot reliably answer a visual task.";
+    return;
+  }
+
+  if (appState.screenEnabled) {
+    elements.cameraWarning.textContent =
+      "Screen sharing is active. Use Capture Screenshot when you want to send a still frame immediately.";
+    return;
+  }
+
+  if (appState.cameraEnabled) {
+    elements.cameraWarning.textContent =
+      "Camera is active. Keep the frame simple: one item, one label, or one control at a time.";
+    return;
+  }
+
+  elements.cameraWarning.textContent = "";
 }
 
 function parseFirebaseConfig() {
@@ -321,7 +432,11 @@ function waitForSocketOpen(ws) {
   });
 }
 
-async function startAudioCapture() {
+async function enableMicCapture() {
+  if (!appState.micEnabled || !sessionRunning() || appState.micStream) {
+    return;
+  }
+
   await ensureAudioContext();
 
   appState.micStream = await navigator.mediaDevices.getUserMedia({
@@ -340,7 +455,7 @@ async function startAudioCapture() {
   appState.monitorGain.gain.value = 0;
 
   appState.processor.onaudioprocess = (event) => {
-    if (!appState.ws || appState.ws.readyState !== WebSocket.OPEN) {
+    if (!sessionRunning()) {
       return;
     }
     const input = event.inputBuffer.getChannelData(0);
@@ -360,62 +475,7 @@ async function startAudioCapture() {
   appState.monitorGain.connect(appState.audioContext.destination);
 }
 
-async function startVideoCapture() {
-  if (!elements.useCamera.checked) {
-    elements.preview.srcObject = null;
-    return;
-  }
-
-  appState.camStream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: { ideal: "environment" },
-      width: { ideal: 960 },
-      height: { ideal: 720 },
-    },
-    audio: false,
-  });
-
-  elements.preview.srcObject = appState.camStream;
-
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("Unable to capture camera frames in this browser.");
-  }
-
-  appState.videoTimer = window.setInterval(() => {
-    if (!appState.ws || appState.ws.readyState !== WebSocket.OPEN || !appState.camStream) {
-      return;
-    }
-
-    const track = appState.camStream.getVideoTracks()[0];
-    if (!track) {
-      return;
-    }
-
-    const settings = track.getSettings();
-    canvas.width = Number(settings.width) || 640;
-    canvas.height = Number(settings.height) || 480;
-    context.drawImage(elements.preview, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.68);
-    const base64Data = dataUrl.split(",", 2)[1];
-
-    appState.ws.send(
-      JSON.stringify({
-        type: "client.video",
-        mime: "image/jpeg",
-        data_b64: base64Data,
-      })
-    );
-  }, 1000);
-}
-
-async function stopMedia() {
-  if (appState.videoTimer) {
-    clearInterval(appState.videoTimer);
-    appState.videoTimer = null;
-  }
-
+async function disableMicCapture() {
   if (appState.processor) {
     appState.processor.disconnect();
     appState.processor.onaudioprocess = null;
@@ -438,15 +498,187 @@ async function stopMedia() {
     }
     appState.micStream = null;
   }
+}
 
+function updatePreviewSource() {
+  if (appState.screenStream) {
+    elements.preview.srcObject = appState.screenStream;
+    return;
+  }
+  if (appState.camStream) {
+    elements.preview.srcObject = appState.camStream;
+    return;
+  }
+  elements.preview.srcObject = null;
+}
+
+async function ensureCameraCapture() {
+  if (!appState.cameraEnabled || !sessionRunning() || appState.camStream) {
+    return;
+  }
+  appState.camStream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { ideal: "environment" },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    },
+    audio: false,
+  });
+  updatePreviewSource();
+}
+
+async function ensureScreenCapture() {
+  if (!appState.screenEnabled || !sessionRunning() || appState.screenStream) {
+    return;
+  }
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    throw new Error("Screen sharing is not supported in this browser.");
+  }
+
+  appState.screenStream = await navigator.mediaDevices.getDisplayMedia({
+    video: {
+      frameRate: { ideal: 5, max: 8 },
+    },
+    audio: false,
+  });
+
+  const [track] = appState.screenStream.getVideoTracks();
+  if (track) {
+    track.addEventListener("ended", () => {
+      appState.screenEnabled = false;
+      void stopScreenCapture();
+      updateCaptureGuidance();
+      refreshMediaButtons();
+      appendCaption("Status", "Screen sharing stopped.");
+    });
+  }
+
+  updatePreviewSource();
+}
+
+async function stopCameraCapture() {
   if (appState.camStream) {
     for (const track of appState.camStream.getTracks()) {
       track.stop();
     }
     appState.camStream = null;
   }
+  updatePreviewSource();
+}
 
-  elements.preview.srcObject = null;
+async function stopScreenCapture() {
+  if (appState.screenStream) {
+    for (const track of appState.screenStream.getTracks()) {
+      track.stop();
+    }
+    appState.screenStream = null;
+  }
+  updatePreviewSource();
+  restartVisualFrameTimer();
+}
+
+function capturePreviewFrame() {
+  const video = elements.preview;
+  if (!video.srcObject || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    return null;
+  }
+
+  const width = video.videoWidth || 1280;
+  const height = video.videoHeight || 720;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return null;
+  }
+  context.drawImage(video, 0, 0, width, height);
+
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
+  return dataUrl.split(",", 2)[1] || null;
+}
+
+function sendVisualFrame(base64Data) {
+  if (!sessionRunning()) {
+    return;
+  }
+  appState.ws.send(
+    JSON.stringify({
+      type: "client.video",
+      mime: "image/jpeg",
+      data_b64: base64Data,
+    })
+  );
+}
+
+function restartVisualFrameTimer() {
+  if (appState.videoTimer) {
+    clearInterval(appState.videoTimer);
+    appState.videoTimer = null;
+  }
+
+  if (!sessionRunning() || !hasVisualSourceEnabled()) {
+    return;
+  }
+
+  appState.videoTimer = window.setInterval(() => {
+    const base64Data = capturePreviewFrame();
+    if (!base64Data) {
+      return;
+    }
+    sendVisualFrame(base64Data);
+  }, 1000);
+}
+
+async function syncVisualCapture() {
+  if (!sessionRunning()) {
+    return;
+  }
+
+  if (appState.screenEnabled) {
+    await ensureScreenCapture();
+    await stopCameraCapture();
+  } else {
+    await stopScreenCapture();
+    if (appState.cameraEnabled) {
+      await ensureCameraCapture();
+    } else {
+      await stopCameraCapture();
+    }
+  }
+
+  updatePreviewSource();
+  restartVisualFrameTimer();
+}
+
+async function captureScreenshot() {
+  if (!sessionRunning()) {
+    appendCaption("Status", "Start a live session before capturing a screenshot.");
+    return;
+  }
+  if (!hasVisualSourceEnabled()) {
+    appendCaption("Status", "Turn on camera or screen sharing before capturing a screenshot.");
+    return;
+  }
+  const base64Data = capturePreviewFrame();
+  if (!base64Data) {
+    appendCaption("Status", "Wait for the live preview to appear before capturing a screenshot.");
+    return;
+  }
+  sendVisualFrame(base64Data);
+  appendCaption("Setup", "Captured one still frame for analysis.");
+}
+
+async function stopMedia() {
+  if (appState.videoTimer) {
+    clearInterval(appState.videoTimer);
+    appState.videoTimer = null;
+  }
+
+  await disableMicCapture();
+  await stopScreenCapture();
+  await stopCameraCapture();
 }
 
 async function stopSession({ notifyServer = true } = {}) {
@@ -517,12 +749,19 @@ function attachSocketHandlers(ws) {
     appState.ws = null;
     appState.sessionId = null;
     setRunningState(false);
+    refreshMediaButtons();
   };
 }
 
 async function startSession() {
   if (!appState.user) {
     throw new Error("Sign in before starting a session.");
+  }
+  if (!appState.micEnabled && !hasVisualSourceEnabled()) {
+    throw new Error("Turn on mic, camera, or screen sharing before starting.");
+  }
+  if (selectedSkillNeedsVisualSource() && !hasVisualSourceEnabled()) {
+    throw new Error("Turn on camera or screen sharing for this skill, then show one item or panel at a time.");
   }
 
   elements.summary.innerHTML = "";
@@ -548,8 +787,20 @@ async function startSession() {
     })
   );
 
-  await startAudioCapture();
-  await startVideoCapture();
+  if (appState.micEnabled) {
+    await enableMicCapture();
+  }
+  await syncVisualCapture();
+
+  const captureRule = getCaptureRule();
+  if (captureRule) {
+    appendCaption("Setup", captureRule.hint);
+  } else if (!hasVisualSourceEnabled()) {
+    appendCaption("Setup", "Audio-only mode is active. Use a short spoken question.");
+  }
+  if (appState.screenEnabled) {
+    appendCaption("Setup", "Screen sharing is active. Use Capture Screenshot for an extra still frame.");
+  }
 
   setRunningState(true);
   setSessionStatus("Live session running.");
@@ -588,6 +839,69 @@ elements.stop.addEventListener("click", async () => {
   await stopSession({ notifyServer: true });
 });
 
-elements.mode.addEventListener("change", updateGoalHint);
+elements.micToggle.addEventListener("click", async () => {
+  appState.micEnabled = !appState.micEnabled;
+  try {
+    if (sessionRunning()) {
+      if (appState.micEnabled) {
+        await enableMicCapture();
+      } else {
+        await disableMicCapture();
+      }
+    }
+  } catch (error) {
+    appState.micEnabled = !appState.micEnabled;
+    appendCaption("Error", error.message || "Unable to update microphone.");
+  }
+  refreshMediaButtons();
+  updateCaptureGuidance();
+});
+
+elements.cameraToggle.addEventListener("click", async () => {
+  const nextValue = !appState.cameraEnabled;
+  appState.cameraEnabled = nextValue;
+  if (nextValue) {
+    appState.screenEnabled = false;
+  }
+  try {
+    if (sessionRunning()) {
+      await syncVisualCapture();
+    }
+  } catch (error) {
+    appState.cameraEnabled = !nextValue;
+    appendCaption("Error", error.message || "Unable to update camera.");
+  }
+  refreshMediaButtons();
+  updateCaptureGuidance();
+});
+
+elements.screenToggle.addEventListener("click", async () => {
+  const nextValue = !appState.screenEnabled;
+  appState.screenEnabled = nextValue;
+  if (nextValue) {
+    appState.cameraEnabled = false;
+  }
+  try {
+    if (sessionRunning()) {
+      await syncVisualCapture();
+    }
+  } catch (error) {
+    appState.screenEnabled = !nextValue;
+    appendCaption("Error", error.message || "Unable to update screen sharing.");
+  }
+  refreshMediaButtons();
+  updateCaptureGuidance();
+});
+
+elements.snapshot.addEventListener("click", async () => {
+  await captureScreenshot();
+});
+
+elements.mode.addEventListener("change", () => {
+  updateGoalHint();
+  updateCaptureGuidance();
+});
 updateGoalHint();
+updateCaptureGuidance();
+refreshMediaButtons();
 void loadClientConfig();

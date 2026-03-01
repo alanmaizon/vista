@@ -143,6 +143,93 @@ def _parse_live_json_message(raw_message: Any) -> dict[str, Any] | None:
         return None
 
 
+def _extract_live_error_message(payload: dict[str, Any]) -> str | None:
+    """Extract a compact error string from a Live API payload."""
+    error_payload = _read_field(payload, "error")
+    if isinstance(error_payload, str):
+        return error_payload.strip() or None
+    if not isinstance(error_payload, dict):
+        return None
+
+    code = _read_field(error_payload, "code")
+    message = (
+        _read_field(error_payload, "message")
+        or _read_field(error_payload, "status")
+        or error_payload.get("details")
+    )
+    if isinstance(message, list):
+        message = ", ".join(str(item) for item in message if item)
+    if code and message:
+        return f"{code}: {message}"
+    if message:
+        return str(message)
+    if code:
+        return str(code)
+    return "Unknown Live API error"
+
+
+def _describe_live_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a redacted summary of a Live API payload for debugging."""
+    summary: dict[str, Any] = {
+        "setup_complete": bool(_read_field(payload, "setup_complete")),
+        "error_message": _extract_live_error_message(payload),
+        "go_away": bool(_read_field(payload, "go_away")),
+        "interrupted": False,
+        "turn_complete": False,
+        "generation_complete": False,
+        "text_parts": 0,
+        "audio_parts": 0,
+        "audio_mimes": [],
+        "transcription_fields": [],
+    }
+
+    server_content = _read_field(payload, "server_content")
+    if isinstance(server_content, dict):
+        summary["interrupted"] = bool(_read_field(server_content, "interrupted"))
+        summary["turn_complete"] = bool(_read_field(server_content, "turn_complete"))
+        summary["generation_complete"] = bool(_read_field(server_content, "generation_complete"))
+        model_turn = _read_field(server_content, "model_turn")
+        if isinstance(model_turn, dict):
+            parts = _read_field(model_turn, "parts") or []
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("text"):
+                    summary["text_parts"] += 1
+                inline_data = _read_field(part, "inline_data")
+                if not isinstance(inline_data, dict):
+                    continue
+                if inline_data.get("data"):
+                    summary["audio_parts"] += 1
+                    mime_type = _read_field(inline_data, "mime_type")
+                    if mime_type and mime_type not in summary["audio_mimes"]:
+                        summary["audio_mimes"].append(str(mime_type))
+
+    for scope_name, scope in (("root", payload), ("server", server_content)):
+        if not isinstance(scope, dict):
+            continue
+        for field_name in (
+            "input_transcription",
+            "output_transcription",
+            "input_audio_transcription",
+            "output_audio_transcription",
+        ):
+            transcription = _read_field(scope, field_name)
+            if not isinstance(transcription, dict):
+                continue
+            text = (
+                _read_field(transcription, "text")
+                or _read_field(transcription, "transcript")
+                or transcription.get("partial")
+            )
+            if text:
+                label = f"{scope_name}.{field_name}"
+                if label not in summary["transcription_fields"]:
+                    summary["transcription_fields"].append(label)
+
+    return summary
+
+
 def adk_runtime_status() -> tuple[bool, str]:
     """Return whether the optional ADK runtime is importable."""
     required_modules = (
@@ -193,6 +280,7 @@ class _DirectGeminiLiveBridge:
         self._closed = False
         self._last_video_sent_at = 0.0
         self._sentinel_enqueued = False
+        self._logged_payload_categories: set[str] = set()
 
     @property
     def active_location(self) -> str:
@@ -201,6 +289,7 @@ class _DirectGeminiLiveBridge:
     async def connect(self) -> None:
         self._closed = False
         self._sentinel_enqueued = False
+        self._logged_payload_categories.clear()
         self._events = asyncio.Queue()
         last_error: Exception | None = None
         for location in _candidate_locations(self.location, self.fallback_location):
@@ -319,6 +408,18 @@ class _DirectGeminiLiveBridge:
             await self._enqueue_sentinel()
 
     async def _process_json_message(self, payload: dict[str, Any]) -> None:
+        summary = _describe_live_payload(payload)
+        self._log_payload_summary(summary)
+
+        if summary["error_message"]:
+            await self._events.put(
+                {
+                    "type": "error",
+                    "message": f"Live API error: {summary['error_message']}",
+                }
+            )
+            return
+
         if _read_field(payload, "go_away"):
             await self._events.put(
                 {
@@ -332,6 +433,44 @@ class _DirectGeminiLiveBridge:
         if isinstance(server_content, dict):
             await self._process_server_content(server_content)
         await _emit_transcription_events(self._events, payload)
+
+    def _log_payload_summary(self, summary: dict[str, Any]) -> None:
+        categories: list[str] = []
+        if summary["setup_complete"]:
+            categories.append("setup")
+        if summary["error_message"]:
+            categories.append("error")
+        if summary["go_away"]:
+            categories.append("go_away")
+        if summary["transcription_fields"]:
+            categories.append("transcription")
+        if summary["text_parts"]:
+            categories.append("text")
+        if summary["audio_parts"]:
+            categories.append("audio")
+        if summary["interrupted"]:
+            categories.append("interrupted")
+        if summary["turn_complete"]:
+            categories.append("turn_complete")
+        if summary["generation_complete"]:
+            categories.append("generation_complete")
+        if not categories:
+            return
+
+        category_key = ",".join(categories)
+        if category_key in self._logged_payload_categories:
+            return
+        self._logged_payload_categories.add(category_key)
+
+        logger.info(
+            "Live API payload observed: categories=%s, text_parts=%s, audio_parts=%s, "
+            "audio_mimes=%s, transcription_fields=%s",
+            category_key,
+            summary["text_parts"],
+            summary["audio_parts"],
+            summary["audio_mimes"],
+            summary["transcription_fields"],
+        )
 
     async def _process_server_content(self, payload: dict[str, Any]) -> None:
         if _read_field(payload, "interrupted"):

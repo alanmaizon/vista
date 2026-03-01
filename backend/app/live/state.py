@@ -41,6 +41,37 @@ CAUTION_KEYWORDS = (
     "electrical",
 )
 
+FRAME_READY_KEYWORDS = (
+    "readable",
+    "clear enough",
+    "clear view",
+    "good view",
+    "that frame works",
+    "i can read it now",
+    "i can read the label",
+    "i can read the text",
+    "i can see it clearly",
+    "the frame is clear",
+)
+
+FRAME_UNCLEAR_KEYWORDS = (
+    "not readable",
+    "still not readable",
+    "cannot read",
+    "can't read",
+    "too blurry",
+    "blurry",
+    "too far",
+    "too small",
+    "cropped",
+    "cut off",
+    "blocked",
+    "glare",
+    "reflection",
+    "mirrored",
+    "unclear",
+)
+
 
 @dataclass(frozen=True)
 class SkillSpec:
@@ -68,16 +99,33 @@ SKILL_SPECS: dict[str, SkillSpec] = {
         anchor="Coach the user to hold a steady, readable frame with exact camera instructions.",
         base_risk="R0",
         done_when="You say the frame is readable and the user confirms.",
+        frame_first=True,
+        capture_prompt=(
+            "Start in FRAME mode. Give one exact camera instruction at a time and do not analyze the scene yet. "
+            "Only say 'Readable.' when the frame is actually clear and steady."
+        ),
     ),
     "FRAME_COACH": SkillSpec(
         anchor="Coach the user to hold a steady, readable frame with exact camera instructions.",
         base_risk="R0",
         done_when="You say the frame is readable and the user confirms.",
+        frame_first=True,
+        capture_prompt=(
+            "Start in FRAME mode. Give one exact camera instruction at a time and do not analyze the scene yet. "
+            "Only say 'Readable.' when the frame is actually clear and steady."
+        ),
     ),
     "READ_TEXT": SkillSpec(
         anchor="Read exactly what is visible, summarize briefly, and mark uncertain parts.",
         base_risk="R0",
         done_when="The user confirms they received the information they needed.",
+        frame_first=True,
+        capture_prompt=(
+            "Do not read or summarize yet. First require one sign, label, or document section at a time. "
+            "Ask the user to move closer until the text fills at least half the frame, center it, reduce glare, "
+            "and hold still for two seconds. If any text is blurry, mirrored, cropped, or blocked, say it is "
+            "unreadable and ask for one exact camera adjustment."
+        ),
     ),
     "NAV_FIND": SkillSpec(
         anchor="Find a door, sign, counter, exit, elevator, or restroom and guide the user there with verification.",
@@ -93,26 +141,53 @@ SKILL_SPECS: dict[str, SkillSpec] = {
         anchor="Verify whether an item matches the requested product, variant, size, and price if visible.",
         base_risk="R1",
         done_when="The user has the correct item or a safe alternative is chosen.",
+        frame_first=True,
+        capture_prompt=(
+            "Do not compare multiple packages at once. Ask for one item front-facing and centered first. "
+            "If price matters, ask for the price tag as a separate close frame. If the brand, size, or variant "
+            "is not clearly readable, say it is unverified and request a better single-item view."
+        ),
     ),
     "PRICE_AND_DEAL_CHECK": SkillSpec(
         anchor="Read prices, unit prices if visible, and compare the relevant items.",
         base_risk="R1",
         done_when="The user selects one item.",
+        frame_first=True,
+        capture_prompt=(
+            "Require one price tag or one item label at a time. Ask for a close, steady view where the price fills "
+            "a large part of the frame. Only compare items after each price has been captured clearly."
+        ),
     ),
     "MONEY_HANDLING": SkillSpec(
         anchor="Identify notes or coins, confirm change, and help organize cash.",
         base_risk="R1",
         done_when="The user confirms the amount is organized.",
+        frame_first=True,
+        capture_prompt=(
+            "Ask for a plain background and one coin or bank note at a time. Do not estimate from a pile. "
+            "If edges, color, or denomination marks are unclear, request a closer single-item view."
+        ),
     ),
     "OBJECT_LOCATE": SkillSpec(
         anchor="Locate an item in reachable space and guide the user to it.",
         base_risk="R1",
         done_when="The user confirms they picked it up.",
+        frame_first=True,
+        capture_prompt=(
+            "Start by asking for a slow sweep of one surface or area. Once a likely target appears, ask the user "
+            "to stop, center that area, and hold steady. If the scene is cluttered, ask them to narrow the frame "
+            "instead of guessing."
+        ),
     ),
     "DEVICE_BUTTONS_AND_DIALS": SkillSpec(
         anchor="Identify controls and provide safe, explicit one-step device guidance.",
         base_risk="R1-R2",
         done_when="The requested setting is verified.",
+        frame_first=True,
+        capture_prompt=(
+            "Require one control panel or one dial at a time. Ask for a close frame where labels and indicator marks "
+            "are centered and readable before naming any control."
+        ),
     ),
     "SOCIAL_CONTEXT": SkillSpec(
         anchor="Describe the nearby social scene without guessing identities or sensitive traits.",
@@ -128,6 +203,11 @@ SKILL_SPECS: dict[str, SkillSpec] = {
         anchor="Guide one form or kiosk step at a time and verify the selected field or button.",
         base_risk="R1",
         done_when="The current form step is completed and confirmed.",
+        frame_first=True,
+        capture_prompt=(
+            "Require a close frame of only the active screen region. Ask the user to center the selected field or "
+            "button, reduce glare, and hold steady before you name any control."
+        ),
     ),
     "MEDICATION_LABEL_READ": SkillSpec(
         anchor="Read visible medication label text for one item at a time without interpreting dosage or instructions.",
@@ -181,6 +261,7 @@ class LiveSessionState:
     confirmations: int = 0
     saw_video: bool = False
     completed: bool = False
+    frame_ready: bool = False
     last_instruction: str | None = None
     last_assistant_text: str | None = None
     saw_assistant_audio: bool = False
@@ -249,7 +330,10 @@ class LiveSessionState:
             else ""
         )
         frame_fragment = (
-            f"{self.skill_spec.capture_prompt} "
+            (
+                f"{self.skill_spec.capture_prompt} "
+                "Do not analyze, compare, or claim success until you have explicitly confirmed the frame is readable. "
+            )
             if self.skill_spec.frame_first and self.skill_spec.capture_prompt
             else ""
         )
@@ -267,7 +351,9 @@ class LiveSessionState:
 
     def on_client_video(self) -> None:
         self.saw_video = True
-        if self.phase == "INTENT":
+        if self._needs_frame_gate():
+            self.phase = "FRAME"
+        elif self.phase == "INTENT":
             self.phase = "FRAME"
 
     def on_client_confirm(self) -> str | None:
@@ -279,6 +365,13 @@ class LiveSessionState:
             return None
         self.confirmations += 1
         self.awaiting_confirmation = False
+        if self._needs_frame_gate():
+            self.phase = "FRAME"
+            return (
+                "I adjusted the camera. Verify only the frame before you answer the task. "
+                "If the view is still unclear, give exactly one camera adjustment. "
+                "If it is finally clear enough, say 'Readable.' and then continue carefully."
+            )
         if self.phase in {"INTENT", "FRAME", "GUIDE"}:
             self.phase = "VERIFY"
         elif self.phase == "VERIFY":
@@ -304,6 +397,16 @@ class LiveSessionState:
 
         lower = clean.lower()
         if self.risk_mode != "REFUSE":
+            if self._needs_frame_gate():
+                if self._frame_is_ready(lower):
+                    self.frame_ready = True
+                    self.phase = "GUIDE"
+                else:
+                    self.phase = "FRAME"
+                    self.awaiting_confirmation = True
+                    self.last_instruction = self._first_sentence(clean)
+                    return events
+
             if any(token in lower for token in ("hold still", "confirming", "let me check", "verify")):
                 self.phase = "VERIFY"
             elif any(token in lower for token in ("done", "confirmed", "you reached", "match", "not a match")):
@@ -360,6 +463,12 @@ class LiveSessionState:
                 else "The session stayed audio-only."
             ),
         ]
+        if self.skill_spec.frame_first:
+            bullets.append(
+                "Frame gate cleared before analysis."
+                if self.frame_ready
+                else "Frame gate never cleared; the assistant should keep asking for a better view."
+            )
         if self.completed:
             bullets.append(f"Done when: {self.skill_spec.done_when}")
         elif self.last_instruction:
@@ -378,6 +487,15 @@ class LiveSessionState:
             if separator in text:
                 return text.split(separator, 1)[0].strip() + separator.strip()
         return text.strip()
+
+    def _needs_frame_gate(self) -> bool:
+        return self.skill_spec.frame_first and not self.frame_ready and self.risk_mode != "REFUSE"
+
+    @staticmethod
+    def _frame_is_ready(lower: str) -> bool:
+        if any(token in lower for token in FRAME_UNCLEAR_KEYWORDS):
+            return False
+        return any(token in lower for token in FRAME_READY_KEYWORDS)
 
     def recent_notes(self) -> Iterable[str]:
         return tuple(self.notes)

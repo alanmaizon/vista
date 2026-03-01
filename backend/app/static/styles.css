@@ -39,9 +39,9 @@ body::before {
 .shell {
   position: relative;
   z-index: 1;
-  width: min(1100px, calc(100% - 2rem));
+  width: min(1380px, calc(100% - 1.5rem));
   margin: 0 auto;
-  padding: 1.25rem 0 2rem;
+  padding: 0.85rem 0 1.5rem;
 }
 
 .panel {
@@ -55,7 +55,13 @@ body::before {
 }
 
 .hero {
-  padding: 1.3rem 1.2rem;
+  padding: 1.1rem 1.2rem;
+}
+
+.disclaimer-panel {
+  border-color: rgba(189, 109, 45, 0.3);
+  background:
+    linear-gradient(120deg, rgba(255, 250, 242, 0.95), rgba(255, 243, 229, 0.92));
 }
 
 .eyebrow {
@@ -86,6 +92,15 @@ h2 {
   color: var(--muted);
 }
 
+.hint {
+  margin: 0;
+}
+
+.hint.warning {
+  color: #8f2c2c;
+  font-weight: 700;
+}
+
 .lede {
   margin: 0.5rem 0 0;
 }
@@ -94,6 +109,24 @@ h2 {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.setup-panel {
+  padding: 0.9rem 1rem;
+}
+
+.setup-drawer summary {
+  cursor: pointer;
+  font-weight: 800;
+  list-style: none;
+}
+
+.setup-drawer summary::-webkit-details-marker {
+  display: none;
+}
+
+.setup-drawer[open] summary {
+  margin-bottom: 0.9rem;
 }
 
 .stack {
@@ -142,6 +175,13 @@ button:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.media-actions {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.9rem 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 button {
   min-height: 3.4rem;
   padding: 0.85rem 1rem;
@@ -169,6 +209,17 @@ button:disabled {
 .secondary {
   background: rgba(15, 107, 95, 0.08);
   color: var(--primary);
+}
+
+.secondary.is-on {
+  background: rgba(15, 107, 95, 0.15);
+  border-color: rgba(15, 107, 95, 0.35);
+}
+
+.secondary.is-active {
+  background: rgba(189, 109, 45, 0.16);
+  border-color: rgba(189, 109, 45, 0.35);
+  color: #8c4c19;
 }
 
 .accent {
@@ -257,12 +308,17 @@ button:disabled {
   margin-top: 0.45rem;
 }
 
-.media-panel video {
+.stage-panel {
+  padding-bottom: 1rem;
+}
+
+.stage-panel video {
   width: 100%;
-  border-radius: 18px;
-  border: 1px solid var(--line);
+  min-height: min(68vh, 760px);
+  border-radius: 22px;
+  border: 1px solid rgba(18, 33, 28, 0.16);
   background: #15211c;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 9;
   object-fit: cover;
 }
 
@@ -278,5 +334,13 @@ button:disabled {
 
   .button-row {
     grid-template-columns: 1fr;
+  }
+
+  .media-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .stage-panel video {
+    min-height: 48vh;
   }
 }

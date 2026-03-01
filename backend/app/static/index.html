@@ -3,20 +3,47 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Vista AI</title>
+    <title>Janey Mac</title>
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
     <main class="shell">
-      <section class="panel hero disclaimer-panel">
-        <p class="eyebrow">Vista AI MVP</p>
-        <h1>Janey Mac</h1>
-        <p class="lede">This assistant can help with framing, reading, and verification, but it can be wrong. Show one item at a time, wait for verification, and do not rely on it for road crossings or medication dosing.</p>
+      <section class="panel stage-panel">
+        <div class="stage-frame">
+          <video id="preview" autoplay muted playsinline></video>
+          <div class="stage-sheen" aria-hidden="true"></div>
+
+          <div class="stage-topbar">
+            <div class="status-card">
+              <p class="status-brand">Janey Mac</p>
+              <p id="session-status" class="session-text" aria-live="polite">Show what matters.</p>
+              <p id="capture-hint" class="hint capture-text">Audio-first checks work without camera. Dense visual tasks need a clean close-up.</p>
+              <p id="camera-warning" class="hint warning" aria-live="polite"></p>
+            </div>
+            <span id="risk-badge" class="badge">NORMAL</span>
+          </div>
+
+          <div class="caption-shell">
+            <div id="captions" class="captions overlay-captions" aria-live="polite"></div>
+          </div>
+
+          <div class="control-dock">
+            <div class="media-actions" role="group" aria-label="Media controls">
+              <button id="mic-toggle" class="secondary" type="button">Mic On</button>
+              <button id="camera-toggle" class="secondary" type="button">Camera Off</button>
+              <button id="screen-toggle" class="secondary" type="button">Share Screen Off</button>
+              <button id="snapshot" class="secondary" type="button">Capture Screenshot</button>
+            </div>
+            <div class="action-row">
+              <button id="start" class="primary action-button" type="button">Start session</button>
+            </div>
+          </div>
+        </div>
       </section>
 
-      <section class="panel setup-panel">
-        <details class="setup-drawer">
-          <summary>Session Setup</summary>
+      <details class="dev-drawer-floating">
+        <summary>Dev</summary>
+        <section class="panel setup-panel">
           <div class="grid">
             <div class="stack">
               <label for="firebase-config">Firebase Config JSON</label>
@@ -28,7 +55,7 @@
               <label for="password">Password (optional)</label>
               <input id="password" type="password" autocomplete="current-password">
 
-              <button id="sign-in" class="secondary">Sign In</button>
+              <button id="sign-in" class="secondary" type="button">Sign In</button>
               <p id="auth-status" class="hint" aria-live="polite">Signed out.</p>
             </div>
 
@@ -60,44 +87,10 @@
               <input id="goal" type="text" placeholder="Find the exit sign">
             </div>
           </div>
-        </details>
-      </section>
+        </section>
+      </details>
 
-      <section class="panel stage-panel">
-        <div class="panel-head">
-          <h2>Live View</h2>
-          <span id="risk-badge" class="badge">NORMAL</span>
-        </div>
-        <video id="preview" autoplay muted playsinline></video>
-        <div class="media-actions" role="group" aria-label="Media controls">
-          <button id="mic-toggle" class="secondary" type="button">Mic On</button>
-          <button id="camera-toggle" class="secondary" type="button">Camera Off</button>
-          <button id="screen-toggle" class="secondary" type="button">Share Screen Off</button>
-          <button id="snapshot" class="secondary" type="button">Capture Screenshot</button>
-        </div>
-        <div class="button-row">
-          <button id="start" class="primary">Start</button>
-          <button id="confirm" class="accent" disabled>Confirm</button>
-          <button id="stop" class="danger" disabled>Stop</button>
-        </div>
-        <p id="capture-hint" class="hint">Audio-first checks work without camera. Dense visual tasks need a clean close-up.</p>
-        <p id="camera-warning" class="hint warning" aria-live="polite"></p>
-        <p id="session-status" class="hint" aria-live="polite">Idle.</p>
-      </section>
-
-      <section class="panel transcript-panel">
-        <div class="panel-head">
-          <h2>Captions</h2>
-        </div>
-        <div id="captions" class="captions" aria-live="polite"></div>
-      </section>
-
-      <section class="panel transcript-panel">
-        <div class="panel-head">
-          <h2>Summary</h2>
-        </div>
-        <ul id="summary" class="summary"></ul>
-      </section>
+      <ul id="summary" class="summary is-hidden" hidden></ul>
     </main>
 
     <script type="module" src="/static/app.js"></script>

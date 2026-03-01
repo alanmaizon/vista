@@ -18,8 +18,6 @@ const elements = {
   screenToggle: document.getElementById("screen-toggle"),
   snapshot: document.getElementById("snapshot"),
   start: document.getElementById("start"),
-  confirm: document.getElementById("confirm"),
-  stop: document.getElementById("stop"),
   captureHint: document.getElementById("capture-hint"),
   cameraWarning: document.getElementById("camera-warning"),
   sessionStatus: document.getElementById("session-status"),
@@ -116,12 +114,42 @@ const skillCaptureRules = {
   },
 };
 
+function iconSvg(name) {
+  const icons = {
+    mic:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/><path d="M7 11.5a5 5 0 0 0 10 0" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/><path d="M12 16.5V21" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/><path d="M9 21h6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/></svg>',
+    camera:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5h11A2.5 2.5 0 0 1 18 11v2A2.5 2.5 0 0 1 15.5 15.5h-11A2.5 2.5 0 0 1 2 13v-2a2.5 2.5 0 0 1 2.5-2.5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"/><path d="m18 10 4-2v8l-4-2" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"/></svg>',
+    screen:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 9v10" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/><path d="m8.5 12 3.5-3.5L15.5 12" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/><path d="M8 20h8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/></svg>',
+    snapshot:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7.5 9.3 5h5.4L16 7.5h2.5A2.5 2.5 0 0 1 21 10v6a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16v-6a2.5 2.5 0 0 1 2.5-2.5H8Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"/><circle cx="12" cy="13" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
+    start:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5v11l8-5.5-8-5.5Z" fill="currentColor"/></svg>',
+    confirm:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5.5 12.5 4 4 9-9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.1"/></svg>',
+    stop:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.1"/></svg>',
+  };
+  return icons[name] || "";
+}
+
+function renderButton(button, { icon, label, iconOnly = false }) {
+  button.innerHTML = iconOnly
+    ? `<span class="button-icon" aria-hidden="true">${iconSvg(icon)}</span><span class="sr-only">${label}</span>`
+    : `<span class="button-content"><span class="button-icon" aria-hidden="true">${iconSvg(icon)}</span><span class="button-label">${label}</span></span>`;
+  button.setAttribute("aria-label", label);
+  button.title = label;
+}
+
 function setAuthStatus(message) {
   elements.authStatus.textContent = message;
+  console.info("[Janey Mac][Auth]", message);
 }
 
 function setSessionStatus(message) {
   elements.sessionStatus.textContent = message;
+  console.info("[Janey Mac][Status]", message);
 }
 
 function setRiskBadge(mode) {
@@ -136,9 +164,11 @@ function setRiskBadge(mode) {
 }
 
 function setRunningState(isRunning) {
-  elements.start.disabled = isRunning;
-  elements.confirm.disabled = !isRunning || !appState.assistantResponseReady;
-  elements.stop.disabled = !isRunning;
+  elements.start.disabled = false;
+  if (!isRunning) {
+    appState.assistantResponseReady = false;
+  }
+  updatePrimaryActionButton();
   refreshMediaButtons();
 }
 
@@ -150,15 +180,46 @@ function hasVisualSourceEnabled() {
   return appState.cameraEnabled || appState.screenEnabled;
 }
 
-function setToggleButton(button, enabled, onLabel, offLabel) {
-  button.textContent = enabled ? onLabel : offLabel;
+function setToggleButton(button, enabled, onLabel, offLabel, icon) {
+  renderButton(button, {
+    icon,
+    label: enabled ? onLabel : offLabel,
+    iconOnly: true,
+  });
   button.classList.toggle("is-on", enabled);
 }
 
+function primaryActionState() {
+  if (!sessionRunning()) {
+    return "start";
+  }
+  return appState.assistantResponseReady ? "confirm" : "stop";
+}
+
+function updatePrimaryActionButton() {
+  const state = primaryActionState();
+  elements.start.classList.remove("primary", "accent", "danger");
+
+  if (state === "confirm") {
+    elements.start.classList.add("accent");
+    renderButton(elements.start, { icon: "confirm", label: "Confirm step" });
+    return;
+  }
+  if (state === "stop") {
+    elements.start.classList.add("danger");
+    renderButton(elements.start, { icon: "stop", label: "Stop session" });
+    return;
+  }
+
+  elements.start.classList.add("primary");
+  renderButton(elements.start, { icon: "start", label: "Start session" });
+}
+
 function refreshMediaButtons() {
-  setToggleButton(elements.micToggle, appState.micEnabled, "Mic On", "Mic Off");
-  setToggleButton(elements.cameraToggle, appState.cameraEnabled, "Camera On", "Camera Off");
-  setToggleButton(elements.screenToggle, appState.screenEnabled, "Share Screen On", "Share Screen Off");
+  setToggleButton(elements.micToggle, appState.micEnabled, "Microphone on", "Microphone off", "mic");
+  setToggleButton(elements.cameraToggle, appState.cameraEnabled, "Camera on", "Camera off", "camera");
+  setToggleButton(elements.screenToggle, appState.screenEnabled, "Screen share on", "Screen share off", "screen");
+  renderButton(elements.snapshot, { icon: "snapshot", label: "Capture screenshot", iconOnly: true });
   elements.snapshot.disabled = !sessionRunning() || !hasVisualSourceEnabled();
 }
 
@@ -167,12 +228,11 @@ function markAssistantResponseReady() {
     return;
   }
   appState.assistantResponseReady = true;
-  if (appState.ws && appState.ws.readyState === WebSocket.OPEN) {
-    elements.confirm.disabled = false;
-  }
+  updatePrimaryActionButton();
 }
 
 function appendCaption(label, text) {
+  console.info(`[Janey Mac][${label}]`, text);
   const item = document.createElement("div");
   item.className = "caption";
 
@@ -193,6 +253,13 @@ function renderSummary(bullets) {
     const li = document.createElement("li");
     li.textContent = bullet;
     elements.summary.appendChild(li);
+  }
+  if (bullets.length) {
+    console.groupCollapsed("[Janey Mac] Session summary");
+    for (const bullet of bullets) {
+      console.info(bullet);
+    }
+    console.groupEnd();
   }
 }
 
@@ -682,22 +749,26 @@ async function stopMedia() {
 }
 
 async function stopSession({ notifyServer = true } = {}) {
-  if (notifyServer && appState.ws && appState.ws.readyState === WebSocket.OPEN) {
-    appState.ws.send(JSON.stringify({ type: "client.stop" }));
+  const activeSocket = appState.ws;
+  if (notifyServer && activeSocket && activeSocket.readyState === WebSocket.OPEN) {
+    activeSocket.send(JSON.stringify({ type: "client.stop" }));
     window.setTimeout(() => {
-      if (appState.ws && appState.ws.readyState === WebSocket.OPEN) {
-        appState.ws.close();
+      if (activeSocket.readyState === WebSocket.OPEN) {
+        activeSocket.close();
       }
     }, 1200);
   }
 
   await stopMedia();
+  if (activeSocket) {
+    appState.ws = null;
+    appState.sessionId = null;
+    if (!notifyServer && activeSocket.readyState < WebSocket.CLOSING) {
+      activeSocket.close();
+    }
+  }
   setRunningState(false);
   setSessionStatus("Stopped.");
-
-  if (!notifyServer && appState.ws) {
-    appState.ws.close();
-  }
 }
 
 function attachSocketHandlers(ws) {
@@ -731,7 +802,6 @@ function attachSocketHandlers(ws) {
         break;
       case "server.summary":
         renderSummary(payload.bullets || []);
-        appendCaption("Summary", "Session summary received.");
         await stopSession({ notifyServer: false });
         break;
       case "error":
@@ -815,28 +885,32 @@ elements.signIn.addEventListener("click", async () => {
 });
 
 elements.start.addEventListener("click", async () => {
+  const action = primaryActionState();
+
   try {
+    if (action === "confirm") {
+      if (!appState.ws || appState.ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      appState.assistantResponseReady = false;
+      updatePrimaryActionButton();
+      appState.ws.send(JSON.stringify({ type: "client.confirm" }));
+      return;
+    }
+
+    if (action === "stop") {
+      await stopSession({ notifyServer: true });
+      return;
+    }
+
     await startSession();
   } catch (error) {
     appendCaption("Error", error.message || "Unable to start the session.");
-    setSessionStatus("Start failed.");
-    await stopSession({ notifyServer: false });
+    setSessionStatus(action === "start" ? "Start failed." : "Action failed.");
+    if (action === "start") {
+      await stopSession({ notifyServer: false });
+    }
   }
-});
-
-elements.confirm.addEventListener("click", () => {
-  if (!appState.ws || appState.ws.readyState !== WebSocket.OPEN) {
-    return;
-  }
-  if (!appState.assistantResponseReady) {
-    appendCaption("Status", "Wait for the assistant to respond before confirming a step.");
-    return;
-  }
-  appState.ws.send(JSON.stringify({ type: "client.confirm" }));
-});
-
-elements.stop.addEventListener("click", async () => {
-  await stopSession({ notifyServer: true });
 });
 
 elements.micToggle.addEventListener("click", async () => {
@@ -903,5 +977,6 @@ elements.mode.addEventListener("change", () => {
 });
 updateGoalHint();
 updateCaptureGuidance();
+updatePrimaryActionButton();
 refreshMediaButtons();
 void loadClientConfig();

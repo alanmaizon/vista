@@ -15,6 +15,7 @@ from typing import List, Optional
 
 
 # Types of events sent by the client
+CLIENT_INIT = "client.init"
 CLIENT_AUDIO = "client.audio"
 CLIENT_VIDEO = "client.video"
 CLIENT_CONFIRM = "client.confirm"
@@ -26,6 +27,15 @@ SERVER_TEXT = "server.text"
 SERVER_STATUS = "server.status"
 SERVER_SUMMARY = "server.summary"
 SERVER_ERROR = "server.error"
+
+
+@dataclass
+class ClientInit:
+    """Represents the initial websocket auth + session bootstrap message."""
+
+    token: str
+    session_id: str
+    mode: str
 
 
 @dataclass

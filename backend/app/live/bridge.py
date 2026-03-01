@@ -29,6 +29,11 @@ logger = logging.getLogger("vista-ai")
 LIVE_API_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 LIVE_API_PATH = "/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
 SUPPORTED_LOCATIONS = {"global", "us-central1", "us-east5", "europe-west4"}
+WEBSOCKETS_HEADER_ARG = (
+    "additional_headers"
+    if "additional_headers" in inspect.signature(websockets.connect).parameters
+    else "extra_headers"
+)
 
 
 def _read_field(payload: dict[str, Any], snake_name: str) -> Any:
@@ -54,6 +59,88 @@ async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def _format_exception_detail(exc: Exception | None) -> str:
+    """Return a useful one-line description for client-facing errors."""
+    if exc is None:
+        return "unknown error"
+
+    message = str(exc).strip()
+    if message:
+        return message
+
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status = getattr(response, "status_code", None) or getattr(response, "status", None)
+        reason = (
+            getattr(response, "reason_phrase", None)
+            or getattr(response, "reason", None)
+            or ""
+        )
+        if status and reason:
+            return f"{type(exc).__name__} ({status} {reason})"
+        if status:
+            return f"{type(exc).__name__} ({status})"
+
+    status_code = getattr(exc, "status_code", None)
+    if status_code:
+        return f"{type(exc).__name__} ({status_code})"
+
+    code = getattr(exc, "code", None)
+    if code:
+        return f"{type(exc).__name__} ({code})"
+
+    return type(exc).__name__
+
+
+async def _emit_transcription_events(
+    queue: asyncio.Queue[dict[str, Any] | None],
+    payload: dict[str, Any],
+) -> None:
+    """Emit transcript text from any known transcription field shape."""
+    for field_name in (
+        "input_transcription",
+        "output_transcription",
+        "input_audio_transcription",
+        "output_audio_transcription",
+    ):
+        transcription = _read_field(payload, field_name)
+        if not isinstance(transcription, dict):
+            continue
+        text = (
+            _read_field(transcription, "text")
+            or _read_field(transcription, "transcript")
+            or transcription.get("partial")
+        )
+        if text:
+            await queue.put({"type": "server.text", "text": str(text)})
+
+
+def _parse_live_json_message(raw_message: Any) -> dict[str, Any] | None:
+    """Parse a JSON websocket message from the Live API.
+
+    The documented WebSocket API sends JSON envelopes that contain audio in
+    `serverContent.modelTurn.parts[].inlineData.data`. Unexpected binary frames
+    are ignored rather than treated as PCM audio, which would sound like static.
+    """
+    if isinstance(raw_message, bytes):
+        try:
+            raw_message = raw_message.decode("utf-8")
+        except UnicodeDecodeError:
+            logger.warning(
+                "Ignoring unexpected binary Live API frame (%s bytes); expected JSON with inlineData audio.",
+                len(raw_message),
+            )
+            return None
+    if not isinstance(raw_message, str):
+        logger.warning("Ignoring unsupported Live API frame type: %s", type(raw_message).__name__)
+        return None
+    try:
+        return json.loads(raw_message)
+    except json.JSONDecodeError:
+        logger.warning("Skipping non-JSON Live API frame")
+        return None
 
 
 def adk_runtime_status() -> tuple[bool, str]:
@@ -124,9 +211,14 @@ class _DirectGeminiLiveBridge:
                 return
             except Exception as exc:  # pragma: no cover - exercised via integration
                 last_error = exc
-                logger.warning("Live API connect failed for %s: %s", location, exc)
+                logger.warning(
+                    "Live API connect failed for %s: %s",
+                    location,
+                    _format_exception_detail(exc),
+                )
                 await self._force_close_upstream()
-        raise RuntimeError(f"Unable to connect to Vertex Live API: {last_error}") from last_error
+        detail = _format_exception_detail(last_error)
+        raise RuntimeError(f"Unable to connect to Vertex Live API: {detail}") from last_error
 
     async def close(self) -> None:
         if self._closed:
@@ -185,14 +277,23 @@ class _DirectGeminiLiveBridge:
         uri = f"wss://{host}{LIVE_API_PATH}"
         self._upstream = await websockets.connect(
             uri,
-            additional_headers={"Authorization": f"Bearer {token}"},
+            **{WEBSOCKETS_HEADER_ARG: {"Authorization": f"Bearer {token}"}},
             ping_interval=20,
             ping_timeout=20,
             max_size=16 * 1024 * 1024,
         )
         await self._send_json(self._setup_message(location))
 
-        initial = await self._recv_json(timeout=10)
+        try:
+            initial = await self._recv_json(timeout=10)
+        except asyncio.TimeoutError:
+            logger.info(
+                "Timed out waiting for setup_complete from Live API in %s; "
+                "continuing and allowing a delayed setup response.",
+                location,
+            )
+            self._reader_task = asyncio.create_task(self._reader_loop())
+            return
         if initial is not None and not self._is_setup_complete(initial):
             await self._process_json_message(initial)
 
@@ -202,19 +303,8 @@ class _DirectGeminiLiveBridge:
         try:
             while self._upstream is not None:
                 raw_message = await self._upstream.recv()
-                if isinstance(raw_message, bytes):
-                    await self._events.put(
-                        {
-                            "type": "server.audio",
-                            "mime": "audio/pcm;rate=24000",
-                            "data_b64": base64.b64encode(raw_message).decode("ascii"),
-                        }
-                    )
-                    continue
-                try:
-                    payload = json.loads(raw_message)
-                except json.JSONDecodeError:
-                    logger.warning("Skipping non-JSON Live API frame")
+                payload = _parse_live_json_message(raw_message)
+                if payload is None:
                     continue
                 await self._process_json_message(payload)
         except ConnectionClosed:
@@ -241,18 +331,7 @@ class _DirectGeminiLiveBridge:
         server_content = _read_field(payload, "server_content")
         if isinstance(server_content, dict):
             await self._process_server_content(server_content)
-
-        input_transcription = _read_field(payload, "input_transcription")
-        if isinstance(input_transcription, dict):
-            text = _read_field(input_transcription, "text")
-            if text:
-                await self._events.put({"type": "server.text", "text": str(text)})
-
-        output_transcription = _read_field(payload, "output_transcription")
-        if isinstance(output_transcription, dict):
-            text = _read_field(output_transcription, "text")
-            if text:
-                await self._events.put({"type": "server.text", "text": str(text)})
+        await _emit_transcription_events(self._events, payload)
 
     async def _process_server_content(self, payload: dict[str, Any]) -> None:
         if _read_field(payload, "interrupted"):
@@ -265,17 +344,7 @@ class _DirectGeminiLiveBridge:
                 }
             )
 
-        input_transcription = _read_field(payload, "input_transcription")
-        if isinstance(input_transcription, dict):
-            text = _read_field(input_transcription, "text")
-            if text:
-                await self._events.put({"type": "server.text", "text": str(text)})
-
-        output_transcription = _read_field(payload, "output_transcription")
-        if isinstance(output_transcription, dict):
-            text = _read_field(output_transcription, "text")
-            if text:
-                await self._events.put({"type": "server.text", "text": str(text)})
+        await _emit_transcription_events(self._events, payload)
 
         model_turn = _read_field(payload, "model_turn")
         if not isinstance(model_turn, dict):
@@ -315,19 +384,9 @@ class _DirectGeminiLiveBridge:
             raise RuntimeError("GeminiLiveBridge is not connected")
         while True:
             raw_message = await asyncio.wait_for(self._upstream.recv(), timeout=timeout)
-            if isinstance(raw_message, bytes):
-                await self._events.put(
-                    {
-                        "type": "server.audio",
-                        "mime": "audio/pcm;rate=24000",
-                        "data_b64": base64.b64encode(raw_message).decode("ascii"),
-                    }
-                )
-                continue
-            try:
-                return json.loads(raw_message)
-            except json.JSONDecodeError:
-                logger.warning("Skipping non-JSON setup frame from Live API")
+            payload = _parse_live_json_message(raw_message)
+            if payload is not None:
+                return payload
 
     async def _get_access_token(self) -> str:
         if self._credentials is None:
@@ -355,7 +414,7 @@ class _DirectGeminiLiveBridge:
                     f"publishers/google/models/{self.model_id}"
                 ),
                 "generation_config": {
-                    "response_modalities": ["audio", "text"],
+                    "response_modalities": ["AUDIO"],
                 },
                 "system_instruction": {
                     "parts": [{"text": self.system_prompt}],

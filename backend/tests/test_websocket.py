@@ -87,7 +87,15 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_ws_live_rejects_invalid_session_id(client: TestClient) -> None:
-    with client.websocket_connect("/ws/live?token=test-token&session_id=not-a-uuid&mode=NAV_FIND") as ws:
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": "not-a-uuid",
+                "mode": "NAV_FIND",
+            }
+        )
         payload = ws.receive_json()
 
     assert payload["type"] == "error"
@@ -98,9 +106,15 @@ def test_ws_live_handles_audio_confirm_and_stop(client: TestClient) -> None:
     FakeBridge.initial_events = [{"type": "server.text", "text": "Hold still and look ahead."}]
     session_id = uuid.uuid4()
 
-    with client.websocket_connect(
-        f"/ws/live?token=test-token&session_id={session_id}&mode=NAV_FIND"
-    ) as ws:
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "NAV_FIND",
+            }
+        )
         status_payload = ws.receive_json()
         text_payload = ws.receive_json()
 
@@ -133,9 +147,15 @@ def test_ws_live_handles_audio_confirm_and_stop(client: TestClient) -> None:
 def test_ws_live_reports_invalid_base64_payload(client: TestClient) -> None:
     session_id = uuid.uuid4()
 
-    with client.websocket_connect(
-        f"/ws/live?token=test-token&session_id={session_id}&mode=NAV_FIND"
-    ) as ws:
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "NAV_FIND",
+            }
+        )
         status_payload = ws.receive_json()
 
         ws.send_json(

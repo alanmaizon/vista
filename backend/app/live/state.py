@@ -12,14 +12,18 @@ REFUSAL_KEYWORDS = (
     "cross a road",
     "cross the street",
     "cross a street",
-    "medication",
-    "dose",
-    "dosage",
-    "pill amount",
     "electrical panel",
     "high-voltage",
     "high voltage",
     "breaker box",
+)
+
+GOAL_REFUSAL_KEYWORDS = REFUSAL_KEYWORDS + (
+    "medication dosing",
+    "dosing decision",
+    "dosage recommendation",
+    "how much should i take",
+    "how many should i take",
 )
 
 CAUTION_KEYWORDS = (
@@ -47,7 +51,9 @@ class SkillSpec:
     done_when: str
     caution_default: bool = False
     refuse_default: bool = False
+    frame_first: bool = False
     handoff: str | None = None
+    capture_prompt: str | None = None
 
 
 DEFAULT_SKILL = "NAV_FIND"
@@ -123,6 +129,17 @@ SKILL_SPECS: dict[str, SkillSpec] = {
         base_risk="R1",
         done_when="The current form step is completed and confirmed.",
     ),
+    "MEDICATION_LABEL_READ": SkillSpec(
+        anchor="Read visible medication label text for one item at a time without interpreting dosage or instructions.",
+        base_risk="R1",
+        done_when="The label text was read clearly, or you explicitly said the label is still unreadable.",
+        frame_first=True,
+        capture_prompt=(
+            "Require exactly one medication item at a time. Ask for the front label first, centered and close enough "
+            "that the label fills most of the frame. If text or numbers are mirrored, blurry, cropped, or blocked, "
+            "say they are unreadable and ask for a better view instead of guessing."
+        ),
+    ),
     "COOKING_ASSIST": SkillSpec(
         anchor="MVP scope is cold prep only: read instructions, measure, and identify ingredients.",
         base_risk="R2",
@@ -145,9 +162,9 @@ SKILL_SPECS: dict[str, SkillSpec] = {
     "MEDICATION_DOSING": SkillSpec(
         anchor="Do not make medication dosing decisions.",
         base_risk="R3",
-        done_when="You have refused dosing guidance and redirected to label reading only if requested.",
+        done_when="You have refused dosing guidance and redirected to MEDICATION_LABEL_READ for label text only.",
         refuse_default=True,
-        handoff="Offer to read the label text if it is clear, but do not interpret dosage.",
+        handoff="Offer MEDICATION_LABEL_READ to read visible label text only, but do not interpret dosage.",
     ),
 }
 
@@ -166,6 +183,7 @@ class LiveSessionState:
     completed: bool = False
     last_instruction: str | None = None
     last_assistant_text: str | None = None
+    saw_assistant_audio: bool = False
     skill_spec: SkillSpec = field(init=False)
     notes: Deque[str] = field(default_factory=lambda: deque(maxlen=8))
 
@@ -181,10 +199,12 @@ class LiveSessionState:
             return
         if self.skill_spec.caution_default:
             self.risk_mode = "CAUTION"
+        if self.skill_spec.frame_first:
+            self.phase = "FRAME"
 
     def _goal_is_refused(self) -> bool:
         text = (self.goal or "").lower()
-        return any(keyword in text for keyword in REFUSAL_KEYWORDS)
+        return any(keyword in text for keyword in GOAL_REFUSAL_KEYWORDS)
 
     def _goal_is_caution(self) -> bool:
         text = (self.goal or "").lower()
@@ -228,6 +248,11 @@ class LiveSessionState:
             if self.risk_mode == "CAUTION"
             else ""
         )
+        frame_fragment = (
+            f"{self.skill_spec.capture_prompt} "
+            if self.skill_spec.frame_first and self.skill_spec.capture_prompt
+            else ""
+        )
         return (
             f"I am starting a {self.skill} session. "
             f"Skill objective: {self.skill_spec.anchor} "
@@ -235,6 +260,7 @@ class LiveSessionState:
             f"Completion condition: {self.skill_spec.done_when} "
             f"{goal_fragment}"
             f"{caution_fragment}"
+            f"{frame_fragment}"
             "Follow the constitution: never guess, ask for a better view when uncertain, "
             "give exactly one instruction at a time, and verify before claiming success."
         )
@@ -246,6 +272,10 @@ class LiveSessionState:
 
     def on_client_confirm(self) -> str | None:
         if self.risk_mode == "REFUSE":
+            return None
+        if not self.awaiting_confirmation:
+            return None
+        if not self.last_instruction and not self.last_assistant_text:
             return None
         self.confirmations += 1
         self.awaiting_confirmation = False
@@ -290,6 +320,9 @@ class LiveSessionState:
 
         return events
 
+    def on_model_audio(self) -> None:
+        self.saw_assistant_audio = True
+
     def _update_risk_mode(self, text: str) -> dict | None:
         lower = text.lower()
         if self.risk_mode != "REFUSE" and any(keyword in lower for keyword in REFUSAL_KEYWORDS):
@@ -333,6 +366,8 @@ class LiveSessionState:
             bullets.append(f"Last guided step: {self.last_instruction}")
         elif self.last_assistant_text:
             bullets.append(f"Last assistant response: {self._first_sentence(self.last_assistant_text)}")
+        elif self.saw_assistant_audio:
+            bullets.append("Assistant audio was received, but no transcript text was captured.")
         else:
             bullets.append("No assistant response was captured.")
         return {"bullets": bullets[:6]}

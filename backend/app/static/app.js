@@ -29,6 +29,7 @@ const appState = {
   auth: null,
   user: null,
   clientConfigLoaded: false,
+  assistantResponseReady: false,
   ws: null,
   sessionId: null,
   audioContext: null,
@@ -56,10 +57,11 @@ const skillHints = {
   SOCIAL_CONTEXT: "Tell me who is nearby and where they are.",
   FACE_TO_SPEAKER: "Help me turn toward the person speaking.",
   FORM_FILL_HELP: "Help me complete this kiosk step.",
+  MEDICATION_LABEL_READ: "Read one medication label at a time. Do not interpret dosing.",
   COOKING_ASSIST: "Help me read the recipe and identify ingredients.",
   STAIRS_ESCALATOR_ELEVATOR: "Help me assess this elevator or escalator safely.",
   TRAFFIC_CROSSING: "Locate the crossing button or sign.",
-  MEDICATION_DOSING: "Read the prescription label text only.",
+  MEDICATION_DOSING: "Medication dosing is blocked. Use MEDICATION_LABEL_READ for label text only.",
 };
 
 function setAuthStatus(message) {
@@ -83,8 +85,18 @@ function setRiskBadge(mode) {
 
 function setRunningState(isRunning) {
   elements.start.disabled = isRunning;
-  elements.confirm.disabled = !isRunning;
+  elements.confirm.disabled = !isRunning || !appState.assistantResponseReady;
   elements.stop.disabled = !isRunning;
+}
+
+function markAssistantResponseReady() {
+  if (appState.assistantResponseReady) {
+    return;
+  }
+  appState.assistantResponseReady = true;
+  if (appState.ws && appState.ws.readyState === WebSocket.OPEN) {
+    elements.confirm.disabled = false;
+  }
 }
 
 function appendCaption(label, text) {
@@ -243,16 +255,24 @@ async function ensureAudioContext() {
   return appState.audioContext;
 }
 
-function queuePlaybackChunk(base64Data) {
+function queuePlaybackChunk(base64Data, mime = "audio/pcm;rate=24000") {
   if (!appState.audioContext) {
+    return;
+  }
+  if (typeof mime !== "string" || !mime.toLowerCase().startsWith("audio/pcm")) {
+    appendCaption("Audio", `Received unsupported audio format: ${mime || "unknown"}`);
     return;
   }
 
   const bytes = fromBase64(base64Data);
-  const pcm16 = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
-  const samples = new Float32Array(pcm16.length);
-  for (let index = 0; index < pcm16.length; index += 1) {
-    samples[index] = pcm16[index] / 0x8000;
+  const frameCount = Math.floor(bytes.byteLength / 2);
+  if (!frameCount) {
+    return;
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, frameCount * 2);
+  const samples = new Float32Array(frameCount);
+  for (let index = 0; index < frameCount; index += 1) {
+    samples[index] = view.getInt16(index * 2, true) / 0x8000;
   }
 
   const audioBuffer = appState.audioContext.createBuffer(1, samples.length, 24000);
@@ -287,13 +307,9 @@ async function createSession(idToken) {
   return response.json();
 }
 
-function createLiveSocket(idToken, sessionId) {
+function createLiveSocket() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const url = new URL(`${protocol}://${window.location.host}/ws/live`);
-  url.searchParams.set("token", idToken);
-  url.searchParams.set("session_id", sessionId);
-  url.searchParams.set("mode", elements.mode.value);
-  return new WebSocket(url);
+  return new WebSocket(`${protocol}://${window.location.host}/ws/live`);
 }
 
 function waitForSocketOpen(ws) {
@@ -464,9 +480,11 @@ function attachSocketHandlers(ws) {
 
     switch (payload.type) {
       case "server.audio":
-        queuePlaybackChunk(payload.data_b64);
+        markAssistantResponseReady();
+        queuePlaybackChunk(payload.data_b64, payload.mime);
         break;
       case "server.text":
+        markAssistantResponseReady();
         appendCaption("Live", payload.text);
         break;
       case "server.status":
@@ -509,6 +527,7 @@ async function startSession() {
 
   elements.summary.innerHTML = "";
   appState.playbackCursor = 0;
+  appState.assistantResponseReady = false;
   setRiskBadge("NORMAL");
   setSessionStatus("Creating session...");
 
@@ -517,9 +536,17 @@ async function startSession() {
   appState.sessionId = session.id;
 
   setSessionStatus("Opening live websocket...");
-  appState.ws = createLiveSocket(idToken, session.id);
+  appState.ws = createLiveSocket();
   attachSocketHandlers(appState.ws);
   await waitForSocketOpen(appState.ws);
+  appState.ws.send(
+    JSON.stringify({
+      type: "client.init",
+      token: idToken,
+      session_id: session.id,
+      mode: elements.mode.value,
+    })
+  );
 
   await startAudioCapture();
   await startVideoCapture();
@@ -548,6 +575,10 @@ elements.start.addEventListener("click", async () => {
 
 elements.confirm.addEventListener("click", () => {
   if (!appState.ws || appState.ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  if (!appState.assistantResponseReady) {
+    appendCaption("Status", "Wait for the assistant to respond before confirming a step.");
     return;
   }
   appState.ws.send(JSON.stringify({ type: "client.confirm" }));

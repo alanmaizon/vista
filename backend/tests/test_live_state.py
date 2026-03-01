@@ -30,12 +30,23 @@ def test_caution_skills_start_in_caution_mode() -> None:
 def test_confirm_moves_state_into_verify_phase() -> None:
     state = LiveSessionState(skill="NAV_FIND", goal="Find the exit sign")
     state.phase = "GUIDE"
+    state.awaiting_confirmation = True
+    state.last_assistant_text = "Take one small step left."
 
     prompt = state.on_client_confirm()
 
     assert state.phase == "VERIFY"
     assert state.confirmations == 1
     assert "verify progress" in prompt.lower()
+
+
+def test_medication_label_read_is_allowed_and_frame_first() -> None:
+    state = LiveSessionState(skill="MEDICATION_LABEL_READ", goal="Read the medication label only")
+
+    assert state.risk_mode == "NORMAL"
+    assert state.phase == "FRAME"
+    assert state.completed is False
+    assert "one medication item at a time" in state.opening_prompt().lower()
 
 
 def test_model_text_marks_completion_for_match_language() -> None:

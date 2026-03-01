@@ -20,7 +20,7 @@ from sqlalchemy import select
 from .auth import init_firebase, verify_firebase_token
 from .db import AsyncSessionLocal, init_db
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
-from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_STOP, CLIENT_VIDEO
+from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_INIT, CLIENT_STOP, CLIENT_VIDEO
 from .live.state import LiveSessionState
 from .models import Session
 from .sessions import router as sessions_router
@@ -28,6 +28,16 @@ from .settings import settings
 
 
 logger = logging.getLogger("vista-ai")
+PUBLIC_FIREBASE_WEB_CONFIG_KEYS = {
+    "apiKey",
+    "authDomain",
+    "projectId",
+    "storageBucket",
+    "messagingSenderId",
+    "appId",
+    "measurementId",
+    "databaseURL",
+}
 
 app = FastAPI(title="Vista AI Backend", version="0.2.0")
 app.include_router(sessions_router)
@@ -76,7 +86,15 @@ async def client_config() -> dict[str, object | None]:
     if not isinstance(parsed, dict):
         logger.warning("Ignoring non-object VISTA_FIREBASE_WEB_CONFIG payload")
         return {"firebaseConfig": None}
-    return {"firebaseConfig": parsed}
+    filtered = {
+        key: value
+        for key, value in parsed.items()
+        if key in PUBLIC_FIREBASE_WEB_CONFIG_KEYS and isinstance(value, str) and value
+    }
+    if not filtered:
+        logger.warning("Ignoring VISTA_FIREBASE_WEB_CONFIG because no public Firebase web keys were found")
+        return {"firebaseConfig": None}
+    return {"firebaseConfig": filtered}
 
 
 async def _load_owned_session(session_id: UUID, user_id: str) -> Session:
@@ -143,7 +161,9 @@ async def _forward_bridge_events(
     state: LiveSessionState,
 ) -> None:
     async for event in bridge.receive():
-        if event.get("type") == "server.text":
+        if event.get("type") == "server.audio":
+            state.on_model_audio()
+        elif event.get("type") == "server.text":
             text = str(event.get("text", ""))
             extra_events = state.on_model_text(text)
             for extra_event in extra_events:
@@ -166,9 +186,33 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     session_id_raw = ws.query_params.get("session_id", "").strip()
     skill = ws.query_params.get("mode", "NAV_FIND").strip().upper() or "NAV_FIND"
     if not token or not session_id_raw:
-        await ws.send_json({"type": "error", "message": "Missing token or session_id"})
-        await ws.close(code=1008)
-        return
+        try:
+            init_message = await ws.receive_json()
+        except WebSocketDisconnect:
+            return
+        except (ValueError, TypeError):
+            await ws.send_json({"type": "error", "message": "Malformed websocket init message"})
+            await ws.close(code=1008)
+            return
+
+        if not isinstance(init_message, dict):
+            await ws.send_json({"type": "error", "message": "The first websocket message must be a JSON object"})
+            await ws.close(code=1008)
+            return
+
+        message_type = str(init_message.get("type", "")).strip()
+        if message_type != CLIENT_INIT:
+            await ws.send_json({"type": "error", "message": "The first websocket message must be client.init"})
+            await ws.close(code=1008)
+            return
+
+        token = str(init_message.get("token", "")).strip()
+        session_id_raw = str(init_message.get("session_id", "")).strip()
+        skill = str(init_message.get("mode", "NAV_FIND")).strip().upper() or "NAV_FIND"
+        if not token or not session_id_raw:
+            await ws.send_json({"type": "error", "message": "Missing token or session_id in client.init"})
+            await ws.close(code=1008)
+            return
 
     try:
         session_id = UUID(session_id_raw)

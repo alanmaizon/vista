@@ -1,0 +1,11 @@
+.DS_Store
+.env
+.env.local
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+backend/.env
+frontend/react/node_modules/
+backend/adminsdk.json

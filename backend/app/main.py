@@ -6,6 +6,7 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,6 +60,23 @@ async def index() -> FileResponse:
 async def health_check() -> dict[str, str]:
     """Health endpoint to confirm the service is up."""
     return {"status": "ok"}
+
+
+@app.get("/api/client-config")
+async def client_config() -> dict[str, object | None]:
+    """Expose non-secret browser config needed by the static client."""
+    raw_config = settings.firebase_web_config.strip()
+    if not raw_config:
+        return {"firebaseConfig": None}
+    try:
+        parsed = json.loads(raw_config)
+    except json.JSONDecodeError:
+        logger.warning("Ignoring invalid VISTA_FIREBASE_WEB_CONFIG JSON")
+        return {"firebaseConfig": None}
+    if not isinstance(parsed, dict):
+        logger.warning("Ignoring non-object VISTA_FIREBASE_WEB_CONFIG payload")
+        return {"firebaseConfig": None}
+    return {"firebaseConfig": parsed}
 
 
 async def _load_owned_session(session_id: UUID, user_id: str) -> Session:

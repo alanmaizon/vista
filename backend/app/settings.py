@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     model_id: str = "gemini-live-2.5-flash-native-audio"
     location: str = "us-central1"
     fallback_location: str = "us-central1"
-    use_adk: bool = True
+    use_adk: bool = False
+    firebase_web_config: str = ""
     project_id: str = Field(
         default_factory=lambda: (
             os.getenv("GOOGLE_CLOUD_PROJECT")

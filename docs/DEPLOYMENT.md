@@ -22,7 +22,9 @@
 - `VISTA_PROJECT_ID`
   - Usually not needed if ADC already resolves the Google Cloud project id
 - `VISTA_USE_ADK`
-  - Defaults to `true`
+  - Defaults to `false`
+  - The base backend install does not include `google-adk`
+  - Leave this disabled unless you have built a separate compatible environment for the experimental ADK bridge
   - If disabled, the backend uses the direct Vertex websocket bridge only
 - `CLOUD_RUN_TIMEOUT_SECONDS`
   - The deploy script clamps this to at least `600`

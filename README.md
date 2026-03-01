@@ -9,6 +9,8 @@ This repository is organised into two main parts:
 
 ## Setup overview
 
+Use Python `3.11`, `3.12`, or `3.13` for local development. Python `3.14` is not supported yet by the pinned dependency stack.
+
 1. **Enable required services**: Ensure the following Google Cloud services are enabled in your project: `aiplatform`, `run`, `cloudsql`, `secretmanager`, and `iam`.
 2. **Create a Cloud SQL database**: Provision a Postgres instance and create a database for sessions.  Update the environment variables in the Cloud Run deployment script accordingly.
 3. **Configure Firebase**: Add Firebase to your project, enable authentication, and provide a service account JSON for server‑side token verification.  The backend expects a Firebase ID token for each HTTP/WebSocket request.

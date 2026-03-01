@@ -28,6 +28,7 @@ const appState = {
   firebaseApp: null,
   auth: null,
   user: null,
+  clientConfigLoaded: false,
   ws: null,
   sessionId: null,
   audioContext: null,
@@ -118,9 +119,37 @@ function updateGoalHint() {
 function parseFirebaseConfig() {
   const raw = elements.firebaseConfig.value.trim();
   if (!raw) {
-    throw new Error("Paste Firebase config JSON before signing in.");
+    throw new Error("Firebase config is missing. Paste it in, or set VISTA_FIREBASE_WEB_CONFIG on the backend.");
   }
   return JSON.parse(raw);
+}
+
+async function loadClientConfig() {
+  if (appState.clientConfigLoaded) {
+    return;
+  }
+  appState.clientConfigLoaded = true;
+
+  try {
+    const response = await fetch("/api/client-config");
+    if (!response.ok) {
+      return;
+    }
+    const payload = await response.json();
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+    const firebaseConfig = payload.firebaseConfig;
+    if (!firebaseConfig || typeof firebaseConfig !== "object") {
+      return;
+    }
+    if (!elements.firebaseConfig.value.trim()) {
+      elements.firebaseConfig.value = JSON.stringify(firebaseConfig, null, 2);
+      setAuthStatus("Firebase config loaded. Click Sign In.");
+    }
+  } catch {
+    // Leave manual paste as the fallback path.
+  }
 }
 
 async function ensureFirebase() {
@@ -134,6 +163,7 @@ async function ensureFirebase() {
 }
 
 async function signIn() {
+  await loadClientConfig();
   const auth = await ensureFirebase();
   const email = elements.email.value.trim();
   const password = elements.password.value;
@@ -529,3 +559,4 @@ elements.stop.addEventListener("click", async () => {
 
 elements.mode.addEventListener("change", updateGoalHint);
 updateGoalHint();
+void loadClientConfig();

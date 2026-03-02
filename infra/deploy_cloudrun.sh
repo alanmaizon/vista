@@ -119,6 +119,7 @@ ENV_UPDATES=(
 )
 SECRET_UPDATES=()
 REMOVE_SECRETS=()
+ENV_DELIMITER="~"
 
 DEPLOY_ARGS=(
   "$SERVICE_NAME"
@@ -187,11 +188,23 @@ if [[ -n "$VISTA_FIREBASE_WEB_CONFIG_SECRET_NAME" ]]; then
 fi
 
 if (( SERVICE_EXISTS == 1 && ${#ENV_REMOVALS_FOR_SECRET_MIGRATION[@]} > 0 && ${#MIGRATION_SECRET_UPDATES[@]} > 0 )); then
-  gcloud run services update "$SERVICE_NAME" \
-    --region="$GOOGLE_CLOUD_LOCATION" \
-    --remove-env-vars "$(join_by_comma "${ENV_REMOVALS_FOR_SECRET_MIGRATION[@]}")" \
-    --update-secrets "$(join_by_comma "${MIGRATION_SECRET_UPDATES[@]}")" \
-    >/dev/null
+  MIGRATION_ARGS=(
+    "$SERVICE_NAME"
+    --region="$GOOGLE_CLOUD_LOCATION"
+    --remove-env-vars "$(join_by_comma "${ENV_REMOVALS_FOR_SECRET_MIGRATION[@]}")"
+    --update-secrets "$(join_by_comma "${MIGRATION_SECRET_UPDATES[@]}")"
+  )
+  if (( ${#ENV_UPDATES[@]} > 0 )); then
+    MIGRATION_ARGS+=(
+      --update-env-vars "^${ENV_DELIMITER}^$(join_by_delimiter "${ENV_DELIMITER}" "${ENV_UPDATES[@]}")"
+    )
+  fi
+  if [[ -n "$CLOUDSQL_INSTANCE" ]]; then
+    MIGRATION_ARGS+=(
+      --add-cloudsql-instances "$CLOUDSQL_INSTANCE"
+    )
+  fi
+  gcloud run services update "${MIGRATION_ARGS[@]}" >/dev/null
 fi
 
 if (( ${#SECRET_UPDATES[@]} > 0 )); then
@@ -202,7 +215,6 @@ fi
 
 if (( ${#ENV_UPDATES[@]} > 0 )); then
   # Use a custom delimiter because some values (for example JSON) contain commas.
-  ENV_DELIMITER="~"
   DEPLOY_ARGS+=(
     --update-env-vars "^${ENV_DELIMITER}^$(join_by_delimiter "${ENV_DELIMITER}" "${ENV_UPDATES[@]}")"
   )

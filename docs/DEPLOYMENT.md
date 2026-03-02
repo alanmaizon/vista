@@ -41,6 +41,10 @@
   - Defaults to `900`
 - `CLOUD_RUN_CONCURRENCY`
   - Defaults to `8` for a conservative websocket-friendly setting
+- `ALLOW_UNAUTHENTICATED`
+  - Defaults to `false`
+  - If set to `true`, the deploy script passes `--allow-unauthenticated`
+  - This requires `run.services.setIamPolicy`, so it is usually better to leave this off in CI and manage public invoker access separately
 
 ## Cloud Run notes
 
@@ -74,6 +78,7 @@
   - `CLOUD_RUN_SERVICE_NAME`
   - `CLOUD_RUN_SERVICE_ACCOUNT`
   - `CLOUD_RUN_BUILD_SERVICE_ACCOUNT`
+  - `CLOUD_RUN_ALLOW_UNAUTHENTICATED`
   - `VISTA_MODEL_ID`
   - `VISTA_LOCATION`
   - `VISTA_FALLBACK_LOCATION`

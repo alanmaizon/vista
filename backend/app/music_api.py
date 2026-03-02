@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
 from . import auth as auth_utils
+from .music_symbolic import import_simple_score, score_to_dict
 from .music_transcription import (
     decode_audio_b64,
     parse_pcm_mime,
@@ -51,6 +52,35 @@ class MusicTranscriptionResponse(BaseModel):
     notes: list[dict]
 
 
+class MusicScoreImportRequest(BaseModel):
+    """Request body for a first symbolic score import."""
+
+    source_text: str = Field(..., description="Simple note-line source, e.g. 'C4/q D4/q | E4/h G4/h'")
+    source_format: Literal["NOTE_LINE"] = Field(
+        "NOTE_LINE",
+        description="Import format. The MVP currently supports only NOTE_LINE.",
+    )
+    time_signature: str = Field("4/4", description="Expected time signature for beat warnings.")
+
+    @field_validator("source_text")
+    @classmethod
+    def validate_source_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("source_text is required.")
+        return value
+
+
+class MusicScoreImportResponse(BaseModel):
+    """Imported symbolic score payload."""
+
+    format: str
+    note_count: int
+    normalized: str
+    summary: str
+    warnings: list[str]
+    measures: list[dict]
+
+
 @router.post("/transcribe", response_model=MusicTranscriptionResponse)
 async def transcribe_music(
     payload: MusicTranscriptionRequest,
@@ -68,3 +98,15 @@ async def transcribe_music(
         max_notes=payload.max_notes,
     )
     return MusicTranscriptionResponse(**transcription_to_dict(result))
+
+
+@router.post("/score/import", response_model=MusicScoreImportResponse)
+async def import_music_score(
+    payload: MusicScoreImportRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+) -> MusicScoreImportResponse:
+    """Import a minimal symbolic score from a simple note-line format."""
+    del current_user
+
+    score = import_simple_score(payload.source_text, time_signature=payload.time_signature)
+    return MusicScoreImportResponse(**score_to_dict(score))

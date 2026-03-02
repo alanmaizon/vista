@@ -18,6 +18,8 @@ const elements = {
   screenToggle: document.getElementById("screen-toggle"),
   snapshot: document.getElementById("snapshot"),
   transcribeOnce: document.getElementById("transcribe-once"),
+  scoreLine: document.getElementById("score-line"),
+  importScore: document.getElementById("import-score"),
   start: document.getElementById("start"),
   captureHint: document.getElementById("capture-hint"),
   cameraWarning: document.getElementById("camera-warning"),
@@ -251,6 +253,10 @@ function refreshMediaButtons() {
     renderButton(elements.transcribeOnce, { icon: "analyze", label: "Transcribe clip" });
     elements.transcribeOnce.disabled = sessionRunning();
   }
+  if (elements.importScore) {
+    renderButton(elements.importScore, { icon: "confirm", label: "Import score" });
+    elements.importScore.disabled = sessionRunning();
+  }
 }
 
 function markAssistantResponseReady() {
@@ -314,6 +320,39 @@ function renderMusicAnalysis(result) {
   }
   if (result.harmony_hint) {
     lines.push(`Harmony: ${result.harmony_hint}`);
+  }
+  if (Array.isArray(result.warnings) && result.warnings.length) {
+    lines.push(`Warnings: ${result.warnings.join(" ")}`);
+  }
+  elements.musicAnalysis.textContent = lines.join(" ");
+}
+
+function renderImportedScore(result) {
+  if (!elements.musicAnalysis) {
+    return;
+  }
+
+  if (!result || typeof result !== "object") {
+    elements.musicAnalysis.textContent = "No score import result.";
+    return;
+  }
+
+  const lines = [
+    result.summary || "Score import complete.",
+  ];
+  if (typeof result.normalized === "string" && result.normalized) {
+    lines.push(`Normalized: ${result.normalized}`);
+  }
+  if (Array.isArray(result.measures) && result.measures.length) {
+    const measureSummary = result.measures
+      .map((measure) => {
+        const noteNames = Array.isArray(measure.notes)
+          ? measure.notes.map((note) => note.note_name).join(", ")
+          : "";
+        return `Bar ${measure.index}: ${noteNames || "no notes"} (${measure.total_beats} beats)`;
+      })
+      .join(" | ");
+    lines.push(measureSummary);
   }
   if (Array.isArray(result.warnings) && result.warnings.length) {
     lines.push(`Warnings: ${result.warnings.join(" ")}`);
@@ -631,6 +670,49 @@ async function transcribeOneShotClip() {
     }
   }
   setSessionStatus("Transcription ready.");
+}
+
+async function importScoreLine() {
+  if (sessionRunning()) {
+    throw new Error("Stop the live session before importing a score.");
+  }
+  if (!appState.user) {
+    throw new Error("Sign in before importing a score.");
+  }
+
+  const sourceText = elements.scoreLine?.value.trim() || "";
+  if (!sourceText) {
+    throw new Error("Enter a score line before importing.");
+  }
+
+  setSessionStatus("Importing score...");
+  const idToken = await appState.user.getIdToken(true);
+  const response = await fetch("/api/music/score/import", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      source_text: sourceText,
+      source_format: "NOTE_LINE",
+      time_signature: "4/4",
+    }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.detail || payload?.message || `Score import failed with ${response.status}`);
+  }
+
+  renderImportedScore(payload);
+  appendCaption("Score", payload.summary || "Score import complete.");
+  if (Array.isArray(payload.warnings)) {
+    for (const warning of payload.warnings) {
+      appendCaption("Warning", warning);
+    }
+  }
+  setSessionStatus("Score import ready.");
 }
 
 async function createSession(idToken) {
@@ -1147,6 +1229,17 @@ if (elements.transcribeOnce) {
     } catch (error) {
       appendCaption("Error", error.message || "Unable to transcribe the clip.");
       setSessionStatus("Transcription failed.");
+    }
+  });
+}
+
+if (elements.importScore) {
+  elements.importScore.addEventListener("click", async () => {
+    try {
+      await importScoreLine();
+    } catch (error) {
+      appendCaption("Error", error.message || "Unable to import the score.");
+      setSessionStatus("Score import failed.");
     }
   });
 }

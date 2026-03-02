@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from app import auth as auth_module
 from app import main as main_module
+from app.music_symbolic import import_simple_score
 from app.music_transcription import transcribe_pcm16
 
 
@@ -37,6 +38,17 @@ def test_transcribe_pcm16_detects_a4() -> None:
     assert result.notes
     assert result.notes[0].note_name == "A4"
     assert result.confidence > 0.5
+
+
+def test_import_simple_score_normalizes_note_line() -> None:
+    result = import_simple_score("C4/q D4/q E4/h | G4/q A4/q B4/h")
+
+    assert result.format == "NOTE_LINE"
+    assert result.note_count == 6
+    assert result.normalized == "C4/q D4/q E4/h | G4/q A4/q B4/h"
+    assert len(result.measures) == 2
+    assert result.measures[0].notes[0].midi_note == 60
+    assert not result.warnings
 
 
 @pytest.fixture
@@ -70,3 +82,23 @@ def test_music_transcribe_endpoint_returns_symbolic_notes(client: TestClient) ->
     body = response.json()
     assert body["kind"] == "single_note"
     assert body["notes"][0]["note_name"] == "A4"
+
+
+def test_music_score_import_endpoint_returns_symbolic_score(client: TestClient) -> None:
+    response = client.post(
+        "/api/music/score/import",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "source_text": "C4/q D4/q E4/h | G4/q A4/q B4/h",
+            "source_format": "NOTE_LINE",
+            "time_signature": "4/4",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["format"] == "NOTE_LINE"
+    assert body["note_count"] == 6
+    assert body["normalized"] == "C4/q D4/q E4/h | G4/q A4/q B4/h"
+    assert len(body["measures"]) == 2
+    assert body["measures"][0]["notes"][0]["note_name"] == "C4"

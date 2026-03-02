@@ -85,6 +85,21 @@ join_by_comma() {
   echo "$*"
 }
 
+join_by_delimiter() {
+  local delimiter="$1"
+  shift
+  local joined=""
+  local item
+  for item in "$@"; do
+    if [[ -z "$joined" ]]; then
+      joined="$item"
+    else
+      joined="${joined}${delimiter}${item}"
+    fi
+  done
+  printf '%s' "$joined"
+}
+
 SERVICE_EXISTS=0
 if gcloud run services describe "$SERVICE_NAME" >/dev/null 2>&1; then
   SERVICE_EXISTS=1
@@ -187,8 +202,9 @@ fi
 
 if (( ${#ENV_UPDATES[@]} > 0 )); then
   # Use a custom delimiter because some values (for example JSON) contain commas.
+  ENV_DELIMITER="~"
   DEPLOY_ARGS+=(
-    --update-env-vars "^~^$(join_by_comma "${ENV_UPDATES[@]}")"
+    --update-env-vars "^${ENV_DELIMITER}^$(join_by_delimiter "${ENV_DELIMITER}" "${ENV_UPDATES[@]}")"
   )
 fi
 

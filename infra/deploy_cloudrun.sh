@@ -84,6 +84,11 @@ join_by_comma() {
   echo "$*"
 }
 
+SERVICE_EXISTS=0
+if gcloud run services describe "$SERVICE_NAME" >/dev/null 2>&1; then
+  SERVICE_EXISTS=1
+fi
+
 # Build and deploy the container from the backend directory
 ENV_UPDATES=(
   "DB_USER=$DB_USER"
@@ -145,6 +150,24 @@ if (( ${#REMOVE_SECRETS[@]} > 0 )); then
   DEPLOY_ARGS+=(
     --remove-secrets "$(join_by_comma "${REMOVE_SECRETS[@]}")"
   )
+fi
+
+ENV_REMOVALS_FOR_SECRET_MIGRATION=()
+if [[ -n "$DB_PASSWORD_SECRET_NAME" ]]; then
+  ENV_REMOVALS_FOR_SECRET_MIGRATION+=("DB_PASSWORD")
+fi
+if [[ -n "$FIREBASE_SERVICE_ACCOUNT_JSON_SECRET_NAME" ]]; then
+  ENV_REMOVALS_FOR_SECRET_MIGRATION+=("FIREBASE_SERVICE_ACCOUNT_JSON")
+fi
+if [[ -n "$VISTA_FIREBASE_WEB_CONFIG_SECRET_NAME" ]]; then
+  ENV_REMOVALS_FOR_SECRET_MIGRATION+=("VISTA_FIREBASE_WEB_CONFIG")
+fi
+
+if (( SERVICE_EXISTS == 1 && ${#ENV_REMOVALS_FOR_SECRET_MIGRATION[@]} > 0 )); then
+  gcloud run services update "$SERVICE_NAME" \
+    --region="$GOOGLE_CLOUD_LOCATION" \
+    --remove-env-vars "$(join_by_comma "${ENV_REMOVALS_FOR_SECRET_MIGRATION[@]}")" \
+    >/dev/null
 fi
 
 if (( ${#SECRET_UPDATES[@]} > 0 )); then

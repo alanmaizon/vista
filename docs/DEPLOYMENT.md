@@ -4,6 +4,9 @@
 
 - `DB_USER`
 - `DB_PASSWORD`
+- `DB_PASSWORD_SECRET_NAME`
+  - Recommended for Cloud Run and CI/CD
+  - If set, the deploy script mounts `DB_PASSWORD` from Secret Manager instead of sending a literal env var
 - `DB_NAME`
 - `CLOUDSQL_INSTANCE_CONNECTION_NAME`
 - `VISTA_MODEL_ID`
@@ -14,11 +17,18 @@
 - `FIREBASE_SERVICE_ACCOUNT_JSON`
   - Optional when Application Default Credentials already have Firebase Admin access
   - May be either a file path or the raw JSON service account payload
+- `FIREBASE_SERVICE_ACCOUNT_JSON_SECRET_NAME`
+  - Recommended for Cloud Run when you want the Admin SDK JSON injected from Secret Manager
 
 ## Useful optional environment variables
 
 - `VISTA_FALLBACK_LOCATION`
   - Defaults to `us-central1`
+- `VISTA_FIREBASE_WEB_CONFIG`
+  - Public client config, not a true secret
+  - May still be stored in Secret Manager for consistency
+- `VISTA_FIREBASE_WEB_CONFIG_SECRET_NAME`
+  - If set, the deploy script mounts `VISTA_FIREBASE_WEB_CONFIG` from Secret Manager
 - `VISTA_PROJECT_ID`
   - Usually not needed if ADC already resolves the Google Cloud project id
 - `VISTA_USE_ADK`
@@ -39,10 +49,37 @@
 - Websocket clients must reconnect after timeouts or connection loss.
 - Each open websocket keeps a Cloud Run instance busy, so keep concurrency conservative for the MVP.
 - The deploy script only attaches Cloud SQL when `CLOUDSQL_INSTANCE_CONNECTION_NAME` is set.
+- The deploy script prefers Secret Manager for `DB_PASSWORD`, `FIREBASE_SERVICE_ACCOUNT_JSON`, and `VISTA_FIREBASE_WEB_CONFIG` when the corresponding `*_SECRET_NAME` variables are set.
 - The service account needs:
   - Vertex AI permissions sufficient to call the Live API (`aiplatform`)
   - Cloud SQL Client
   - Firebase Admin access if you rely on ADC instead of `FIREBASE_SERVICE_ACCOUNT_JSON`
+
+## GitHub CI/CD
+
+- The repository includes `.github/workflows/deploy-cloudrun.yml`.
+- It uses GitHub Actions plus Google Workload Identity Federation instead of a long-lived JSON key.
+- Configure these GitHub repository variables before enabling automatic deploys:
+  - `GCP_PROJECT_ID`
+  - `GCP_REGION`
+  - `GCP_WORKLOAD_IDENTITY_PROVIDER`
+  - `GCP_GITHUB_DEPLOY_SERVICE_ACCOUNT`
+  - `CLOUDSQL_INSTANCE_CONNECTION_NAME`
+  - `DB_USER`
+  - `DB_NAME`
+  - `DB_PASSWORD_SECRET_NAME`
+  - `FIREBASE_SERVICE_ACCOUNT_JSON_SECRET_NAME`
+  - `VISTA_FIREBASE_WEB_CONFIG_SECRET_NAME` (optional if you still set it as a literal env var)
+- Optional repository variables:
+  - `CLOUD_RUN_SERVICE_NAME`
+  - `CLOUD_RUN_SERVICE_ACCOUNT`
+  - `CLOUD_RUN_BUILD_SERVICE_ACCOUNT`
+  - `VISTA_MODEL_ID`
+  - `VISTA_LOCATION`
+  - `VISTA_FALLBACK_LOCATION`
+  - `VISTA_PROJECT_ID`
+  - `VISTA_USE_ADK`
+- The workflow calls the same `infra/deploy_cloudrun.sh` script, so local and CI deploys stay aligned.
 
 ## Local development
 

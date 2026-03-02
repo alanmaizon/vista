@@ -17,17 +17,21 @@ const elements = {
   cameraToggle: document.getElementById("camera-toggle"),
   screenToggle: document.getElementById("screen-toggle"),
   snapshot: document.getElementById("snapshot"),
+  transcribeOnce: document.getElementById("transcribe-once"),
   start: document.getElementById("start"),
   captureHint: document.getElementById("capture-hint"),
   cameraWarning: document.getElementById("camera-warning"),
   sessionStatus: document.getElementById("session-status"),
   captions: document.getElementById("captions"),
   summary: document.getElementById("summary"),
+  musicAnalysis: document.getElementById("music-analysis"),
   riskBadge: document.getElementById("risk-badge"),
   preview: document.getElementById("preview"),
 };
 
 const appState = {
+  brand: document.body.dataset.brand || "Janey Mac",
+  domain: (document.body.dataset.domain || "VISION").toUpperCase(),
   firebaseApp: null,
   auth: null,
   user: null,
@@ -69,6 +73,18 @@ const skillHints = {
   STAIRS_ESCALATOR_ELEVATOR: "Help me assess this elevator or escalator safely.",
   TRAFFIC_CROSSING: "Locate the crossing button or sign.",
   MEDICATION_DOSING: "Medication dosing is blocked. Use MEDICATION_LABEL_READ for label text only.",
+  SHEET_FRAME_COACH: "Help me frame one clear stave or measure group.",
+  READ_SCORE: "Read this measure or staff line.",
+  HEAR_PHRASE: "Identify the melody, interval, chord, or arpeggio I just played.",
+  COMPARE_PERFORMANCE: "Compare what I played with the intended notes or rhythm.",
+  EAR_TRAIN: "Give me one ear-training drill at a time.",
+  GENERATE_EXAMPLE: "Generate one original musical example or exercise.",
+};
+
+const musicExpectedKinds = {
+  HEAR_PHRASE: "AUTO",
+  COMPARE_PERFORMANCE: "PHRASE",
+  EAR_TRAIN: "INTERVAL",
 };
 
 const skillCaptureRules = {
@@ -112,6 +128,14 @@ const skillCaptureRules = {
     requiresCamera: true,
     hint: "Show one medication item at a time. Start with the front label close-up. Do not compare two inhalers at once.",
   },
+  SHEET_FRAME_COACH: {
+    requiresCamera: true,
+    hint: "Show one staff line or one short score excerpt at a time. Center it, flatten the page, and reduce glare before reading.",
+  },
+  READ_SCORE: {
+    requiresCamera: true,
+    hint: "Show one measure group or one short system at a time. Keep the notation close, centered, and steady before analysis.",
+  },
 };
 
 function iconSvg(name) {
@@ -130,6 +154,8 @@ function iconSvg(name) {
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5.5 12.5 4 4 9-9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.1"/></svg>',
     stop:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.1"/></svg>',
+    analyze:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15.5V12" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.9"/><path d="M8 18V9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.9"/><path d="M12 20V5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.9"/><path d="M16 17V8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.9"/><path d="M20 14V10" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.9"/></svg>',
   };
   return icons[name] || "";
 }
@@ -144,12 +170,12 @@ function renderButton(button, { icon, label, iconOnly = false }) {
 
 function setAuthStatus(message) {
   elements.authStatus.textContent = message;
-  console.info("[Janey Mac][Auth]", message);
+  console.info(`[${appState.brand}][Auth]`, message);
 }
 
 function setSessionStatus(message) {
   elements.sessionStatus.textContent = message;
-  console.info("[Janey Mac][Status]", message);
+  console.info(`[${appState.brand}][Status]`, message);
 }
 
 function setRiskBadge(mode) {
@@ -221,6 +247,10 @@ function refreshMediaButtons() {
   setToggleButton(elements.screenToggle, appState.screenEnabled, "Screen share on", "Screen share off", "screen");
   renderButton(elements.snapshot, { icon: "snapshot", label: "Capture screenshot", iconOnly: true });
   elements.snapshot.disabled = !sessionRunning() || !hasVisualSourceEnabled();
+  if (elements.transcribeOnce) {
+    renderButton(elements.transcribeOnce, { icon: "analyze", label: "Transcribe clip" });
+    elements.transcribeOnce.disabled = sessionRunning();
+  }
 }
 
 function markAssistantResponseReady() {
@@ -232,7 +262,7 @@ function markAssistantResponseReady() {
 }
 
 function appendCaption(label, text) {
-  console.info(`[Janey Mac][${label}]`, text);
+  console.info(`[${appState.brand}][${label}]`, text);
   const item = document.createElement("div");
   item.className = "caption";
 
@@ -255,12 +285,40 @@ function renderSummary(bullets) {
     elements.summary.appendChild(li);
   }
   if (bullets.length) {
-    console.groupCollapsed("[Janey Mac] Session summary");
+    console.groupCollapsed(`[${appState.brand}] Session summary`);
     for (const bullet of bullets) {
       console.info(bullet);
     }
     console.groupEnd();
   }
+}
+
+function renderMusicAnalysis(result) {
+  if (!elements.musicAnalysis) {
+    return;
+  }
+
+  if (!result || typeof result !== "object") {
+    elements.musicAnalysis.textContent = "No transcription result.";
+    return;
+  }
+
+  const lines = [
+    result.summary || "No transcription summary.",
+  ];
+  if (Array.isArray(result.notes) && result.notes.length) {
+    lines.push(`Notes: ${result.notes.map((note) => note.note_name).join(", ")}`);
+  }
+  if (result.interval_hint) {
+    lines.push(`Interval: ${result.interval_hint}`);
+  }
+  if (result.harmony_hint) {
+    lines.push(`Harmony: ${result.harmony_hint}`);
+  }
+  if (Array.isArray(result.warnings) && result.warnings.length) {
+    lines.push(`Warnings: ${result.warnings.join(" ")}`);
+  }
+  elements.musicAnalysis.textContent = lines.join(" ");
 }
 
 function updateGoalHint() {
@@ -465,6 +523,116 @@ function queuePlaybackChunk(base64Data, mime = "audio/pcm;rate=24000") {
   appState.playbackCursor = startAt + audioBuffer.duration;
 }
 
+function concatUint8Arrays(chunks) {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return output;
+}
+
+async function captureOneShotPcmClip({ durationMs = 2400 } = {}) {
+  await ensureAudioContext();
+
+  const tempStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+    video: false,
+  });
+
+  const source = appState.audioContext.createMediaStreamSource(tempStream);
+  const processor = appState.audioContext.createScriptProcessor(4096, 1, 1);
+  const sink = appState.audioContext.createGain();
+  sink.gain.value = 0;
+  const chunks = [];
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      processor.disconnect();
+      processor.onaudioprocess = null;
+      source.disconnect();
+      sink.disconnect();
+      for (const track of tempStream.getTracks()) {
+        track.stop();
+      }
+    };
+
+    processor.onaudioprocess = (event) => {
+      const input = event.inputBuffer.getChannelData(0);
+      const downsampled = downsampleBuffer(input, appState.audioContext.sampleRate, 16000);
+      chunks.push(floatToPcm16Bytes(downsampled));
+    };
+
+    source.connect(processor);
+    processor.connect(sink);
+    sink.connect(appState.audioContext.destination);
+
+    window.setTimeout(() => {
+      try {
+        cleanup();
+        resolve(concatUint8Arrays(chunks));
+      } catch (error) {
+        reject(error);
+      }
+    }, durationMs);
+  });
+}
+
+async function transcribeOneShotClip() {
+  if (sessionRunning()) {
+    throw new Error("Stop the live session before running a one-shot transcription.");
+  }
+  if (!appState.user) {
+    throw new Error("Sign in before running transcription.");
+  }
+  if (!appState.micEnabled) {
+    throw new Error("Turn the microphone on before running transcription.");
+  }
+
+  setSessionStatus("Recording a short phrase...");
+  const clip = await captureOneShotPcmClip();
+  if (!clip.length) {
+    throw new Error("No audio was captured.");
+  }
+
+  setSessionStatus("Transcribing phrase...");
+  const idToken = await appState.user.getIdToken(true);
+  const response = await fetch("/api/music/transcribe", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      audio_b64: toBase64(clip),
+      mime: "audio/pcm;rate=16000",
+      expected: musicExpectedKinds[elements.mode.value] || "AUTO",
+      max_notes: 8,
+    }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.detail || payload?.message || `Transcription failed with ${response.status}`);
+  }
+
+  renderMusicAnalysis(payload);
+  appendCaption("Transcription", payload.summary || "No transcription summary.");
+  if (Array.isArray(payload.warnings)) {
+    for (const warning of payload.warnings) {
+      appendCaption("Warning", warning);
+    }
+  }
+  setSessionStatus("Transcription ready.");
+}
+
 async function createSession(idToken) {
   const response = await fetch("/api/sessions", {
     method: "POST",
@@ -473,6 +641,7 @@ async function createSession(idToken) {
       Authorization: `Bearer ${idToken}`,
     },
     body: JSON.stringify({
+      domain: appState.domain,
       mode: elements.mode.value,
       goal: elements.goal.value.trim() || null,
     }),
@@ -970,6 +1139,17 @@ elements.screenToggle.addEventListener("click", async () => {
 elements.snapshot.addEventListener("click", async () => {
   await captureScreenshot();
 });
+
+if (elements.transcribeOnce) {
+  elements.transcribeOnce.addEventListener("click", async () => {
+    try {
+      await transcribeOneShotClip();
+    } catch (error) {
+      appendCaption("Error", error.message || "Unable to transcribe the clip.");
+      setSessionStatus("Transcription failed.");
+    }
+  });
+}
 
 elements.mode.addEventListener("change", () => {
   updateGoalHint();

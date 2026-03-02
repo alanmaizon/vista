@@ -14,6 +14,8 @@ from sqlalchemy import Boolean, Column, DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase
 
+from .domains.base import DEFAULT_DOMAIN
+
 
 class Base(DeclarativeBase):
     pass
@@ -43,6 +45,7 @@ class Session(Base):
     started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     ended_at = Column(DateTime(timezone=True), nullable=True)
 
+    domain: str = Column(String(16), nullable=False, default=DEFAULT_DOMAIN, server_default=DEFAULT_DOMAIN)
     mode: str = Column(String(32), nullable=False)
     risk_mode: str = Column(String(16), nullable=False, default="NORMAL")
     goal: Optional[str] = Column(String(256), nullable=True)

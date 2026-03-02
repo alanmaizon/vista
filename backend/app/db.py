@@ -2,6 +2,7 @@ import os
 from typing import AsyncGenerator
 from urllib.parse import quote_plus
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -53,6 +54,13 @@ async def init_db() -> None:
     """Create tables if they do not already exist."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight schema evolution until full migrations are in place.
+        await conn.execute(
+            text(
+                "ALTER TABLE sessions "
+                "ADD COLUMN IF NOT EXISTS domain VARCHAR(16) NOT NULL DEFAULT 'VISION'"
+            )
+        )
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

@@ -4,6 +4,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .constitution import DEFAULT_SYSTEM_INSTRUCTIONS
+from .domains.music.constitution import DEFAULT_MUSIC_SYSTEM_INSTRUCTIONS
 
 
 DEPRECATED_LIVE_MODEL_ID = "gemini-live-2.5-flash-preview-native-audio-09-2025"
@@ -17,6 +18,7 @@ class Settings(BaseSettings):
     fallback_location: str = "us-central1"
     use_adk: bool = False
     firebase_web_config: str = ""
+    music_system_instructions: str = DEFAULT_MUSIC_SYSTEM_INSTRUCTIONS
     project_id: str = Field(
         default_factory=lambda: (
             os.getenv("GOOGLE_CLOUD_PROJECT")

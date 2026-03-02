@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Janey Mac</title>
+    <title>Eurydice</title>
     <link rel="stylesheet" href="/static/styles.css">
   </head>
-  <body data-brand="Janey Mac" data-domain="VISION">
+  <body data-brand="Eurydice" data-domain="MUSIC">
     <main class="shell">
       <section class="panel stage-panel">
         <div class="stage-frame">
@@ -15,9 +15,9 @@
 
           <div class="stage-topbar">
             <div class="status-card">
-              <p class="status-brand">Janey Mac</p>
-              <p id="session-status" class="session-text" aria-live="polite">Show what matters.</p>
-              <p id="capture-hint" class="hint capture-text">Audio-first checks work without camera. Dense visual tasks need a clean close-up.</p>
+              <p class="status-brand">Eurydice</p>
+              <p id="session-status" class="session-text" aria-live="polite">Hear. Read. Practice.</p>
+              <p id="capture-hint" class="hint capture-text">Use audio for played phrases. Turn on camera for score reading and sheet framing.</p>
               <p id="camera-warning" class="hint warning" aria-live="polite"></p>
             </div>
             <span id="risk-badge" class="badge">NORMAL</span>
@@ -35,10 +35,15 @@
               <button id="snapshot" class="secondary" type="button">Capture Screenshot</button>
             </div>
             <div class="action-row">
+              <button id="transcribe-once" class="secondary action-button" type="button">Transcribe clip</button>
               <button id="start" class="primary action-button" type="button">Start session</button>
             </div>
           </div>
         </div>
+      </section>
+
+      <section class="panel setup-panel music-analysis-panel">
+        <div id="music-analysis" class="hint" aria-live="polite">One-shot phrase transcription will appear here.</div>
       </section>
 
       <details class="dev-drawer-floating">
@@ -60,31 +65,18 @@
             </div>
 
             <div class="stack">
-              <label for="mode">Skill</label>
+              <label for="mode">Music Skill</label>
               <select id="mode">
-                <option value="REORIENT">REORIENT</option>
-                <option value="HOLD_STEADY">HOLD_STEADY</option>
-                <option value="FRAME_COACH">FRAME_COACH</option>
-                <option value="READ_TEXT">READ_TEXT</option>
-                <option value="NAV_FIND" selected>NAV_FIND</option>
-                <option value="QUEUE_AND_COUNTER">QUEUE_AND_COUNTER</option>
-                <option value="SHOP_VERIFY">SHOP_VERIFY</option>
-                <option value="PRICE_AND_DEAL_CHECK">PRICE_AND_DEAL_CHECK</option>
-                <option value="MONEY_HANDLING">MONEY_HANDLING</option>
-                <option value="OBJECT_LOCATE">OBJECT_LOCATE</option>
-                <option value="DEVICE_BUTTONS_AND_DIALS">DEVICE_BUTTONS_AND_DIALS</option>
-                <option value="SOCIAL_CONTEXT">SOCIAL_CONTEXT</option>
-                <option value="FACE_TO_SPEAKER">FACE_TO_SPEAKER</option>
-                <option value="FORM_FILL_HELP">FORM_FILL_HELP</option>
-                <option value="MEDICATION_LABEL_READ">MEDICATION_LABEL_READ</option>
-                <option value="COOKING_ASSIST">COOKING_ASSIST</option>
-                <option value="STAIRS_ESCALATOR_ELEVATOR">STAIRS_ESCALATOR_ELEVATOR</option>
-                <option value="TRAFFIC_CROSSING">TRAFFIC_CROSSING</option>
-                <option value="MEDICATION_DOSING">MEDICATION_DOSING</option>
+                <option value="HEAR_PHRASE" selected>HEAR_PHRASE</option>
+                <option value="SHEET_FRAME_COACH">SHEET_FRAME_COACH</option>
+                <option value="READ_SCORE">READ_SCORE</option>
+                <option value="COMPARE_PERFORMANCE">COMPARE_PERFORMANCE</option>
+                <option value="EAR_TRAIN">EAR_TRAIN</option>
+                <option value="GENERATE_EXAMPLE">GENERATE_EXAMPLE</option>
               </select>
 
               <label for="goal">Goal</label>
-              <input id="goal" type="text" placeholder="Find the exit sign">
+              <input id="goal" type="text" placeholder="Identify the arpeggio I just played">
             </div>
           </div>
         </section>

@@ -43,6 +43,7 @@ async def create_session(
     """
     session = Session(
         user_id=current_user["uid"],
+        domain=payload.domain,
         mode=payload.mode,
         risk_mode="NORMAL",
         goal=payload.goal,

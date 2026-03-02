@@ -544,12 +544,20 @@ button:disabled {
 
 .action-row {
   margin-top: 0.7rem;
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
 }
 
 .action-button {
   min-height: 4rem;
   border-radius: 24px;
   font-size: 1rem;
+}
+
+.music-analysis-panel {
+  padding: 0.95rem 1.05rem;
+  background: var(--glass-soft);
 }
 
 .summary-panel {

@@ -19,11 +19,13 @@ def build_session(
     *,
     session_id: uuid.UUID | None = None,
     user_id: str = "user-123",
+    domain: str = "VISION",
     mode: str = "NAV_FIND",
 ) -> Session:
     session = Session(
         id=session_id or uuid.uuid4(),
         user_id=user_id,
+        domain=domain,
         mode=mode,
         risk_mode="NORMAL",
         goal="Find the exit sign",
@@ -95,6 +97,8 @@ class FakeCreateDB(FakeExecuteDB):
         if instance.started_at is None:
             instance.started_at = datetime.now(timezone.utc)
         instance.ended_at = None
+        if getattr(instance, "domain", None) is None:
+            instance.domain = "VISION"
         instance.summary = None
         instance.success = None
         instance.model_id = None
@@ -113,7 +117,9 @@ async def test_create_session_sets_owner_and_defaults() -> None:
 
     assert db.added is not None
     assert db.commit_calls == 1
+    assert db.added.domain == "VISION"
     assert result.user_id == "firebase-user"
+    assert result.domain == "VISION"
     assert result.mode == "READ_TEXT"
     assert result.risk_mode == "NORMAL"
     assert result.goal == "Read the menu"

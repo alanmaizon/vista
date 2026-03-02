@@ -2,14 +2,22 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from .domains.base import DEFAULT_DOMAIN, normalize_domain
 
 
 class SessionCreate(BaseModel):
     """Schema for creating a new session."""
 
+    domain: str = Field(DEFAULT_DOMAIN, description="Domain selected (VISION or MUSIC)")
     mode: str = Field(..., description="Skill selected (e.g. NAV_FIND, SHOP_VERIFY)")
     goal: Optional[str] = Field(None, description="Short user-provided goal description")
+
+    @field_validator("domain")
+    @classmethod
+    def validate_domain(cls, value: str) -> str:
+        return normalize_domain(value)
 
 
 class SessionUpdate(BaseModel):
@@ -30,6 +38,7 @@ class SessionOut(BaseModel):
     user_id: str
     started_at: datetime
     ended_at: Optional[datetime]
+    domain: str
     mode: str
     risk_mode: str
     goal: Optional[str]

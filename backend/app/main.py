@@ -19,9 +19,10 @@ from sqlalchemy import select
 
 from .auth import init_firebase, verify_firebase_token
 from .db import AsyncSessionLocal, init_db
+from .domains import SessionRuntime, build_session_runtime
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
 from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_INIT, CLIENT_STOP, CLIENT_VIDEO
-from .live.state import LiveSessionState
+from .music_api import router as music_router
 from .models import Session
 from .sessions import router as sessions_router
 from .settings import settings
@@ -41,6 +42,7 @@ PUBLIC_FIREBASE_WEB_CONFIG_KEYS = {
 
 app = FastAPI(title="Vista AI Backend", version="0.2.0")
 app.include_router(sessions_router)
+app.include_router(music_router)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -62,8 +64,14 @@ async def startup_event() -> None:
 
 @app.get("/")
 async def index() -> FileResponse:
-    """Serve the minimal browser client."""
+    """Serve the Janey Mac browser client."""
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/music")
+async def music_index() -> FileResponse:
+    """Serve the Eurydice browser client shell."""
+    return FileResponse(STATIC_DIR / "music.html")
 
 
 @app.get("/health")
@@ -127,7 +135,7 @@ async def _update_session_start_metadata(
 async def _persist_session_completion(
     session_id: UUID,
     *,
-    state: LiveSessionState,
+    runtime: SessionRuntime,
     bridge: GeminiLiveBridge,
 ) -> None:
     async with AsyncSessionLocal() as db:
@@ -135,11 +143,13 @@ async def _persist_session_completion(
         session = result.scalar_one_or_none()
         if session is None:
             return
-        summary = state.summary_payload()
+        summary = runtime.summary_payload()
         session.summary = summary
-        session.risk_mode = state.risk_mode
+        session.risk_mode = runtime.risk_mode
         session.ended_at = datetime.now(timezone.utc)
-        session.success = state.completed and state.risk_mode != "REFUSE"
+        session.success = runtime.completed and runtime.risk_mode != "REFUSE"
+        session.domain = runtime.domain
+        session.mode = runtime.skill
         session.model_id = bridge.model_id
         session.region = bridge.active_location
         await db.commit()
@@ -158,21 +168,21 @@ def _decode_b64_payload(message: dict, field_name: str = "data_b64") -> bytes:
 async def _forward_bridge_events(
     ws: WebSocket,
     bridge: GeminiLiveBridge,
-    state: LiveSessionState,
+    runtime: SessionRuntime,
 ) -> None:
     async for event in bridge.receive():
         if event.get("type") == "server.audio":
-            state.on_model_audio()
+            runtime.on_model_audio()
         elif event.get("type") == "server.text":
             text = str(event.get("text", ""))
-            extra_events = state.on_model_text(text)
+            extra_events = runtime.on_model_text(text)
             for extra_event in extra_events:
                 await ws.send_json(extra_event)
         elif event.get("type") == "server.status":
             event = {
                 **event,
-                "mode": state.risk_mode,
-                "skill": state.skill,
+                "mode": runtime.risk_mode,
+                "skill": runtime.skill,
             }
         await ws.send_json(event)
 
@@ -234,14 +244,22 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         await ws.close(code=1011)
         return
 
-    state = LiveSessionState(skill=skill, goal=session.goal)
+    resolved_skill = (session.mode or skill).strip().upper() if getattr(session, "mode", None) else skill
+    runtime = build_session_runtime(
+        domain=getattr(session, "domain", None),
+        skill=resolved_skill,
+        goal=session.goal,
+    )
     bridge = GeminiLiveBridge(
         model_id=settings.model_id,
         location=settings.location,
         fallback_location=settings.fallback_location,
         project_id=settings.project_id,
-        system_prompt=settings.system_instructions,
-        skill=state.skill,
+        system_prompt=runtime.system_prompt(
+            settings.system_instructions,
+            settings.music_system_instructions,
+        ),
+        skill=runtime.skill,
         goal=session.goal,
         user_key=user["uid"],
         session_key=str(session_id),
@@ -264,15 +282,15 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             {
                 "type": "server.status",
                 "state": "connected",
-                "mode": state.risk_mode,
-                "skill": state.skill,
+                "mode": runtime.risk_mode,
+                "skill": runtime.skill,
             }
         )
-        for event in state.on_connect_events():
+        for event in runtime.on_connect_events():
             await ws.send_json(event)
-        await bridge.send_text(state.opening_prompt(), role="user")
+        await bridge.send_text(runtime.opening_prompt(), role="user")
 
-        forward_task = asyncio.create_task(_forward_bridge_events(ws, bridge, state))
+        forward_task = asyncio.create_task(_forward_bridge_events(ws, bridge, runtime))
         stop_requested = False
 
         while True:
@@ -293,15 +311,15 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 if message_type == CLIENT_AUDIO:
                     await bridge.send_audio(_decode_b64_payload(message))
                 elif message_type == CLIENT_VIDEO:
-                    state.on_client_video()
+                    runtime.on_client_video()
                     await bridge.send_image_jpeg(_decode_b64_payload(message))
                 elif message_type == CLIENT_CONFIRM:
-                    confirm_prompt = state.on_client_confirm()
+                    confirm_prompt = runtime.on_client_confirm()
                     if confirm_prompt:
                         await bridge.send_text(confirm_prompt, role="user")
                 elif message_type == CLIENT_STOP:
                     stop_requested = True
-                    await ws.send_json({"type": "server.summary", **state.summary_payload()})
+                    await ws.send_json({"type": "server.summary", **runtime.summary_payload()})
                     break
                 else:
                     await ws.send_json({"type": "error", "message": f"Unsupported message type: {message_type}"})
@@ -313,7 +331,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 break
 
         if not stop_requested and ws.client_state.name == "CONNECTED":
-            await ws.send_json({"type": "server.summary", **state.summary_payload()})
+            await ws.send_json({"type": "server.summary", **runtime.summary_payload()})
 
         forward_task.cancel()
         try:
@@ -324,7 +342,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         logger.exception("Unexpected error in /ws/live: %s", exc)
         await ws.send_json({"type": "error", "message": f"Live session error: {exc}"})
     finally:
-        await _persist_session_completion(session_id, state=state, bridge=bridge)
+        await _persist_session_completion(session_id, runtime=runtime, bridge=bridge)
         await bridge.close()
         with contextlib.suppress(RuntimeError):
             await ws.close()

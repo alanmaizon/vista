@@ -16,9 +16,13 @@ class ComparedEvent:
     expected_note_name: str
     expected_duration_code: str
     expected_beats: float
+    expected_start_beat: float
     played_note_name: str | None
+    played_start_ms: int | None
     played_duration_ms: int | None
     pitch_match: bool
+    onset_match: bool
+    duration_match: bool
     rhythm_match: bool
 
 
@@ -44,6 +48,120 @@ def _flatten_expected_notes(score: MusicScore) -> list[dict]:
     return expected_notes
 
 
+def _compare_expected_window(
+    expected_notes: list[dict],
+    played_window: list,
+) -> tuple[float, list[str], list[ComparedEvent]]:
+    expected_total_beats = sum(float(note.get("beats", 0.0)) for note in expected_notes) or 1.0
+    played_total_ms = sum(note.duration_ms for note in played_window) or 1
+    expected_onset_span_beats = sum(float(note.get("beats", 0.0)) for note in expected_notes[:-1]) or 1.0
+    played_window_start_ms = played_window[0].start_ms if played_window else 0
+    played_onset_span_ms = (
+        max(1, played_window[-1].start_ms - played_window_start_ms)
+        if len(played_window) > 1
+        else 1
+    )
+    score_units = 0.0
+    mismatches: list[str] = []
+    comparisons: list[ComparedEvent] = []
+    expected_start_beat = 0.0
+
+    for index, expected in enumerate(expected_notes):
+        played = played_window[index] if index < len(played_window) else None
+        expected_note_name = str(expected.get("note_name", ""))
+        expected_duration_code = str(expected.get("duration_code", ""))
+        expected_beats = float(expected.get("beats", 0.0))
+
+        pitch_match = bool(played and played.note_name == expected_note_name)
+        onset_match = False
+        duration_match = False
+        rhythm_match = False
+        if played:
+            expected_duration_ratio = expected_beats / expected_total_beats
+            played_duration_ratio = played.duration_ms / played_total_ms
+            duration_delta = abs(expected_duration_ratio - played_duration_ratio)
+            duration_match = duration_delta <= 0.18
+
+            expected_onset_ratio = (
+                expected_start_beat / expected_onset_span_beats
+                if len(expected_notes) > 1
+                else 0.0
+            )
+            played_onset_ratio = (
+                (played.start_ms - played_window_start_ms) / played_onset_span_ms
+                if len(played_window) > 1
+                else 0.0
+            )
+            onset_delta = abs(expected_onset_ratio - played_onset_ratio)
+            onset_match = onset_delta <= 0.12
+            rhythm_match = onset_match and duration_match
+
+        comparisons.append(
+            ComparedEvent(
+                index=index + 1,
+                expected_note_name=expected_note_name,
+                expected_duration_code=expected_duration_code,
+                expected_beats=expected_beats,
+                expected_start_beat=round(expected_start_beat, 3),
+                played_note_name=played.note_name if played else None,
+                played_start_ms=played.start_ms if played else None,
+                played_duration_ms=played.duration_ms if played else None,
+                pitch_match=pitch_match,
+                onset_match=onset_match,
+                duration_match=duration_match,
+                rhythm_match=rhythm_match,
+            )
+        )
+
+        note_units = 0.0
+        if pitch_match:
+            note_units += 0.6
+        else:
+            if played is None:
+                mismatches.append(
+                    f"Missing note {index + 1}: expected {expected_note_name}."
+                )
+            else:
+                mismatches.append(
+                    f"Note {index + 1}: expected {expected_note_name}, heard {played.note_name}."
+                )
+
+        if onset_match:
+            note_units += 0.2
+        elif played is not None:
+            direction = "late" if played.start_ms > played_window_start_ms else "early"
+            if len(played_window) > 1:
+                expected_onset_ratio = (
+                    expected_start_beat / expected_onset_span_beats
+                    if len(expected_notes) > 1
+                    else 0.0
+                )
+                played_onset_ratio = (
+                    (played.start_ms - played_window_start_ms) / played_onset_span_ms
+                    if len(played_window) > 1
+                    else 0.0
+                )
+                direction = "late" if played_onset_ratio > expected_onset_ratio else "early"
+            mismatches.append(
+                f"Timing {index + 1}: the note started {direction} for the beat."
+            )
+
+        if duration_match:
+            note_units += 0.2
+        elif played is not None:
+            expected_duration_ratio = expected_beats / expected_total_beats
+            played_duration_ratio = played.duration_ms / played_total_ms
+            length_direction = "longer" if played_duration_ratio > expected_duration_ratio else "shorter"
+            mismatches.append(
+                f"Length {index + 1}: expected about {expected_duration_code}, heard a {length_direction} hold."
+            )
+
+        score_units += note_units
+        expected_start_beat += expected_beats
+
+    return score_units, mismatches, comparisons
+
+
 def compare_performance_against_score(
     score: MusicScore,
     *,
@@ -63,74 +181,89 @@ def compare_performance_against_score(
     warnings = list(phrase.warnings)
     mismatches: list[str] = []
     comparisons: list[ComparedEvent] = []
-
-    expected_total_beats = sum(float(note.get("beats", 0.0)) for note in expected_notes) or 1.0
-    played_total_ms = sum(note.duration_ms for note in played_notes) or 1
     score_units = 0.0
     total_units = len(expected_notes) or 1
+    alignment_start = 0
 
-    for index, expected in enumerate(expected_notes):
-        played = played_notes[index] if index < len(played_notes) else None
-        expected_note_name = str(expected.get("note_name", ""))
-        expected_duration_code = str(expected.get("duration_code", ""))
-        expected_beats = float(expected.get("beats", 0.0))
-
-        pitch_match = bool(played and played.note_name == expected_note_name)
-        rhythm_match = False
-        if played:
-            expected_ratio = expected_beats / expected_total_beats
-            played_ratio = played.duration_ms / played_total_ms
-            rhythm_match = abs(expected_ratio - played_ratio) <= 0.22
-
-        comparisons.append(
-            ComparedEvent(
-                index=index + 1,
-                expected_note_name=expected_note_name,
-                expected_duration_code=expected_duration_code,
-                expected_beats=expected_beats,
-                played_note_name=played.note_name if played else None,
-                played_duration_ms=played.duration_ms if played else None,
-                pitch_match=pitch_match,
-                rhythm_match=rhythm_match,
+    if len(played_notes) > len(expected_notes) and expected_notes:
+        best_alignment: tuple[float, int, list[str], list[ComparedEvent]] | None = None
+        window_size = len(expected_notes)
+        for start in range(0, len(played_notes) - window_size + 1):
+            window = played_notes[start : start + window_size]
+            candidate_score, candidate_mismatches, candidate_comparisons = _compare_expected_window(
+                expected_notes,
+                window,
             )
+            ranking = (
+                candidate_score,
+                -len(candidate_mismatches),
+                -start,
+            )
+            if best_alignment is None:
+                best_alignment = (
+                    candidate_score,
+                    start,
+                    candidate_mismatches,
+                    candidate_comparisons,
+                )
+                best_ranking = ranking
+                continue
+            if ranking > best_ranking:
+                best_alignment = (
+                    candidate_score,
+                    start,
+                    candidate_mismatches,
+                    candidate_comparisons,
+                )
+                best_ranking = ranking
+
+        assert best_alignment is not None
+        score_units, alignment_start, mismatches, comparisons = best_alignment
+
+        ignored_leading = alignment_start
+        ignored_trailing = len(played_notes) - (alignment_start + len(expected_notes))
+        if ignored_leading or ignored_trailing:
+            warnings.append(
+                f"Aligned against notes {alignment_start + 1}-{alignment_start + len(expected_notes)} of the take."
+            )
+            if ignored_leading:
+                ignored_names = ", ".join(
+                    note.note_name for note in played_notes[:ignored_leading]
+                )
+                warnings.append(
+                    f"Ignored {ignored_leading} leading extra note{'s' if ignored_leading != 1 else ''}: {ignored_names}."
+                )
+            if ignored_trailing:
+                ignored_names = ", ".join(
+                    note.note_name for note in played_notes[-ignored_trailing:]
+                )
+                warnings.append(
+                    f"Ignored {ignored_trailing} trailing extra note{'s' if ignored_trailing != 1 else ''}: {ignored_names}."
+                )
+    else:
+        score_units, mismatches, comparisons = _compare_expected_window(
+            expected_notes,
+            played_notes,
         )
 
-        note_units = 0.0
-        if pitch_match:
-            note_units += 0.7
-        else:
-            if played is None:
-                mismatches.append(
-                    f"Missing note {index + 1}: expected {expected_note_name}."
-                )
-            else:
-                mismatches.append(
-                    f"Note {index + 1}: expected {expected_note_name}, heard {played.note_name}."
-                )
-        if rhythm_match:
-            note_units += 0.3
-        elif played is not None:
-            mismatches.append(
-                f"Rhythm {index + 1}: expected about {expected_duration_code}, heard a different length."
-            )
-
-        score_units += note_units
-
-    if len(played_notes) > len(expected_notes):
-        extra_note_names = ", ".join(note.note_name for note in played_notes[len(expected_notes) :])
-        mismatches.append(f"Extra played note{'s' if len(played_notes) - len(expected_notes) != 1 else ''}: {extra_note_names}.")
-
     accuracy = round(max(0.0, min(1.0, score_units / total_units)), 3)
-    match = accuracy >= 0.95 and len(played_notes) == len(expected_notes) and not mismatches
+    match = accuracy >= 0.95 and bool(expected_notes) and not mismatches
 
     if not expected_notes:
         warnings.append("The stored score has no notes to compare against.")
 
     if match:
-        summary = (
-            f"Matched the target phrase: {' '.join(note['note_name'] for note in expected_notes)} "
-            f"with {round(accuracy * 100)}% alignment."
-        )
+        if alignment_start:
+            summary = (
+                f"Matched the target phrase after aligning to notes "
+                f"{alignment_start + 1}-{alignment_start + len(expected_notes)} of the take. "
+                f"Alignment {round(accuracy * 100)}%."
+            )
+        else:
+            summary = (
+                f"Matched the target phrase: {' '.join(note['note_name'] for note in expected_notes)} "
+                f"with {round(accuracy * 100)}% alignment."
+            )
     else:
         summary = (
             f"Heard {' '.join(note.note_name for note in played_notes) or 'no stable notes'}. "

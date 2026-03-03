@@ -40,15 +40,21 @@ def synth_phrase(
     frequencies_hz: list[float],
     *,
     note_duration_ms: int = 320,
-    gap_ms: int = 90,
+    gap_ms: int | list[int] = 90,
     sample_rate: int = 16000,
 ) -> bytes:
-    gap_samples = int(sample_rate * gap_ms / 1000)
-    gap = b"\x00\x00" * gap_samples
+    if isinstance(gap_ms, int):
+        gaps_ms = [gap_ms] * max(0, len(frequencies_hz) - 1)
+    else:
+        gaps_ms = list(gap_ms)
+        if len(gaps_ms) != max(0, len(frequencies_hz) - 1):
+            raise ValueError("gap_ms list must have one fewer entries than frequencies_hz.")
     chunks = []
     for index, frequency in enumerate(frequencies_hz):
         chunks.append(synth_tone(frequency, duration_ms=note_duration_ms, sample_rate=sample_rate))
         if index != len(frequencies_hz) - 1:
+            gap_samples = int(sample_rate * gaps_ms[index] / 1000)
+            gap = b"\x00\x00" * gap_samples
             chunks.append(gap)
     return b"".join(chunks)
 
@@ -137,6 +143,40 @@ def test_compare_performance_against_score_reports_pitch_mismatch() -> None:
 
     assert result.match is False
     assert any("expected D4, heard D#4" in mismatch for mismatch in result.mismatches)
+
+
+def test_compare_performance_against_score_aligns_to_best_phrase_window() -> None:
+    score = build_stored_score()
+    clip = synth_phrase([220.0, 261.63, 293.66, 329.63, 392.0])  # extra A3 + G4 around the target
+
+    result = compare_performance_against_score(
+        score,
+        audio_bytes=clip,
+        sample_rate=16000,
+    )
+
+    assert result.match is True
+    assert result.accuracy >= 0.95
+    assert not result.mismatches
+    assert any("Aligned against notes 2-4 of the take." in warning for warning in result.warnings)
+    assert any("Ignored 1 leading extra note" in warning for warning in result.warnings)
+    assert any("Ignored 1 trailing extra note" in warning for warning in result.warnings)
+
+
+def test_compare_performance_against_score_reports_timing_mismatch() -> None:
+    score = build_stored_score()
+    clip = synth_phrase([261.63, 293.66, 329.63], gap_ms=[420, 90])
+
+    result = compare_performance_against_score(
+        score,
+        audio_bytes=clip,
+        sample_rate=16000,
+    )
+
+    assert result.match is False
+    assert any("Timing 2:" in mismatch for mismatch in result.mismatches)
+    assert result.comparisons[1].pitch_match is True
+    assert result.comparisons[1].onset_match is False
 
 
 class FakeScalarResult:

@@ -9,6 +9,7 @@ import re
 import struct
 from dataclasses import asdict
 
+from .music_pitch import estimate_pitch_fastyin
 from .music_symbolic import (
     NOTE_NAMES,
     NoteEvent,
@@ -132,38 +133,10 @@ def _find_active_segments(samples: list[float], sample_rate: int) -> list[tuple[
 
 
 def _estimate_pitch(segment: list[float], sample_rate: int) -> tuple[float | None, float]:
-    if len(segment) < sample_rate // 20:
+    estimate = estimate_pitch_fastyin(segment, sample_rate=sample_rate)
+    if estimate is None:
         return None, 0.0
-
-    mean = sum(segment) / len(segment)
-    centered = [sample - mean for sample in segment]
-    energy = sum(sample * sample for sample in centered)
-    if energy <= 0.0:
-        return None, 0.0
-
-    min_freq = 82.41  # E2
-    max_freq = 1046.5  # C6
-    min_lag = max(2, int(sample_rate / max_freq))
-    max_lag = min(len(centered) - 1, int(sample_rate / min_freq))
-    if max_lag <= min_lag:
-        return None, 0.0
-
-    best_lag = 0
-    best_corr = 0.0
-    for lag in range(min_lag, max_lag + 1):
-        corr = 0.0
-        for index in range(len(centered) - lag):
-            corr += centered[index] * centered[index + lag]
-        if corr > best_corr:
-            best_corr = corr
-            best_lag = lag
-
-    if best_lag <= 0 or best_corr <= 0.0:
-        return None, 0.0
-
-    confidence = max(0.0, min(1.0, best_corr / energy))
-    frequency_hz = sample_rate / best_lag
-    return frequency_hz, confidence
+    return estimate.frequency_hz, estimate.confidence
 
 
 def _dedupe_similar_notes(events: list[NoteEvent]) -> list[NoteEvent]:

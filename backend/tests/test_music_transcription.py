@@ -22,6 +22,7 @@ from app import main as main_module
 from app import music_api as music_api_module
 from app import music_compare as music_compare_module
 from app.music_compare import compare_performance_against_score
+from app.music_pitch import estimate_pitch_fastyin
 from app.music_render import build_note_layout, render_music_score, score_to_musicxml
 from app.music_symbolic import NoteEvent, SymbolicPhrase, import_simple_score
 from app.music_transcription import transcribe_pcm16
@@ -67,6 +68,17 @@ def test_transcribe_pcm16_detects_a4() -> None:
     assert result.notes
     assert result.notes[0].note_name == "A4"
     assert result.confidence > 0.5
+
+
+def test_estimate_pitch_fastyin_detects_a4() -> None:
+    audio_bytes = synth_tone(440.0, duration_ms=700)
+    samples = [sample / 32768.0 for (sample,) in struct.iter_unpack("<h", audio_bytes)]
+
+    estimate = estimate_pitch_fastyin(samples, sample_rate=16000)
+
+    assert estimate is not None
+    assert estimate.confidence > 0.7
+    assert abs(estimate.frequency_hz - 440.0) < 3.0
 
 
 def test_import_simple_score_normalizes_note_line() -> None:

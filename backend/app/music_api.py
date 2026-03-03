@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from . import auth as auth_utils
 from .db import get_db
 from .music_compare import compare_performance_against_score, comparison_to_dict
+from .music_crepe import crepe_runtime_status
 from .models import MusicScore
 from .music_render import render_music_score, verovio_runtime_status
 from .music_symbolic import import_simple_score, score_to_dict
@@ -139,6 +140,8 @@ class MusicRuntimeStatusResponse(BaseModel):
 
     verovio_available: bool
     verovio_detail: str
+    crepe_available: bool
+    crepe_detail: str
 
 
 async def _get_owned_score(db: AsyncSession, score_id: UUID, user_id: str) -> MusicScore:
@@ -178,9 +181,12 @@ async def music_runtime_status(
     del current_user
 
     available, detail = verovio_runtime_status()
+    crepe_available, crepe_detail = crepe_runtime_status()
     return MusicRuntimeStatusResponse(
         verovio_available=available,
         verovio_detail=detail,
+        crepe_available=crepe_available,
+        crepe_detail=crepe_detail,
     )
 
 

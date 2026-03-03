@@ -9,6 +9,7 @@ import re
 import struct
 from dataclasses import asdict
 
+from .music_crepe import estimate_pitch_crepe
 from .music_pitch import estimate_pitch_fastyin
 from .music_symbolic import (
     NOTE_NAMES,
@@ -133,10 +134,26 @@ def _find_active_segments(samples: list[float], sample_rate: int) -> list[tuple[
 
 
 def _estimate_pitch(segment: list[float], sample_rate: int) -> tuple[float | None, float]:
-    estimate = estimate_pitch_fastyin(segment, sample_rate=sample_rate)
-    if estimate is None:
+    fastyin_estimate = estimate_pitch_fastyin(segment, sample_rate=sample_rate)
+    crepe_estimate = estimate_pitch_crepe(segment, sample_rate=sample_rate)
+
+    if fastyin_estimate is None and crepe_estimate is None:
         return None, 0.0
-    return estimate.frequency_hz, estimate.confidence
+    if fastyin_estimate is None:
+        return crepe_estimate.frequency_hz, crepe_estimate.confidence
+    if crepe_estimate is None:
+        return fastyin_estimate.frequency_hz, fastyin_estimate.confidence
+
+    semitone_delta = abs(12.0 * math.log2(crepe_estimate.frequency_hz / fastyin_estimate.frequency_hz))
+    if semitone_delta <= 0.35:
+        blended_frequency = (fastyin_estimate.frequency_hz + crepe_estimate.frequency_hz) / 2.0
+        blended_confidence = max(fastyin_estimate.confidence, crepe_estimate.confidence)
+        return blended_frequency, min(1.0, blended_confidence)
+
+    if crepe_estimate.confidence >= fastyin_estimate.confidence + 0.15:
+        return crepe_estimate.frequency_hz, crepe_estimate.confidence
+
+    return fastyin_estimate.frequency_hz, max(0.0, min(fastyin_estimate.confidence, 0.82))
 
 
 def _dedupe_similar_notes(events: list[NoteEvent]) -> list[NoteEvent]:

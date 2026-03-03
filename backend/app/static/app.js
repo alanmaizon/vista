@@ -185,6 +185,22 @@ if (elements.scoreLine) {
     renderScoreNoteStrip();
   });
 }
+const settingsToggle = document.getElementById("settings-toggle");
+const settingsDropdown = document.getElementById("settings-dropdown");
+if (settingsToggle && settingsDropdown) {
+  settingsToggle.addEventListener("click", () => {
+    const isOpen = !settingsDropdown.classList.contains("is-hidden");
+    settingsDropdown.classList.toggle("is-hidden", isOpen);
+    settingsToggle.setAttribute("aria-expanded", String(!isOpen));
+  });
+  document.addEventListener("click", (event) => {
+    if (!settingsToggle.contains(event.target) && !settingsDropdown.contains(event.target)) {
+      settingsDropdown.classList.add("is-hidden");
+      settingsToggle.setAttribute("aria-expanded", "false");
+    }
+  });
+}
+
 updateGoalHint();
 updateCaptureGuidance();
 updatePrimaryActionButton();

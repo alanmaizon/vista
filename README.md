@@ -1,5 +1,9 @@
 # Eurydice
 
+<p align="center">
+  <img src="logo.svg" alt="Eurydice logo" width="120" height="120">
+</p>
+
 Eurydice is a real-time multimodal music tutor built for the Gemini Live Agent Challenge. It can hear a student play, read their score via the camera, coach them bar by bar in voice, and adapt the lesson live until the phrase is learned.
 
 This repository is organised into two main parts:

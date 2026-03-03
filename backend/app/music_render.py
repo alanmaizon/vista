@@ -29,6 +29,7 @@ class RenderedMusicScore:
     verovio_available: bool
     musicxml: str
     svg: str | None
+    note_layout: tuple[dict[str, float | int | str], ...] = ()
     warnings: tuple[str, ...] = ()
 
 
@@ -70,6 +71,64 @@ def _default_clef(score: MusicScore) -> tuple[str, int]:
         return "G", 2
     average = sum(midi_notes) / len(midi_notes)
     return ("F", 4) if average < 60 else ("G", 2)
+
+
+def build_note_layout(score: MusicScore) -> tuple[dict[str, float | int | str], ...]:
+    """Emit stable note anchors for the score surface.
+
+    These are layout hints, not engraved glyph coordinates. They give the client
+    a deterministic per-note position even when Verovio SVG glyph detection is
+    unavailable or changes shape.
+    """
+
+    measures = list(score.measures or [])
+    if not measures:
+        return ()
+
+    total_measures = max(1, len(measures))
+    horizontal_start = 12.0
+    horizontal_end = 92.0
+    measure_width = (horizontal_end - horizontal_start) / total_measures
+
+    midi_notes: list[int] = []
+    for measure in measures:
+        for note in measure.get("notes", []):
+            midi_note = note.get("midi_note")
+            if isinstance(midi_note, int):
+                midi_notes.append(midi_note)
+    if midi_notes:
+        midi_floor = min(midi_notes) - 3
+        midi_ceiling = max(midi_notes) + 3
+    else:
+        midi_floor = 57
+        midi_ceiling = 77
+    midi_span = max(1, midi_ceiling - midi_floor)
+
+    note_layout: list[dict[str, float | int | str]] = []
+    note_index = 0
+    for measure_offset, measure in enumerate(measures):
+        notes = list(measure.get("notes", []))
+        count = max(1, len(notes))
+        measure_start = horizontal_start + (measure_offset * measure_width)
+        for note_offset, note in enumerate(notes):
+            midi_note = note.get("midi_note")
+            if isinstance(midi_note, int):
+                pitch_position = max(0.0, min(1.0, (midi_note - midi_floor) / midi_span))
+                top_pct = 76.0 - (pitch_position * 46.0)
+            else:
+                top_pct = 52.0
+            left_pct = measure_start + (((note_offset + 1) / (count + 1)) * measure_width)
+            note_layout.append(
+                {
+                    "index": note_index,
+                    "measure_index": measure_offset,
+                    "note_name": str(note.get("note_name", "")),
+                    "left_pct": round(left_pct, 3),
+                    "top_pct": round(top_pct, 3),
+                }
+            )
+            note_index += 1
+    return tuple(note_layout)
 
 
 def score_to_musicxml(score: MusicScore) -> str:
@@ -176,6 +235,7 @@ def _render_with_verovio(musicxml: str) -> str:
 def render_music_score(score: MusicScore) -> RenderedMusicScore:
     """Render a stored symbolic score with Verovio when available."""
     musicxml = score_to_musicxml(score)
+    note_layout = build_note_layout(score)
     available, detail = verovio_runtime_status()
     if not available:
         return RenderedMusicScore(
@@ -183,6 +243,7 @@ def render_music_score(score: MusicScore) -> RenderedMusicScore:
             verovio_available=False,
             musicxml=musicxml,
             svg=None,
+            note_layout=note_layout,
             warnings=(detail,),
         )
 
@@ -194,6 +255,7 @@ def render_music_score(score: MusicScore) -> RenderedMusicScore:
             verovio_available=True,
             musicxml=musicxml,
             svg=None,
+            note_layout=note_layout,
             warnings=(f"Verovio render failed: {exc}",),
         )
 
@@ -202,5 +264,6 @@ def render_music_score(score: MusicScore) -> RenderedMusicScore:
         verovio_available=True,
         musicxml=musicxml,
         svg=svg,
+        note_layout=note_layout,
         warnings=(),
     )

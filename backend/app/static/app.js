@@ -30,6 +30,7 @@ const elements = {
   summary: document.getElementById("summary"),
   musicAnalysis: document.getElementById("music-analysis"),
   scoreRender: document.getElementById("score-render"),
+  scoreOverlay: document.getElementById("score-overlay"),
   scoreNoteStrip: document.getElementById("score-note-strip"),
   riskBadge: document.getElementById("risk-badge"),
   preview: document.getElementById("preview"),
@@ -48,6 +49,11 @@ const appState = {
   activeMusicNotes: [],
   highlightedScoreNoteIndexes: [],
   focusedScoreNoteIndex: null,
+  scoreOverlayMode: "idle",
+  scoreOverlaySummary: "",
+  scoreOverlayMarkers: [],
+  scoreLayoutHints: [],
+  scoreGlyphAnchors: [],
   assistantResponseReady: false,
   ws: null,
   sessionId: null,
@@ -425,11 +431,230 @@ function renderScoreNoteStrip() {
     button.addEventListener("click", () => {
       appState.focusedScoreNoteIndex = index;
       renderScoreNoteStrip();
+      renderScoreOverlay();
       appendCaption("Score", `Focused note ${index + 1}: ${note.note_name}, duration ${note.duration_code}.`);
     });
     fragment.appendChild(button);
   });
   elements.scoreNoteStrip.appendChild(fragment);
+}
+
+function setScoreOverlayState({ mode = "idle", summary = "", markers = [] } = {}) {
+  appState.scoreOverlayMode = mode;
+  appState.scoreOverlaySummary = summary;
+  appState.scoreOverlayMarkers = Array.isArray(markers) ? markers : [];
+  renderScoreOverlay();
+}
+
+function buildScoreOverlayMarkersForState(mode, comparisons = []) {
+  const noteCount = Array.isArray(appState.activeMusicNotes) ? appState.activeMusicNotes.length : 0;
+  if (!noteCount) {
+    return [];
+  }
+  if (mode === "replay") {
+    return Array.from({ length: noteCount }, () => ({ state: "replay" }));
+  }
+  if (!Array.isArray(comparisons) || !comparisons.length) {
+    return Array.from({ length: noteCount }, () => ({ state: "neutral" }));
+  }
+  return comparisons.slice(0, noteCount).map((item) => {
+    if (!item?.pitch_match) {
+      return { state: "pitch" };
+    }
+    if (!item?.rhythm_match) {
+      return { state: "rhythm" };
+    }
+    return { state: "match" };
+  });
+}
+
+function normalizeGlyphAnchorPercent(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, value));
+}
+
+function normalizeScoreLayoutHints(layoutHints) {
+  if (!Array.isArray(layoutHints)) {
+    return [];
+  }
+  return layoutHints
+    .map((item, index) => {
+      const left = normalizeGlyphAnchorPercent(Number(item?.left_pct));
+      const top = normalizeGlyphAnchorPercent(Number(item?.top_pct));
+      if (left === null || top === null) {
+        return null;
+      }
+      return {
+        index: Number.isFinite(Number(item?.index)) ? Number(item.index) : index,
+        left,
+        top,
+      };
+    })
+    .filter(Boolean);
+}
+
+function glyphAnchorRect(node) {
+  if (!(node instanceof Element)) {
+    return null;
+  }
+  const preferred = node.querySelector(
+    ".notehead, [class~='notehead'], [class*='notehead']"
+  );
+  const target = preferred || node;
+  const rect = target.getBoundingClientRect();
+  if (!rect.width && !rect.height) {
+    return null;
+  }
+  return rect;
+}
+
+function collectScoreGlyphAnchors() {
+  if (!elements.scoreRender) {
+    return [];
+  }
+  const noteCount = Array.isArray(appState.activeMusicNotes) ? appState.activeMusicNotes.length : 0;
+  if (!noteCount) {
+    return [];
+  }
+
+  const scoreStage = elements.scoreRender.closest(".score-stage");
+  const svg = elements.scoreRender.querySelector("svg");
+  if (!scoreStage || !svg) {
+    return [];
+  }
+
+  const stageRect = scoreStage.getBoundingClientRect();
+  if (!stageRect.width || !stageRect.height) {
+    return [];
+  }
+
+  let candidates = Array.from(svg.querySelectorAll("g.note"));
+  if (!candidates.length) {
+    candidates = Array.from(
+      svg.querySelectorAll("g[class~='note'], g[class^='note'], g[class*=' note']")
+    );
+  }
+  if (!candidates.length) {
+    candidates = Array.from(svg.querySelectorAll(".notehead, [class~='notehead']"));
+  }
+  if (!candidates.length) {
+    return [];
+  }
+
+  const seen = new Set();
+  const anchors = [];
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    const rect = glyphAnchorRect(candidate);
+    if (!rect) {
+      continue;
+    }
+    const left = normalizeGlyphAnchorPercent(
+      ((rect.left + rect.width / 2) - stageRect.left) / stageRect.width * 100
+    );
+    const top = normalizeGlyphAnchorPercent(
+      ((rect.top + rect.height / 2) - stageRect.top) / stageRect.height * 100
+    );
+    if (left === null || top === null) {
+      continue;
+    }
+    anchors.push({ left, top });
+    if (anchors.length >= noteCount) {
+      break;
+    }
+  }
+
+  return anchors;
+}
+
+function renderScoreOverlay() {
+  if (!elements.scoreOverlay) {
+    return;
+  }
+
+  elements.scoreOverlay.innerHTML = "";
+  const noteCount = Array.isArray(appState.activeMusicNotes) ? appState.activeMusicNotes.length : 0;
+  if (!noteCount || appState.scoreOverlayMode === "idle") {
+    elements.scoreOverlay.classList.add("is-hidden");
+    return;
+  }
+
+  elements.scoreOverlay.classList.remove("is-hidden");
+
+  const badge = document.createElement("div");
+  badge.className = "score-overlay-badge";
+
+  if (appState.scoreOverlayMode === "replay") {
+    badge.textContent = "Replay required";
+    badge.classList.add("is-replay");
+  } else if (appState.scoreOverlayMode === "match") {
+    badge.textContent = "Strong match";
+    badge.classList.add("is-match");
+  } else if (appState.scoreOverlayMode === "difference") {
+    badge.textContent = "Differences highlighted";
+    badge.classList.add("is-difference");
+  } else {
+    badge.textContent = appState.scoreOverlaySummary || "Score ready";
+  }
+  elements.scoreOverlay.appendChild(badge);
+
+  const track = document.createElement("div");
+  track.className = "score-overlay-track";
+
+  const rail = document.createElement("div");
+  rail.className = "score-overlay-rail";
+  track.appendChild(rail);
+
+  const markers = appState.scoreOverlayMarkers.length
+    ? appState.scoreOverlayMarkers
+    : buildScoreOverlayMarkersForState(appState.scoreOverlayMode);
+  const backendAnchors =
+    Array.isArray(appState.scoreLayoutHints) && appState.scoreLayoutHints.length >= noteCount
+      ? appState.scoreLayoutHints.slice(0, noteCount).map((anchor) => ({
+          left: anchor.left,
+          top: anchor.top,
+        }))
+      : null;
+  const glyphAnchors =
+    Array.isArray(appState.scoreGlyphAnchors) && appState.scoreGlyphAnchors.length >= noteCount
+      ? appState.scoreGlyphAnchors.slice(0, noteCount)
+      : null;
+  const anchoredMarkers = backendAnchors || glyphAnchors;
+
+  if (anchoredMarkers) {
+    markers.forEach((marker, index) => {
+      const anchor = anchoredMarkers[index];
+      const markerNode = document.createElement("div");
+      markerNode.className = "score-overlay-marker is-anchored";
+      markerNode.classList.add(`is-${marker.state || "neutral"}`);
+      if (index === appState.focusedScoreNoteIndex) {
+        markerNode.classList.add("is-focused");
+      }
+      markerNode.style.left = `${anchor.left}%`;
+      markerNode.style.top = `${anchor.top}%`;
+      elements.scoreOverlay.appendChild(markerNode);
+    });
+    return;
+  }
+
+  markers.forEach((marker, index) => {
+    const markerNode = document.createElement("div");
+    markerNode.className = "score-overlay-marker";
+    markerNode.classList.add(`is-${marker.state || "neutral"}`);
+    if (index === appState.focusedScoreNoteIndex) {
+      markerNode.classList.add("is-focused");
+    }
+    const percent = noteCount === 1 ? 50 : (index / (noteCount - 1)) * 100;
+    markerNode.style.left = `${percent}%`;
+    track.appendChild(markerNode);
+  });
+
+  elements.scoreOverlay.appendChild(track);
 }
 
 function renderScoreSurface(result) {
@@ -438,6 +663,8 @@ function renderScoreSurface(result) {
   }
 
   elements.scoreRender.innerHTML = "";
+  appState.scoreLayoutHints = normalizeScoreLayoutHints(result?.note_layout);
+  appState.scoreGlyphAnchors = [];
   if (!result || typeof result !== "object") {
     elements.scoreRender.textContent = "No rendered notation is available.";
     return;
@@ -445,6 +672,10 @@ function renderScoreSurface(result) {
 
   if (typeof result.svg === "string" && result.svg.trim()) {
     elements.scoreRender.innerHTML = result.svg;
+    window.requestAnimationFrame(() => {
+      appState.scoreGlyphAnchors = collectScoreGlyphAnchors();
+      renderScoreOverlay();
+    });
     return;
   }
 
@@ -452,6 +683,7 @@ function renderScoreSurface(result) {
   fallback.className = "score-render-fallback";
   fallback.textContent = result.musicxml || "No MusicXML fallback was returned.";
   elements.scoreRender.appendChild(fallback);
+  renderScoreOverlay();
 }
 
 function renderPerformanceComparison(result) {
@@ -874,6 +1106,8 @@ async function importScoreLine() {
   appState.activeMusicNotes = flattenNotesFromMeasures(payload.measures);
   appState.highlightedScoreNoteIndexes = [];
   appState.focusedScoreNoteIndex = null;
+  appState.scoreLayoutHints = [];
+  setScoreOverlayState({ mode: "idle" });
   renderImportedScore(payload);
   renderScoreSurface(null);
   renderScoreNoteStrip();
@@ -915,6 +1149,11 @@ async function renderStoredScore() {
   appState.activeMusicNotes = Array.isArray(payload.expected_notes) ? payload.expected_notes : appState.activeMusicNotes;
   appState.highlightedScoreNoteIndexes = [];
   appState.focusedScoreNoteIndex = null;
+  setScoreOverlayState({
+    mode: "score-ready",
+    summary: payload.render_backend === "VEROVIO" ? "Score rendered" : "MusicXML fallback",
+    markers: buildScoreOverlayMarkersForState("score-ready"),
+  });
   renderScoreSurface(payload);
   renderScoreNoteStrip();
   appendCaption(
@@ -980,6 +1219,14 @@ async function comparePerformanceClip() {
           .map((item) => Math.max(0, Number(item.index || 1) - 1))
       : [];
   appState.focusedScoreNoteIndex = appState.highlightedScoreNoteIndexes[0] ?? null;
+  setScoreOverlayState({
+    mode: payload.needs_replay ? "replay" : payload.match ? "match" : "difference",
+    summary: payload.summary || "",
+    markers: buildScoreOverlayMarkersForState(
+      payload.needs_replay ? "replay" : payload.match ? "match" : "difference",
+      payload.comparisons
+    ),
+  });
   renderScoreNoteStrip();
   renderPerformanceComparison(payload);
   appendCaption("Compare", payload.summary || "Comparison complete.");

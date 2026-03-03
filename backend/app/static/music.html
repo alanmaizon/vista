@@ -56,7 +56,10 @@
           <button id="compare-performance" class="secondary action-button" type="button">Compare take</button>
         </div>
         <div id="music-analysis" class="hint" aria-live="polite">One-shot phrase transcription will appear here.</div>
-        <div id="score-render" class="score-render-surface hint" aria-live="polite">Rendered notation will appear here.</div>
+        <div class="score-stage">
+          <div id="score-render" class="score-render-surface hint" aria-live="polite">Rendered notation will appear here.</div>
+          <div id="score-overlay" class="score-overlay is-hidden" aria-live="polite"></div>
+        </div>
         <div id="score-note-strip" class="score-note-strip" aria-live="polite"></div>
       </section>
 

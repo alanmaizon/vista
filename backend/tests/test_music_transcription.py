@@ -22,7 +22,7 @@ from app import main as main_module
 from app import music_api as music_api_module
 from app import music_compare as music_compare_module
 from app.music_compare import compare_performance_against_score
-from app.music_render import render_music_score, score_to_musicxml
+from app.music_render import build_note_layout, render_music_score, score_to_musicxml
 from app.music_symbolic import NoteEvent, SymbolicPhrase, import_simple_score
 from app.music_transcription import transcribe_pcm16
 
@@ -108,13 +108,17 @@ def test_score_to_musicxml_emits_score_partwise() -> None:
     score = build_stored_score()
 
     musicxml = score_to_musicxml(score)
+    note_layout = build_note_layout(score)
     rendered = render_music_score(score)
 
     assert "<score-partwise" in musicxml
     assert "<measure number=\"1\">" in musicxml
     assert "<step>C</step>" in musicxml
+    assert [anchor["note_name"] for anchor in note_layout] == ["C4", "D4", "E4"]
+    assert note_layout[0]["left_pct"] < note_layout[-1]["left_pct"]
     assert rendered.musicxml.startswith("<?xml")
     assert rendered.render_backend in {"VEROVIO", "MUSICXML_FALLBACK"}
+    assert len(rendered.note_layout) == 3
 
 
 def test_compare_performance_against_score_detects_exact_match() -> None:
@@ -386,6 +390,8 @@ def test_render_music_score_endpoint_returns_musicxml(client: TestClient, fake_m
     assert body["render_backend"] in {"VEROVIO", "MUSICXML_FALLBACK"}
     assert body["musicxml"].startswith("<?xml")
     assert [note["note_name"] for note in body["expected_notes"]] == ["C4", "D4", "E4"]
+    assert [anchor["note_name"] for anchor in body["note_layout"]] == ["C4", "D4", "E4"]
+    assert body["note_layout"][0]["left_pct"] < body["note_layout"][-1]["left_pct"]
 
 
 def test_compare_performance_endpoint_returns_alignment_feedback(

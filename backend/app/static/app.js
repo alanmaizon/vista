@@ -2121,11 +2121,18 @@ async function startSession({
   const captureRule = getCaptureRule(sessionMode);
   if (captureRule) {
     appendCaption("Setup", captureRule.hint);
+    if (appState.domain === "MUSIC" && sessionMode === "READ_SCORE") {
+      appendCaption("Setup", "Score reading is text-first. Keep one short bar centered until Eurydice captures a NOTE_LINE.");
+    }
   } else if (usesDeterministicLivePhraseCapture(sessionMode)) {
     appendCaption(
       "Setup",
       "Capture phrase records a short focused replay. Play immediately after pressing it."
     );
+  } else if (appState.domain === "MUSIC" && sessionMode === "GUIDED_LESSON") {
+    appendCaption("Setup", "This lesson loop is deterministic-first. Use the main button to move bar by bar.");
+  } else if (appState.domain === "MUSIC" && sessionMode === "COMPARE_PERFORMANCE") {
+    appendCaption("Setup", "Comparison is deterministic-first. Use the prepared score and compare one take at a time.");
   } else if (!hasVisualSourceEnabled()) {
     appendCaption("Setup", "Audio-only mode is active. Use a short spoken question.");
   }

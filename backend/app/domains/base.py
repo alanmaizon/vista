@@ -35,6 +35,9 @@ class SessionRuntime(Protocol):
     def on_connect_events(self) -> list[dict[str, Any]]:
         """Return any initial status events to emit after the websocket connects."""
 
+    def uses_model_opening_prompt(self) -> bool:
+        """Return whether the shared websocket loop should send the opening prompt to the model."""
+
     def opening_prompt(self) -> str:
         """Return the first user-facing instruction sent to the model."""
 
@@ -55,6 +58,9 @@ class SessionRuntime(Protocol):
 
     def on_model_audio(self) -> None:
         """Record that the model emitted audio."""
+
+    def allow_model_audio(self) -> bool:
+        """Return whether model audio should be forwarded to the client for this session."""
 
     def summary_payload(self) -> dict[str, Any]:
         """Return a final structured summary for the completed session."""

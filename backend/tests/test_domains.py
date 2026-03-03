@@ -14,6 +14,13 @@ def test_build_session_runtime_returns_music_runtime() -> None:
     assert runtime.system_prompt("vision", DEFAULT_MUSIC_SYSTEM_INSTRUCTIONS) == DEFAULT_MUSIC_SYSTEM_INSTRUCTIONS
 
 
+def test_build_session_runtime_preserves_guided_lesson_skill() -> None:
+    runtime = build_session_runtime(domain="music", skill="GUIDED_LESSON", goal="Teach me bar by bar")
+
+    assert runtime.domain == "MUSIC"
+    assert runtime.skill == "GUIDED_LESSON"
+
+
 def test_build_session_runtime_defaults_to_vision() -> None:
     runtime = build_session_runtime(domain="unknown-domain", skill="READ_TEXT", goal="Read the page")
 
@@ -93,3 +100,20 @@ def test_music_runtime_requests_replay_when_live_phrase_is_too_short() -> None:
     assert events
     assert "Play the full phrase once" in events[0]["text"]
     assert runtime.completed is False
+
+
+def test_music_runtime_marks_deterministic_modes_as_text_first() -> None:
+    hear_phrase = MusicRuntime(skill="HEAR_PHRASE", goal="Identify the phrase")
+    guided = MusicRuntime(skill="GUIDED_LESSON", goal="Teach the score")
+    read_score = MusicRuntime(skill="READ_SCORE", goal="Read the bar")
+
+    assert hear_phrase.uses_model_opening_prompt() is False
+    assert hear_phrase.allow_model_audio() is False
+    assert any("deterministic phrase analyser" in event["text"] for event in hear_phrase.on_connect_events())
+
+    assert guided.uses_model_opening_prompt() is False
+    assert guided.allow_model_audio() is False
+    assert any("lesson flow is driven by the score" in event["text"] for event in guided.on_connect_events())
+
+    assert read_score.uses_model_opening_prompt() is True
+    assert read_score.allow_model_audio() is False

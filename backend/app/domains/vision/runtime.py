@@ -39,6 +39,9 @@ class VisionRuntime(SessionRuntime):
     def on_connect_events(self) -> list[dict[str, Any]]:
         return self._state.on_connect_events()
 
+    def uses_model_opening_prompt(self) -> bool:
+        return True
+
     def opening_prompt(self) -> str:
         return self._state.opening_prompt()
 
@@ -60,6 +63,9 @@ class VisionRuntime(SessionRuntime):
 
     def on_model_audio(self) -> None:
         self._state.on_model_audio()
+
+    def allow_model_audio(self) -> bool:
+        return True
 
     def summary_payload(self) -> dict[str, Any]:
         return self._state.summary_payload()

@@ -183,6 +183,8 @@ async def _forward_bridge_events(
 ) -> None:
     async for event in bridge.receive():
         if event.get("type") == "server.audio":
+            if not runtime.allow_model_audio():
+                continue
             runtime.on_model_audio()
         elif event.get("type") == "server.text":
             text = str(event.get("text", ""))
@@ -299,7 +301,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         )
         for event in runtime.on_connect_events():
             await ws.send_json(event)
-        await bridge.send_text(runtime.opening_prompt(), role="user")
+        if runtime.uses_model_opening_prompt():
+            opening_prompt = runtime.opening_prompt()
+            if opening_prompt:
+                await bridge.send_text(opening_prompt, role="user")
 
         forward_task = asyncio.create_task(_forward_bridge_events(ws, bridge, runtime))
         stop_requested = False

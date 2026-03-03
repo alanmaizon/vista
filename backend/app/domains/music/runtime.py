@@ -47,6 +47,10 @@ MUSIC_SKILLS: dict[str, MusicSkillSpec] = {
         anchor="Identify a melody, interval, chord, or arpeggio and state confidence explicitly.",
         done_when="The musical phrase was identified clearly, or the user was asked for a narrower replay.",
     ),
+    "GUIDED_LESSON": MusicSkillSpec(
+        anchor="Guide one prepared bar at a time, compare the take, and advance or replay deliberately.",
+        done_when="The current prepared bar was confirmed or replay guidance was given before moving on.",
+    ),
     "COMPARE_PERFORMANCE": MusicSkillSpec(
         anchor="Compare a played phrase to the intended notes or rhythm and explain the mismatch clearly.",
         done_when="The user understands the main difference and has one next correction to try.",
@@ -96,7 +100,49 @@ class MusicRuntime(SessionRuntime):
         return music_prompt
 
     def on_connect_events(self) -> list[dict[str, str]]:
+        if self.skill == "HEAR_PHRASE":
+            return [
+                {
+                    "type": "server.text",
+                    "text": (
+                        "Play one clear phrase, then use Capture phrase. "
+                        "The deterministic phrase analyser will handle the result."
+                    ),
+                }
+            ]
+        if self.skill == "GUIDED_LESSON":
+            return [
+                {
+                    "type": "server.text",
+                    "text": (
+                        "Prepare one bar, then move through the lesson with Next bar and Compare bar. "
+                        "The lesson flow is driven by the score and deterministic comparison."
+                    ),
+                }
+            ]
+        if self.skill == "COMPARE_PERFORMANCE":
+            return [
+                {
+                    "type": "server.text",
+                    "text": (
+                        "Prepare the target notes first, then compare one take at a time. "
+                        "The comparison result is authoritative."
+                    ),
+                }
+            ]
+        if self.skill in {"READ_SCORE", "SHEET_FRAME_COACH"}:
+            return [
+                {
+                    "type": "server.text",
+                    "text": (
+                        "Show one short bar clearly. Eurydice will stay text-first while it reads or reframes the score."
+                    ),
+                }
+            ]
         return []
+
+    def uses_model_opening_prompt(self) -> bool:
+        return self.skill in {"READ_SCORE", "SHEET_FRAME_COACH", "EAR_TRAIN", "GENERATE_EXAMPLE"}
 
     def opening_prompt(self) -> str:
         goal_fragment = (
@@ -215,6 +261,9 @@ class MusicRuntime(SessionRuntime):
 
     def on_model_audio(self) -> None:
         self.saw_assistant_audio = True
+
+    def allow_model_audio(self) -> bool:
+        return self.skill in {"EAR_TRAIN", "GENERATE_EXAMPLE"}
 
     def summary_payload(self) -> dict[str, list[str]]:
         bullets = [

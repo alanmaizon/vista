@@ -5,7 +5,28 @@
 .pytest_cache/
 __pycache__/
 *.pyc
+*.log
+*.swp
+*.swo
+*~
 
 backend/.env
 frontend/react/node_modules/
 backend/adminsdk.json
+
+# IDE
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Test coverage
+.coverage
+coverage/
+htmlcov/
+.pytest_cache/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/

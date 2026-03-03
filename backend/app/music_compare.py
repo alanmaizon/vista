@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass
 from .models import MusicScore
 from .music_transcription import transcribe_pcm16, transcription_to_dict
 
+REPLAY_CONFIDENCE_THRESHOLD = 0.72
+
 
 @dataclass(frozen=True)
 class ComparedEvent:
@@ -30,6 +32,7 @@ class ComparedEvent:
 class PerformanceComparison:
     """Structured comparison payload for a played phrase."""
 
+    needs_replay: bool
     match: bool
     accuracy: float
     summary: str
@@ -247,12 +250,25 @@ def compare_performance_against_score(
         )
 
     accuracy = round(max(0.0, min(1.0, score_units / total_units)), 3)
-    match = accuracy >= 0.95 and bool(expected_notes) and not mismatches
+    needs_replay = phrase.confidence < REPLAY_CONFIDENCE_THRESHOLD or not played_notes
+    match = accuracy >= 0.95 and bool(expected_notes) and not mismatches and not needs_replay
 
     if not expected_notes:
         warnings.append("The stored score has no notes to compare against.")
 
-    if match:
+    if needs_replay:
+        warnings.append(
+            f"Replay requested: this take was only {round(phrase.confidence * 100)}% confident, "
+            "so the comparison is provisional."
+        )
+        if played_notes:
+            summary = (
+                f"I heard {' '.join(note.note_name for note in played_notes)}, but confidence was only "
+                f"{round(phrase.confidence * 100)}%. Replay the phrase slowly and clearly before trusting this comparison."
+            )
+        else:
+            summary = "I could not hear a stable enough phrase to compare. Replay slowly and clearly."
+    elif match:
         if alignment_start:
             summary = (
                 f"Matched the target phrase after aligning to notes "
@@ -272,6 +288,7 @@ def compare_performance_against_score(
         )
 
     return PerformanceComparison(
+        needs_replay=needs_replay,
         match=match,
         accuracy=accuracy,
         summary=summary,
@@ -286,6 +303,7 @@ def compare_performance_against_score(
 def comparison_to_dict(result: PerformanceComparison) -> dict[str, object]:
     """Convert a performance comparison to a JSON-serializable dict."""
     return {
+        "needs_replay": result.needs_replay,
         "match": result.match,
         "accuracy": result.accuracy,
         "summary": result.summary,

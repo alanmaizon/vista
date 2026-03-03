@@ -20,9 +20,10 @@ from app import auth as auth_module
 from app import db as db_module
 from app import main as main_module
 from app import music_api as music_api_module
+from app import music_compare as music_compare_module
 from app.music_compare import compare_performance_against_score
 from app.music_render import render_music_score, score_to_musicxml
-from app.music_symbolic import import_simple_score
+from app.music_symbolic import NoteEvent, SymbolicPhrase, import_simple_score
 from app.music_transcription import transcribe_pcm16
 
 
@@ -177,6 +178,60 @@ def test_compare_performance_against_score_reports_timing_mismatch() -> None:
     assert any("Timing 2:" in mismatch for mismatch in result.mismatches)
     assert result.comparisons[1].pitch_match is True
     assert result.comparisons[1].onset_match is False
+
+
+def test_compare_performance_against_score_requests_replay_for_low_confidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    score = build_stored_score()
+
+    def fake_transcribe(*_args, **_kwargs) -> SymbolicPhrase:
+        return SymbolicPhrase(
+            kind="melody_fragment",
+            notes=(
+                NoteEvent(
+                    midi_note=60,
+                    note_name="C4",
+                    frequency_hz=261.63,
+                    start_ms=0,
+                    duration_ms=320,
+                    confidence=0.62,
+                ),
+                NoteEvent(
+                    midi_note=62,
+                    note_name="D4",
+                    frequency_hz=293.66,
+                    start_ms=400,
+                    duration_ms=320,
+                    confidence=0.6,
+                ),
+                NoteEvent(
+                    midi_note=64,
+                    note_name="E4",
+                    frequency_hz=329.63,
+                    start_ms=800,
+                    duration_ms=620,
+                    confidence=0.58,
+                ),
+            ),
+            duration_ms=1500,
+            confidence=0.61,
+            summary="Low-confidence phrase.",
+            warnings=(),
+        )
+
+    monkeypatch.setattr(music_compare_module, "transcribe_pcm16", fake_transcribe)
+
+    result = compare_performance_against_score(
+        score,
+        audio_bytes=b"\x00\x00",
+        sample_rate=16000,
+    )
+
+    assert result.needs_replay is True
+    assert result.match is False
+    assert "Replay the phrase slowly and clearly" in result.summary
+    assert any("Replay requested:" in warning for warning in result.warnings)
 
 
 class FakeScalarResult:
@@ -353,6 +408,7 @@ def test_compare_performance_endpoint_returns_alignment_feedback(
     assert response.status_code == 200
     body = response.json()
     assert body["score_id"] == str(stored.id)
+    assert body["needs_replay"] is False
     assert body["match"] is False
     assert body["played_phrase"]["notes"]
     assert body["mismatches"]

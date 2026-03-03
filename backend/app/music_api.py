@@ -122,6 +122,7 @@ class MusicPerformanceCompareResponse(BaseModel):
     """Comparison result between a target phrase and the performed phrase."""
 
     score_id: UUID
+    needs_replay: bool
     match: bool
     accuracy: float
     summary: str

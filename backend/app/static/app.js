@@ -467,6 +467,9 @@ function renderPerformanceComparison(result) {
   const lines = [
     result.summary || "No comparison summary.",
   ];
+  if (result.needs_replay) {
+    lines.push("Replay requested before treating this take as reliable.");
+  }
   if (Array.isArray(result.mismatches) && result.mismatches.length) {
     lines.push(`Differences: ${result.mismatches.join(" ")}`);
   }
@@ -969,15 +972,20 @@ async function comparePerformanceClip() {
   }
 
   appState.activeMusicNotes = Array.isArray(payload.expected_notes) ? payload.expected_notes : appState.activeMusicNotes;
-  appState.highlightedScoreNoteIndexes = Array.isArray(payload.comparisons)
-    ? payload.comparisons
-        .filter((item) => !item.pitch_match || !item.rhythm_match)
-        .map((item) => Math.max(0, Number(item.index || 1) - 1))
-    : [];
+  appState.highlightedScoreNoteIndexes = payload.needs_replay
+    ? []
+    : Array.isArray(payload.comparisons)
+      ? payload.comparisons
+          .filter((item) => !item.pitch_match || !item.rhythm_match)
+          .map((item) => Math.max(0, Number(item.index || 1) - 1))
+      : [];
   appState.focusedScoreNoteIndex = appState.highlightedScoreNoteIndexes[0] ?? null;
   renderScoreNoteStrip();
   renderPerformanceComparison(payload);
   appendCaption("Compare", payload.summary || "Comparison complete.");
+  if (payload.needs_replay) {
+    appendCaption("Replay", "Replay the phrase slowly and clearly before trusting this comparison.");
+  }
   if (Array.isArray(payload.mismatches)) {
     for (const mismatch of payload.mismatches) {
       appendCaption("Difference", mismatch);
@@ -988,7 +996,7 @@ async function comparePerformanceClip() {
       appendCaption("Warning", warning);
     }
   }
-  setSessionStatus("Comparison ready.");
+  setSessionStatus(payload.needs_replay ? "Replay requested." : "Comparison ready.");
 }
 
 async function createSession(idToken) {

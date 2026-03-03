@@ -481,6 +481,33 @@ def test_music_score_import_endpoint_returns_symbolic_score(
     assert stored.time_signature == "4/4"
 
 
+def test_music_score_prepare_endpoint_returns_symbolic_score_and_render(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    response = client.post(
+        "/api/music/score/prepare",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "source_text": "C4/q D4/q E4/h",
+            "source_format": "NOTE_LINE",
+            "time_signature": "4/4",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["score_id"] is not None
+    assert body["normalized"] == "C4/q D4/q E4/h"
+    assert body["render_backend"] in {"VEROVIO", "MUSICXML_FALLBACK"}
+    assert body["musicxml"].startswith("<?xml")
+    assert [note["note_name"] for note in body["expected_notes"]] == ["C4", "D4", "E4"]
+    assert [anchor["note_name"] for anchor in body["note_layout"]] == ["C4", "D4", "E4"]
+
+    score_id = uuid.UUID(body["score_id"])
+    assert score_id in fake_music_db.scores
+
+
 def test_get_music_score_endpoint_returns_owned_score(client: TestClient, fake_music_db: FakeMusicDB) -> None:
     stored = build_stored_score()
     fake_music_db.scores[stored.id] = stored

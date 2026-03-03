@@ -105,6 +105,17 @@ class MusicScoreRenderResponse(BaseModel):
     note_layout: list[dict]
 
 
+class MusicScorePrepareResponse(MusicScoreImportResponse):
+    """Prepared score payload including render output."""
+
+    render_backend: str
+    verovio_available: bool
+    musicxml: str
+    svg: str | None
+    expected_notes: list[dict]
+    note_layout: list[dict]
+
+
 class MusicPerformanceCompareRequest(BaseModel):
     """Request body for comparing a played phrase against a stored score."""
 
@@ -277,6 +288,51 @@ async def import_music_score(
         result["score_id"] = stored_score.id
 
     return MusicScoreImportResponse(**result)
+
+
+@router.post("/score/prepare", response_model=MusicScorePrepareResponse)
+async def prepare_music_score(
+    payload: MusicScoreImportRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicScorePrepareResponse:
+    """Import and render a score in one backend step for guided workflows."""
+    score = import_simple_score(payload.source_text, time_signature=payload.time_signature)
+    measures = score_to_dict(score)["measures"]
+
+    stored_score = MusicScore(
+        user_id=current_user["uid"],
+        source_format=score.format,
+        time_signature=payload.time_signature,
+        note_count=score.note_count,
+        normalized=score.normalized,
+        summary=score.summary,
+        warnings=list(score.warnings),
+        measures=measures,
+    )
+    if payload.persist:
+        db.add(stored_score)
+        await db.commit()
+        await db.refresh(stored_score)
+
+    rendered = render_music_score(stored_score)
+    expected_notes = _flatten_expected_notes(stored_score)
+    return MusicScorePrepareResponse(
+        score_id=stored_score.id if payload.persist else None,
+        format=score.format,
+        time_signature=payload.time_signature,
+        note_count=score.note_count,
+        normalized=score.normalized,
+        summary=score.summary,
+        warnings=list(score.warnings),
+        measures=list(measures),
+        render_backend=rendered.render_backend,
+        verovio_available=rendered.verovio_available,
+        musicxml=rendered.musicxml,
+        svg=rendered.svg,
+        expected_notes=expected_notes,
+        note_layout=list(rendered.note_layout),
+    )
 
 
 @router.get("/score/{score_id}", response_model=MusicScoreImportResponse)

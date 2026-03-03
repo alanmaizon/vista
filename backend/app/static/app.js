@@ -1428,6 +1428,40 @@ async function importScoreLine() {
   updateMusicFlowHint();
 }
 
+function applyPreparedScorePayload(payload) {
+  appState.activeMusicScoreId = payload.score_id || null;
+  appState.activeMusicMeasures = Array.isArray(payload.measures) ? payload.measures : [];
+  appState.activeMusicNotes = Array.isArray(payload.expected_notes)
+    ? payload.expected_notes
+    : flattenNotesFromMeasures(payload.measures);
+  appState.scorePrepared = true;
+  appState.musicScoreDirty = false;
+  appState.scoreLayoutHints = Array.isArray(payload.note_layout) ? payload.note_layout : [];
+  resetLessonFlow();
+  setScoreOverlayState({
+    mode: "score-ready",
+    summary: payload.render_backend === "VEROVIO" ? "Score rendered" : "MusicXML fallback",
+    markers: buildScoreOverlayMarkersForState("score-ready"),
+  });
+  renderImportedScore(payload);
+  renderScoreSurface(payload);
+  renderScoreNoteStrip();
+  appendCaption(
+    "Render",
+    payload.render_backend === "VEROVIO"
+      ? "Rendered notation with Verovio."
+      : "Verovio was unavailable, so MusicXML fallback is shown."
+  );
+  if (Array.isArray(payload.warnings)) {
+    for (const warning of payload.warnings) {
+      appendCaption("Warning", warning);
+    }
+  }
+  setSessionStatus("Notation ready.");
+  updatePrimaryActionButton();
+  updateMusicFlowHint();
+}
+
 async function renderStoredScore() {
   if (sessionRunning()) {
     throw new Error("Stop the live session before rendering notation.");
@@ -1595,8 +1629,29 @@ async function prepareScoreFlow() {
   if (!hasScoreDraft()) {
     throw new Error("Enter a score line before preparing it.");
   }
-  await importScoreLine();
-  await renderStoredScore();
+
+  setSessionStatus("Preparing score...");
+  const idToken = await appState.user.getIdToken(true);
+  const response = await fetch("/api/music/score/prepare", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      source_text: elements.scoreLine?.value.trim() || "",
+      source_format: "NOTE_LINE",
+      time_signature: "4/4",
+      persist: true,
+    }),
+  });
+
+  const payload = await readApiPayload(response);
+  if (!response.ok) {
+    throw new Error(payload?.detail || payload?.message || `Score preparation failed with ${response.status}`);
+  }
+
+  applyPreparedScorePayload(payload);
 }
 
 async function requestGuidedLessonStep() {

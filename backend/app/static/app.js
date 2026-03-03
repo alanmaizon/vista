@@ -48,6 +48,7 @@ const appState = {
   verovioAvailable: null,
   crepeAvailable: null,
   activeMusicScoreId: null,
+  activeMusicMeasures: [],
   activeMusicNotes: [],
   highlightedScoreNoteIndexes: [],
   focusedScoreNoteIndex: null,
@@ -58,6 +59,10 @@ const appState = {
   scoreGlyphAnchors: [],
   scorePrepared: false,
   musicScoreDirty: false,
+  lessonMeasureIndex: null,
+  lessonStage: "idle",
+  cameraScoreImportPending: false,
+  cameraScoreReadBuffer: "",
   assistantResponseReady: false,
   ws: null,
   sessionId: null,
@@ -97,6 +102,7 @@ const skillHints = {
   MEDICATION_DOSING: "Medication dosing is blocked. Use MEDICATION_LABEL_READ for label text only.",
   SHEET_FRAME_COACH: "Help me frame one clear stave or measure group.",
   READ_SCORE: "Read this measure or staff line.",
+  GUIDED_LESSON: "Guide me through this score one bar at a time, then listen and compare my take.",
   HEAR_PHRASE: "Identify the melody, interval, chord, or arpeggio I just played.",
   COMPARE_PERFORMANCE: "Compare what I played with the intended notes or rhythm.",
   EAR_TRAIN: "Give me one ear-training drill at a time.",
@@ -240,6 +246,26 @@ function setToggleButton(button, enabled, onLabel, offLabel, icon) {
 function primaryActionState() {
   if (!sessionRunning()) {
     if (appState.domain === "MUSIC") {
+      if (elements.mode.value === "GUIDED_LESSON") {
+        if (!hasFreshPreparedScore() || appState.musicScoreDirty) {
+          if (!hasScoreDraft() && hasVisualSourceEnabled()) {
+            return "camera-score";
+          }
+          return "prepare-score";
+        }
+        if (appState.lessonStage === "awaiting-compare") {
+          return "lesson-compare";
+        }
+        return "lesson-next";
+      }
+      if (
+        elements.mode.value === "READ_SCORE" &&
+        !hasFreshPreparedScore() &&
+        !hasScoreDraft() &&
+        hasVisualSourceEnabled()
+      ) {
+        return "camera-score";
+      }
       if (musicModeUsesPreparedScore() && (!hasFreshPreparedScore() || appState.musicScoreDirty)) {
         return "prepare-score";
       }
@@ -259,7 +285,11 @@ function musicModeUsesPreparedScore() {
   if (appState.domain !== "MUSIC") {
     return false;
   }
-  return elements.mode.value === "READ_SCORE" || elements.mode.value === "COMPARE_PERFORMANCE";
+  return (
+    elements.mode.value === "READ_SCORE" ||
+    elements.mode.value === "COMPARE_PERFORMANCE" ||
+    elements.mode.value === "GUIDED_LESSON"
+  );
 }
 
 function hasScoreDraft() {
@@ -270,8 +300,85 @@ function hasFreshPreparedScore() {
   return Boolean(appState.activeMusicScoreId && appState.scorePrepared && !appState.musicScoreDirty);
 }
 
-function usesDeterministicLivePhraseCapture() {
-  return appState.domain === "MUSIC" && elements.mode.value === "HEAR_PHRASE";
+function resetLessonFlow({ keepPrepared = true } = {}) {
+  appState.lessonMeasureIndex = null;
+  appState.lessonStage = "idle";
+  appState.highlightedScoreNoteIndexes = [];
+  appState.focusedScoreNoteIndex = null;
+  if (!keepPrepared) {
+    appState.scorePrepared = false;
+  }
+}
+
+function activeMeasureCount() {
+  return Array.isArray(appState.activeMusicMeasures) ? appState.activeMusicMeasures.length : 0;
+}
+
+function noteOffsetForMeasure(measureIndex) {
+  if (!Array.isArray(appState.activeMusicMeasures) || measureIndex <= 0) {
+    return 0;
+  }
+  let offset = 0;
+  for (let index = 0; index < measureIndex - 1; index += 1) {
+    const measure = appState.activeMusicMeasures[index];
+    offset += Array.isArray(measure?.notes) ? measure.notes.length : 0;
+  }
+  return offset;
+}
+
+function noteRangeForMeasure(measureIndex) {
+  if (!Array.isArray(appState.activeMusicMeasures) || measureIndex <= 0) {
+    return { start: 0, end: 0 };
+  }
+  const start = noteOffsetForMeasure(measureIndex);
+  const count = Array.isArray(appState.activeMusicMeasures[measureIndex - 1]?.notes)
+    ? appState.activeMusicMeasures[measureIndex - 1].notes.length
+    : 0;
+  return { start, end: start + count };
+}
+
+function focusLessonMeasure(measureIndex) {
+  if (!Array.isArray(appState.activeMusicMeasures) || measureIndex <= 0) {
+    return;
+  }
+  const range = noteRangeForMeasure(measureIndex);
+  appState.highlightedScoreNoteIndexes = Array.from(
+    { length: Math.max(0, range.end - range.start) },
+    (_, offset) => range.start + offset
+  );
+  appState.focusedScoreNoteIndex = appState.highlightedScoreNoteIndexes[0] ?? null;
+  setScoreOverlayState({
+    mode: "score-ready",
+    summary: `Focus on bar ${measureIndex}.`,
+    markers: buildScoreOverlayMarkersForState("score-ready"),
+  });
+  renderScoreNoteStrip();
+}
+
+function guidedLessonBarPrompt(measureIndex) {
+  const measure = Array.isArray(appState.activeMusicMeasures) ? appState.activeMusicMeasures[measureIndex - 1] : null;
+  if (!measure) {
+    return `Play bar ${measureIndex} clearly, then compare your take.`;
+  }
+  const noteNames = Array.isArray(measure.notes)
+    ? measure.notes.map((note) => note.note_name).join(", ")
+    : "the prepared notes";
+  return `Bar ${measureIndex}: play ${noteNames}. Then use the main button to compare your take.`;
+}
+
+function parseLiveNoteLine(text) {
+  if (typeof text !== "string") {
+    return null;
+  }
+  const match = text.match(/NOTE_LINE:\s*(.+)$/i);
+  if (!match) {
+    return null;
+  }
+  return match[1].trim() || null;
+}
+
+function usesDeterministicLivePhraseCapture(modeOverride = elements.mode.value) {
+  return appState.domain === "MUSIC" && modeOverride === "HEAR_PHRASE";
 }
 
 function updatePrimaryActionButton() {
@@ -291,10 +398,36 @@ function updatePrimaryActionButton() {
     renderButton(elements.start, { icon: "analyze", label: "Hear phrase" });
     return;
   }
+  if (state === "camera-score") {
+    elements.start.classList.add("primary");
+    renderButton(elements.start, { icon: "camera", label: "Read score" });
+    elements.start.disabled = !hasVisualSourceEnabled();
+    return;
+  }
   if (state === "prepare-score") {
     elements.start.classList.add("primary");
     renderButton(elements.start, { icon: "confirm", label: "Prepare score" });
     elements.start.disabled = !hasScoreDraft();
+    return;
+  }
+  if (state === "lesson-next") {
+    elements.start.classList.add("primary");
+    const finalBar = activeMeasureCount() > 0 && appState.lessonMeasureIndex === activeMeasureCount();
+    renderButton(elements.start, {
+      icon: "start",
+      label:
+        appState.lessonStage === "complete"
+          ? "Restart lesson"
+          : finalBar && appState.lessonStage === "reviewed"
+            ? "Finish lesson"
+            : "Next bar",
+    });
+    return;
+  }
+  if (state === "lesson-compare") {
+    elements.start.classList.add("primary");
+    renderButton(elements.start, { icon: "analyze", label: "Compare bar" });
+    elements.start.disabled = !appState.micEnabled;
     return;
   }
   if (state === "compare") {
@@ -320,6 +453,27 @@ function updateMusicFlowHint() {
   let message = "Use the main button for the next music action.";
   if (elements.mode.value === "HEAR_PHRASE") {
     message = "Use the main button to capture one focused phrase. Play immediately after pressing it.";
+  } else if (elements.mode.value === "GUIDED_LESSON") {
+    if (appState.cameraScoreImportPending) {
+      message = "Show one short bar clearly. Eurydice is listening for a NOTE_LINE capture from the live score reader.";
+    } else if (!hasFreshPreparedScore()) {
+      if (hasScoreDraft()) {
+        message = "Prepare the score, then Eurydice will guide you bar by bar.";
+      } else if (hasVisualSourceEnabled()) {
+        message = "Use the main button to read one short bar from camera, then Eurydice will prepare the lesson.";
+      } else {
+        message = "Add a score line or turn on camera to capture one bar from the sheet before starting the lesson.";
+      }
+    } else if (appState.lessonStage === "awaiting-compare") {
+      message = `Play bar ${appState.lessonMeasureIndex || 1}, then use the main button to compare your take.`;
+    } else if (appState.lessonStage === "reviewed") {
+      const finalBar = activeMeasureCount() > 0 && appState.lessonMeasureIndex === activeMeasureCount();
+      message = finalBar
+        ? "This was the last prepared bar. Use the main button to finish or replay it."
+        : "Use the main button to move to the next bar.";
+    } else {
+      message = "Use the main button to begin the guided lesson at the first prepared bar.";
+    }
   } else if (elements.mode.value === "COMPARE_PERFORMANCE") {
     if (hasFreshPreparedScore()) {
       message = "The score is prepared. Use the main button to record one take and compare it.";
@@ -331,6 +485,8 @@ function updateMusicFlowHint() {
   } else if (elements.mode.value === "READ_SCORE") {
     if (hasFreshPreparedScore()) {
       message = "The score is prepared. Start a live session when you want spoken score guidance.";
+    } else if (!hasScoreDraft() && hasVisualSourceEnabled()) {
+      message = "Use the main button to capture one readable bar from camera, then Eurydice will prepare notation.";
     } else if (hasScoreDraft()) {
       message = "Enter a score line, then use the main button to prepare notation before asking Eurydice to read it.";
     } else {
@@ -870,17 +1026,28 @@ function updateGoalHint() {
   elements.goal.placeholder = hint;
 }
 
-function getCaptureRule() {
-  return skillCaptureRules[elements.mode.value] || null;
+function getCaptureRule(modeOverride = elements.mode.value) {
+  return skillCaptureRules[modeOverride] || null;
 }
 
-function selectedSkillNeedsVisualSource() {
-  return Boolean(getCaptureRule()?.requiresCamera);
+function selectedSkillNeedsVisualSource(modeOverride = elements.mode.value) {
+  return Boolean(getCaptureRule(modeOverride)?.requiresCamera);
 }
 
 function updateCaptureGuidance() {
   const rule = getCaptureRule();
-  if (rule) {
+  if (appState.domain === "MUSIC" && elements.mode.value === "GUIDED_LESSON") {
+    if (hasFreshPreparedScore()) {
+      elements.captureHint.textContent =
+        "Eurydice will guide one bar at a time. Use the main button to move to the next bar or compare the current take.";
+    } else if (hasVisualSourceEnabled()) {
+      elements.captureHint.textContent =
+        "Use the camera to capture one clear bar from the sheet, or type a score line to prepare the lesson.";
+    } else {
+      elements.captureHint.textContent =
+        "Type a score line or turn on camera to capture one bar from the sheet before starting the lesson.";
+    }
+  } else if (rule) {
     elements.captureHint.textContent = rule.hint;
   } else if (usesDeterministicLivePhraseCapture()) {
     elements.captureHint.textContent =
@@ -1260,12 +1427,12 @@ async function importScoreLine() {
   }
 
   appState.activeMusicScoreId = payload.score_id || null;
+  appState.activeMusicMeasures = Array.isArray(payload.measures) ? payload.measures : [];
   appState.activeMusicNotes = flattenNotesFromMeasures(payload.measures);
-  appState.highlightedScoreNoteIndexes = [];
-  appState.focusedScoreNoteIndex = null;
   appState.scoreLayoutHints = [];
   appState.musicScoreDirty = false;
   appState.scorePrepared = false;
+  resetLessonFlow({ keepPrepared: false });
   setScoreOverlayState({ mode: "idle" });
   renderImportedScore(payload);
   renderScoreSurface(null);
@@ -1308,10 +1475,9 @@ async function renderStoredScore() {
   }
 
   appState.activeMusicNotes = Array.isArray(payload.expected_notes) ? payload.expected_notes : appState.activeMusicNotes;
-  appState.highlightedScoreNoteIndexes = [];
-  appState.focusedScoreNoteIndex = null;
   appState.scorePrepared = true;
   appState.musicScoreDirty = false;
+  resetLessonFlow();
   setScoreOverlayState({
     mode: "score-ready",
     summary: payload.render_backend === "VEROVIO" ? "Score rendered" : "MusicXML fallback",
@@ -1335,7 +1501,7 @@ async function renderStoredScore() {
   updateMusicFlowHint();
 }
 
-async function comparePerformanceClip() {
+async function comparePerformanceClip({ measureIndex = null } = {}) {
   if (sessionRunning()) {
     throw new Error("Stop the live session before comparing a take.");
   }
@@ -1367,6 +1533,7 @@ async function comparePerformanceClip() {
       audio_b64: toBase64(clip),
       mime: "audio/pcm;rate=16000",
       max_notes: 12,
+      measure_index: measureIndex,
     }),
   });
 
@@ -1375,22 +1542,46 @@ async function comparePerformanceClip() {
     throw new Error(payload?.detail || payload?.message || `Comparison failed with ${response.status}`);
   }
 
-  appState.activeMusicNotes = Array.isArray(payload.expected_notes) ? payload.expected_notes : appState.activeMusicNotes;
+  const measureOffset = measureIndex ? noteOffsetForMeasure(measureIndex) : 0;
+  const overlayMode = payload.needs_replay ? "replay" : payload.match ? "match" : "difference";
+  let overlayMarkers = buildScoreOverlayMarkersForState(overlayMode, payload.comparisons);
+  if (measureIndex) {
+    overlayMarkers = buildScoreOverlayMarkersForState("score-ready");
+    const range = noteRangeForMeasure(measureIndex);
+    if (payload.needs_replay) {
+      for (let index = range.start; index < range.end; index += 1) {
+        overlayMarkers[index] = { state: "replay" };
+      }
+    } else if (Array.isArray(payload.comparisons)) {
+      payload.comparisons.forEach((item, index) => {
+        if (range.start + index >= overlayMarkers.length) {
+          return;
+        }
+        if (!item?.pitch_match) {
+          overlayMarkers[range.start + index] = { state: "pitch" };
+        } else if (!item?.rhythm_match) {
+          overlayMarkers[range.start + index] = { state: "rhythm" };
+        } else {
+          overlayMarkers[range.start + index] = { state: "match" };
+        }
+      });
+    }
+  }
+  if (!measureIndex && Array.isArray(payload.expected_notes)) {
+    appState.activeMusicNotes = payload.expected_notes;
+  }
   appState.highlightedScoreNoteIndexes = payload.needs_replay
     ? []
     : Array.isArray(payload.comparisons)
       ? payload.comparisons
           .filter((item) => !item.pitch_match || !item.rhythm_match)
-          .map((item) => Math.max(0, Number(item.index || 1) - 1))
+          .map((item) => measureOffset + Math.max(0, Number(item.index || 1) - 1))
       : [];
   appState.focusedScoreNoteIndex = appState.highlightedScoreNoteIndexes[0] ?? null;
   setScoreOverlayState({
-    mode: payload.needs_replay ? "replay" : payload.match ? "match" : "difference",
+    mode: overlayMode,
     summary: payload.summary || "",
-    markers: buildScoreOverlayMarkersForState(
-      payload.needs_replay ? "replay" : payload.match ? "match" : "difference",
-      payload.comparisons
-    ),
+    markers: overlayMarkers,
   });
   renderScoreNoteStrip();
   renderPerformanceComparison(payload);
@@ -1408,8 +1599,14 @@ async function comparePerformanceClip() {
       appendCaption("Warning", warning);
     }
   }
+  if (measureIndex) {
+    appState.lessonMeasureIndex = measureIndex;
+    appState.lessonStage = payload.needs_replay || !payload.match ? "awaiting-compare" : "reviewed";
+  }
   setSessionStatus(payload.needs_replay ? "Replay requested." : "Comparison ready.");
+  updatePrimaryActionButton();
   updateMusicFlowHint();
+  return payload;
 }
 
 async function prepareScoreFlow() {
@@ -1423,7 +1620,95 @@ async function prepareScoreFlow() {
   await renderStoredScore();
 }
 
-async function createSession(idToken) {
+async function beginOrAdvanceGuidedLesson() {
+  if (!hasFreshPreparedScore()) {
+    throw new Error("Prepare a score before starting the lesson.");
+  }
+  if (!activeMeasureCount()) {
+    throw new Error("The prepared score does not contain readable bars yet.");
+  }
+
+  if (appState.lessonStage === "complete") {
+    appState.lessonMeasureIndex = null;
+  }
+
+  let nextMeasure = appState.lessonMeasureIndex;
+  if (!Number.isInteger(nextMeasure) || nextMeasure === null) {
+    nextMeasure = 1;
+  } else if (appState.lessonStage === "reviewed" && nextMeasure >= activeMeasureCount()) {
+    appState.lessonStage = "complete";
+    appState.highlightedScoreNoteIndexes = [];
+    appState.focusedScoreNoteIndex = null;
+    setScoreOverlayState({
+      mode: "match",
+      summary: "Lesson complete.",
+      markers: buildScoreOverlayMarkersForState("match"),
+    });
+    renderScoreNoteStrip();
+    appendCaption("Lesson", "Lesson complete. Use the main button to restart from bar 1 if you want another pass.");
+    setSessionStatus("Lesson complete.");
+    updatePrimaryActionButton();
+    updateMusicFlowHint();
+    return;
+  } else if (appState.lessonStage === "reviewed" && nextMeasure < activeMeasureCount()) {
+    nextMeasure += 1;
+  }
+
+  appState.lessonMeasureIndex = nextMeasure;
+  appState.lessonStage = "awaiting-compare";
+  focusLessonMeasure(nextMeasure);
+  appendCaption("Lesson", guidedLessonBarPrompt(nextMeasure));
+  setSessionStatus(`Lesson ready for bar ${nextMeasure}.`);
+  updatePrimaryActionButton();
+  updateMusicFlowHint();
+}
+
+async function handleCameraScoreLiveText(text) {
+  appState.cameraScoreReadBuffer = `${appState.cameraScoreReadBuffer} ${text}`.trim();
+  const noteLine = parseLiveNoteLine(appState.cameraScoreReadBuffer);
+  if (noteLine) {
+    appState.cameraScoreImportPending = false;
+    appState.cameraScoreReadBuffer = "";
+    if (elements.scoreLine) {
+      elements.scoreLine.value = noteLine;
+    }
+    appState.musicScoreDirty = false;
+    appendCaption("Score", `Captured score line: ${noteLine}`);
+    setSessionStatus("Preparing captured score...");
+    await stopSession({ notifyServer: false });
+    await prepareScoreFlow();
+    if (elements.mode.value === "GUIDED_LESSON") {
+      await beginOrAdvanceGuidedLesson();
+    }
+    return true;
+  }
+
+  if (appState.cameraScoreReadBuffer.toUpperCase().includes("SCORE_UNCLEAR")) {
+    appState.cameraScoreReadBuffer = "";
+    appendCaption("Score", "The score is still unclear. Move closer, reduce glare, and center one short bar.");
+    setSessionStatus("Sheet still unclear.");
+    return true;
+  }
+
+  return true;
+}
+
+async function startCameraScoreReadFlow() {
+  if (!hasVisualSourceEnabled()) {
+    throw new Error("Turn on camera or screen sharing before reading a score from the sheet.");
+  }
+  appState.cameraScoreImportPending = true;
+  appState.cameraScoreReadBuffer = "";
+  setSessionStatus("Opening live score reader...");
+  await startSession({
+    sessionMode: "READ_SCORE",
+    goalOverride:
+      "Read one short bar from the visible sheet. If it is readable, emit NOTE_LINE: followed by a simple note line. If it is unclear, say SCORE_UNCLEAR.",
+    requireVisual: true,
+  });
+}
+
+async function createSession(idToken, { sessionMode = elements.mode.value, goalOverride = null } = {}) {
   const response = await fetch("/api/sessions", {
     method: "POST",
     headers: {
@@ -1432,8 +1717,8 @@ async function createSession(idToken) {
     },
     body: JSON.stringify({
       domain: appState.domain,
-      mode: elements.mode.value,
-      goal: elements.goal.value.trim() || null,
+      mode: sessionMode,
+      goal: (goalOverride ?? elements.goal.value.trim()) || null,
     }),
   });
 
@@ -1747,6 +2032,9 @@ function attachSocketHandlers(ws) {
         queuePlaybackChunk(payload.data_b64, payload.mime);
         break;
       case "server.text":
+        if (appState.cameraScoreImportPending && (await handleCameraScoreLiveText(payload.text))) {
+          break;
+        }
         markAssistantResponseReady();
         appendCaption("Live", payload.text);
         break;
@@ -1778,19 +2066,25 @@ function attachSocketHandlers(ws) {
     await stopMedia();
     appState.ws = null;
     appState.sessionId = null;
+    appState.cameraScoreImportPending = false;
+    appState.cameraScoreReadBuffer = "";
     setRunningState(false);
     refreshMediaButtons();
   };
 }
 
-async function startSession() {
+async function startSession({
+  sessionMode = elements.mode.value,
+  goalOverride = null,
+  requireVisual = false,
+} = {}) {
   if (!appState.user) {
     throw new Error("Sign in before starting a session.");
   }
   if (!appState.micEnabled && !hasVisualSourceEnabled()) {
     throw new Error("Turn on mic, camera, or screen sharing before starting.");
   }
-  if (selectedSkillNeedsVisualSource() && !hasVisualSourceEnabled()) {
+  if ((requireVisual || selectedSkillNeedsVisualSource(sessionMode)) && !hasVisualSourceEnabled()) {
     throw new Error("Turn on camera or screen sharing for this skill, then show one item or panel at a time.");
   }
 
@@ -1801,7 +2095,7 @@ async function startSession() {
   setSessionStatus("Creating session...");
 
   const idToken = await appState.user.getIdToken(true);
-  const session = await createSession(idToken);
+  const session = await createSession(idToken, { sessionMode, goalOverride });
   appState.sessionId = session.id;
 
   setSessionStatus("Opening live websocket...");
@@ -1813,21 +2107,21 @@ async function startSession() {
       type: "client.init",
       token: idToken,
       session_id: session.id,
-      mode: elements.mode.value,
+      mode: sessionMode,
     })
   );
 
   if (appState.micEnabled) {
-    if (!usesDeterministicLivePhraseCapture()) {
+    if (!usesDeterministicLivePhraseCapture(sessionMode)) {
       await enableMicCapture();
     }
   }
   await syncVisualCapture();
 
-  const captureRule = getCaptureRule();
+  const captureRule = getCaptureRule(sessionMode);
   if (captureRule) {
     appendCaption("Setup", captureRule.hint);
-  } else if (usesDeterministicLivePhraseCapture()) {
+  } else if (usesDeterministicLivePhraseCapture(sessionMode)) {
     appendCaption(
       "Setup",
       "Capture phrase records a short focused replay. Play immediately after pressing it."
@@ -1888,6 +2182,21 @@ elements.start.addEventListener("click", async () => {
 
     if (action === "prepare-score") {
       await prepareScoreFlow();
+      return;
+    }
+
+    if (action === "camera-score") {
+      await startCameraScoreReadFlow();
+      return;
+    }
+
+    if (action === "lesson-next") {
+      await beginOrAdvanceGuidedLesson();
+      return;
+    }
+
+    if (action === "lesson-compare") {
+      await comparePerformanceClip({ measureIndex: appState.lessonMeasureIndex || 1 });
       return;
     }
 
@@ -2016,9 +2325,12 @@ if (elements.comparePerformance) {
 }
 
 elements.mode.addEventListener("change", () => {
+  resetLessonFlow({ keepPrepared: true });
+  appState.cameraScoreImportPending = false;
   updateGoalHint();
   updateCaptureGuidance();
   updateMusicFlowHint();
+  renderScoreNoteStrip();
   updatePrimaryActionButton();
 });
 if (elements.scoreLine) {
@@ -2027,8 +2339,11 @@ if (elements.scoreLine) {
       appState.musicScoreDirty = true;
       appState.scorePrepared = false;
     }
+    appState.activeMusicMeasures = [];
+    resetLessonFlow({ keepPrepared: false });
     updatePrimaryActionButton();
     updateMusicFlowHint();
+    renderScoreNoteStrip();
   });
 }
 updateGoalHint();

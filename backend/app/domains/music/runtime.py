@@ -115,6 +115,13 @@ class MusicRuntime(SessionRuntime):
             if self.skill == "HEAR_PHRASE"
             else ""
         )
+        read_score_fragment = (
+            "For READ_SCORE, once one short bar is clearly readable, give a short musical description and, when you are confident, "
+            "include a second sentence that starts exactly with NOTE_LINE: followed by a simple token sequence like C4/q D4/q E4/h. "
+            "If the score is still unclear, say SCORE_UNCLEAR and request a tighter frame instead of inventing notes. "
+            if self.skill == "READ_SCORE"
+            else ""
+        )
         return (
             f"I am starting a {self.skill} music tutoring session. "
             f"Skill objective: {self.skill_spec.anchor} "
@@ -122,6 +129,7 @@ class MusicRuntime(SessionRuntime):
             f"{goal_fragment}"
             f"{frame_fragment}"
             f"{live_phrase_fragment}"
+            f"{read_score_fragment}"
             "Never guess musical details. If the score view or the performance is unclear, "
             "ask for one narrower replay or one clearer frame before you analyze."
         )

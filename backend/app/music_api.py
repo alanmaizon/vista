@@ -111,6 +111,11 @@ class MusicPerformanceCompareRequest(BaseModel):
     audio_b64: str = Field(..., description="Base64-encoded mono PCM16 audio clip.")
     mime: str = Field("audio/pcm;rate=16000", description="PCM mime type, e.g. audio/pcm;rate=16000")
     max_notes: int = Field(12, ge=1, le=12, description="Maximum note events to evaluate from the performance.")
+    measure_index: int | None = Field(
+        None,
+        ge=1,
+        description="Optional 1-based measure index to compare instead of the entire stored score.",
+    )
 
     @field_validator("audio_b64")
     @classmethod
@@ -274,10 +279,27 @@ async def compare_performance_with_score(
 ) -> MusicPerformanceCompareResponse:
     """Compare a short played phrase against a stored symbolic score."""
     score = await _get_owned_score(db, score_id, current_user["uid"])
+    compare_score = score
+    if payload.measure_index is not None:
+        measures = list(score.measures or [])
+        if payload.measure_index > len(measures):
+            raise HTTPException(status_code=400, detail="measure_index is outside the stored score.")
+        selected_measure = measures[payload.measure_index - 1]
+        compare_score = MusicScore(
+            id=score.id,
+            user_id=score.user_id,
+            source_format=score.source_format,
+            time_signature=score.time_signature,
+            note_count=len(selected_measure.get("notes", [])),
+            normalized=score.normalized,
+            summary=score.summary,
+            warnings=list(score.warnings or []),
+            measures=[selected_measure],
+        )
     sample_rate = parse_pcm_mime(payload.mime)
     audio_bytes = decode_audio_b64(payload.audio_b64)
     result = compare_performance_against_score(
-        score,
+        compare_score,
         audio_bytes=audio_bytes,
         sample_rate=sample_rate,
         max_notes=payload.max_notes,

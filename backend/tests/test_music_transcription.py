@@ -21,8 +21,9 @@ from app import db as db_module
 from app import main as main_module
 from app import music_api as music_api_module
 from app import music_compare as music_compare_module
+from app import music_transcription as music_transcription_module
 from app.music_compare import compare_performance_against_score
-from app.music_pitch import estimate_pitch_fastyin
+from app.music_pitch import PitchEstimate, estimate_pitch_fastyin
 from app.music_render import build_note_layout, render_music_score, score_to_musicxml
 from app.music_symbolic import NoteEvent, SymbolicPhrase, import_simple_score
 from app.music_transcription import transcribe_pcm16
@@ -79,6 +80,24 @@ def test_estimate_pitch_fastyin_detects_a4() -> None:
     assert estimate is not None
     assert estimate.confidence > 0.7
     assert abs(estimate.frequency_hz - 440.0) < 3.0
+
+
+def test_estimate_pitch_prefers_crepe_when_it_is_more_confident(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_fastyin(*_args, **_kwargs) -> PitchEstimate:
+        return PitchEstimate(frequency_hz=440.0, confidence=0.52)
+
+    def fake_crepe(*_args, **_kwargs) -> PitchEstimate:
+        return PitchEstimate(frequency_hz=444.0, confidence=0.81)
+
+    monkeypatch.setattr(music_transcription_module, "estimate_pitch_fastyin", fake_fastyin)
+    monkeypatch.setattr(music_transcription_module, "estimate_pitch_crepe", fake_crepe)
+
+    frequency_hz, confidence = music_transcription_module._estimate_pitch([0.0] * 2000, 16000)
+
+    assert abs(frequency_hz - 442.0) < 0.1
+    assert abs(confidence - 0.81) < 0.01
 
 
 def test_import_simple_score_normalizes_note_line() -> None:
@@ -385,6 +404,7 @@ def test_music_runtime_status_endpoint_reports_verovio_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(music_api_module, "verovio_runtime_status", lambda: (False, "verovio missing"))
+    monkeypatch.setattr(music_api_module, "crepe_runtime_status", lambda: (True, "crepe module detected"))
 
     response = client.get(
         "/api/music/runtime",
@@ -396,6 +416,8 @@ def test_music_runtime_status_endpoint_reports_verovio_state(
     assert body == {
         "verovio_available": False,
         "verovio_detail": "verovio missing",
+        "crepe_available": True,
+        "crepe_detail": "crepe module detected",
     }
 
 

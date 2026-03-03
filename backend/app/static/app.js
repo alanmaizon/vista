@@ -46,6 +46,7 @@ const appState = {
   clientConfigLoaded: false,
   musicRuntimeLoaded: false,
   verovioAvailable: null,
+  crepeAvailable: null,
   activeMusicScoreId: null,
   activeMusicNotes: [],
   highlightedScoreNoteIndexes: [],
@@ -970,13 +971,21 @@ async function loadMusicRuntimeStatus() {
     }
     const payload = await response.json();
     appState.verovioAvailable = Boolean(payload?.verovio_available);
+    appState.crepeAvailable = Boolean(payload?.crepe_available);
     if (!appState.activeMusicScoreId && !sessionRunning()) {
-      elements.scoreRender.textContent = appState.verovioAvailable
+      const renderStatus = appState.verovioAvailable
         ? "Verovio is available. Render notation will return SVG when a score is loaded."
         : "Verovio is not installed on the backend yet. Render notation will use MusicXML fallback until it is added.";
+      const pitchStatus = appState.crepeAvailable
+        ? " CREPE confirmation is active for focused clips."
+        : " CREPE is not installed yet, so FastYIN remains the only pitch engine.";
+      elements.scoreRender.textContent = `${renderStatus}${pitchStatus}`;
     }
     if (payload?.verovio_detail) {
       console.info(`[${appState.brand}][Verovio]`, payload.verovio_detail);
+    }
+    if (payload?.crepe_detail) {
+      console.info(`[${appState.brand}][CREPE]`, payload.crepe_detail);
     }
   } catch {
     // Keep the default render placeholder when runtime status cannot be loaded.

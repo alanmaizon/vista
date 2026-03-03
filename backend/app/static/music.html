@@ -8,6 +8,51 @@
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body data-brand="Eurydice" data-domain="MUSIC">
+    <nav class="navbar">
+      <a href="/" class="navbar-brand" aria-label="Eurydice home">
+        <img src="/favicon.ico" alt="Eurydice" class="navbar-logo" width="32" height="32">
+        <span class="navbar-title">Eurydice</span>
+      </a>
+      <div class="navbar-settings">
+        <button id="settings-toggle" class="settings-toggle" type="button" aria-label="Settings" aria-expanded="false" aria-controls="settings-dropdown">⚙️</button>
+        <div id="settings-dropdown" class="settings-dropdown is-hidden" role="menu">
+          <section class="settings-section">
+            <div class="grid">
+              <div class="stack">
+                <label for="firebase-config">Firebase Config JSON</label>
+                <textarea id="firebase-config" rows="6" spellcheck="false" placeholder='{"apiKey":"","authDomain":"","projectId":"","appId":""}'></textarea>
+
+                <label for="email">Email (optional)</label>
+                <input id="email" type="email" autocomplete="username">
+
+                <label for="password">Password (optional)</label>
+                <input id="password" type="password" autocomplete="current-password">
+
+                <button id="sign-in" class="secondary" type="button">Sign In</button>
+                <p id="auth-status" class="hint" aria-live="polite">Signed out.</p>
+              </div>
+
+              <div class="stack">
+                <label for="mode">Music Skill</label>
+                <select id="mode">
+                  <option value="GUIDED_LESSON" selected>GUIDED_LESSON</option>
+                  <option value="HEAR_PHRASE">HEAR_PHRASE</option>
+                  <option value="SHEET_FRAME_COACH">SHEET_FRAME_COACH</option>
+                  <option value="READ_SCORE">READ_SCORE</option>
+                  <option value="COMPARE_PERFORMANCE">COMPARE_PERFORMANCE</option>
+                  <option value="EAR_TRAIN">EAR_TRAIN</option>
+                  <option value="GENERATE_EXAMPLE">GENERATE_EXAMPLE</option>
+                </select>
+
+                <label for="goal">Goal</label>
+                <input id="goal" type="text" placeholder="Identify the arpeggio I just played">
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </nav>
+
     <main class="shell">
       <section class="panel stage-panel">
         <div class="stage-frame">
@@ -60,43 +105,6 @@
         </div>
         <div id="score-note-strip" class="score-note-strip" aria-live="polite"></div>
       </section>
-
-      <details class="dev-drawer-floating">
-        <summary>Dev</summary>
-        <section class="panel setup-panel">
-          <div class="grid">
-            <div class="stack">
-              <label for="firebase-config">Firebase Config JSON</label>
-              <textarea id="firebase-config" rows="6" spellcheck="false" placeholder='{"apiKey":"","authDomain":"","projectId":"","appId":""}'></textarea>
-
-              <label for="email">Email (optional)</label>
-              <input id="email" type="email" autocomplete="username">
-
-              <label for="password">Password (optional)</label>
-              <input id="password" type="password" autocomplete="current-password">
-
-              <button id="sign-in" class="secondary" type="button">Sign In</button>
-              <p id="auth-status" class="hint" aria-live="polite">Signed out.</p>
-            </div>
-
-            <div class="stack">
-              <label for="mode">Music Skill</label>
-              <select id="mode">
-                <option value="GUIDED_LESSON" selected>GUIDED_LESSON</option>
-                <option value="HEAR_PHRASE">HEAR_PHRASE</option>
-                <option value="SHEET_FRAME_COACH">SHEET_FRAME_COACH</option>
-                <option value="READ_SCORE">READ_SCORE</option>
-                <option value="COMPARE_PERFORMANCE">COMPARE_PERFORMANCE</option>
-                <option value="EAR_TRAIN">EAR_TRAIN</option>
-                <option value="GENERATE_EXAMPLE">GENERATE_EXAMPLE</option>
-              </select>
-
-              <label for="goal">Goal</label>
-              <input id="goal" type="text" placeholder="Identify the arpeggio I just played">
-            </div>
-          </div>
-        </section>
-      </details>
 
       <ul id="summary" class="summary is-hidden" hidden></ul>
     </main>

@@ -563,3 +563,74 @@ def test_compare_performance_endpoint_can_scope_to_one_measure(
     body = response.json()
     assert [note["note_name"] for note in body["expected_notes"]] == ["G4", "A4"]
     assert body["match"] is True
+
+
+def test_guided_lesson_step_returns_first_bar(client: TestClient, fake_music_db: FakeMusicDB) -> None:
+    stored = build_multimeasure_score()
+    fake_music_db.scores[stored.id] = stored
+
+    response = client.post(
+        f"/api/music/score/{stored.id}/lesson-step",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "current_measure_index": None,
+            "lesson_stage": "idle",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["lesson_complete"] is False
+    assert body["lesson_stage"] == "awaiting-compare"
+    assert body["measure_index"] == 1
+    assert body["note_start_index"] == 0
+    assert body["note_end_index"] == 2
+    assert "Bar 1: play C4, D4." in body["prompt"]
+
+
+def test_guided_lesson_step_advances_to_next_bar(client: TestClient, fake_music_db: FakeMusicDB) -> None:
+    stored = build_multimeasure_score()
+    fake_music_db.scores[stored.id] = stored
+
+    response = client.post(
+        f"/api/music/score/{stored.id}/lesson-step",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "current_measure_index": 1,
+            "lesson_stage": "reviewed",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["lesson_complete"] is False
+    assert body["measure_index"] == 2
+    assert body["note_start_index"] == 2
+    assert body["note_end_index"] == 4
+    assert "Bar 2: play G4, A4." in body["prompt"]
+
+
+def test_guided_lesson_step_marks_completion_on_last_review(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    stored = build_multimeasure_score()
+    fake_music_db.scores[stored.id] = stored
+
+    response = client.post(
+        f"/api/music/score/{stored.id}/lesson-step",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "current_measure_index": 2,
+            "lesson_stage": "reviewed",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["lesson_complete"] is True
+    assert body["lesson_stage"] == "complete"
+    assert body["measure_index"] is None
+    assert body["note_start_index"] is None
+    assert body["note_end_index"] is None
+    assert body["status"] == "Lesson complete."

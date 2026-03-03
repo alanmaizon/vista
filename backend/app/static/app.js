@@ -337,11 +337,13 @@ function noteRangeForMeasure(measureIndex) {
   return { start, end: start + count };
 }
 
-function focusLessonMeasure(measureIndex) {
-  if (!Array.isArray(appState.activeMusicMeasures) || measureIndex <= 0) {
+function focusLessonMeasure(measureIndex, explicitRange = null) {
+  if (measureIndex <= 0) {
     return;
   }
-  const range = noteRangeForMeasure(measureIndex);
+  const range = explicitRange && Number.isInteger(explicitRange.start) && Number.isInteger(explicitRange.end)
+    ? explicitRange
+    : noteRangeForMeasure(measureIndex);
   appState.highlightedScoreNoteIndexes = Array.from(
     { length: Math.max(0, range.end - range.start) },
     (_, offset) => range.start + offset
@@ -353,17 +355,6 @@ function focusLessonMeasure(measureIndex) {
     markers: buildScoreOverlayMarkersForState("score-ready"),
   });
   renderScoreNoteStrip();
-}
-
-function guidedLessonBarPrompt(measureIndex) {
-  const measure = Array.isArray(appState.activeMusicMeasures) ? appState.activeMusicMeasures[measureIndex - 1] : null;
-  if (!measure) {
-    return `Play bar ${measureIndex} clearly, then compare your take.`;
-  }
-  const noteNames = Array.isArray(measure.notes)
-    ? measure.notes.map((note) => note.note_name).join(", ")
-    : "the prepared notes";
-  return `Bar ${measureIndex}: play ${noteNames}. Then use the main button to compare your take.`;
 }
 
 function parseLiveNoteLine(text) {
@@ -1620,6 +1611,34 @@ async function prepareScoreFlow() {
   await renderStoredScore();
 }
 
+async function requestGuidedLessonStep() {
+  if (!appState.user) {
+    throw new Error("Sign in before starting the guided lesson.");
+  }
+  if (!appState.activeMusicScoreId) {
+    throw new Error("Prepare a score before starting the lesson.");
+  }
+
+  const idToken = await appState.user.getIdToken();
+  const response = await fetch(`/api/music/score/${appState.activeMusicScoreId}/lesson-step`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      current_measure_index: appState.lessonMeasureIndex,
+      lesson_stage: appState.lessonStage,
+    }),
+  });
+
+  const payload = await readApiPayload(response);
+  if (!response.ok) {
+    throw new Error(payload?.detail || payload?.message || `Lesson step failed with ${response.status}`);
+  }
+  return payload;
+}
+
 async function beginOrAdvanceGuidedLesson() {
   if (!hasFreshPreparedScore()) {
     throw new Error("Prepare a score before starting the lesson.");
@@ -1628,14 +1647,10 @@ async function beginOrAdvanceGuidedLesson() {
     throw new Error("The prepared score does not contain readable bars yet.");
   }
 
-  if (appState.lessonStage === "complete") {
-    appState.lessonMeasureIndex = null;
-  }
+  const payload = await requestGuidedLessonStep();
 
-  let nextMeasure = appState.lessonMeasureIndex;
-  if (!Number.isInteger(nextMeasure) || nextMeasure === null) {
-    nextMeasure = 1;
-  } else if (appState.lessonStage === "reviewed" && nextMeasure >= activeMeasureCount()) {
+  if (payload.lesson_complete) {
+    appState.lessonMeasureIndex = null;
     appState.lessonStage = "complete";
     appState.highlightedScoreNoteIndexes = [];
     appState.focusedScoreNoteIndex = null;
@@ -1645,20 +1660,21 @@ async function beginOrAdvanceGuidedLesson() {
       markers: buildScoreOverlayMarkersForState("match"),
     });
     renderScoreNoteStrip();
-    appendCaption("Lesson", "Lesson complete. Use the main button to restart from bar 1 if you want another pass.");
-    setSessionStatus("Lesson complete.");
+    appendCaption("Lesson", payload.prompt);
+    setSessionStatus(payload.status);
     updatePrimaryActionButton();
     updateMusicFlowHint();
     return;
-  } else if (appState.lessonStage === "reviewed" && nextMeasure < activeMeasureCount()) {
-    nextMeasure += 1;
   }
 
-  appState.lessonMeasureIndex = nextMeasure;
-  appState.lessonStage = "awaiting-compare";
-  focusLessonMeasure(nextMeasure);
-  appendCaption("Lesson", guidedLessonBarPrompt(nextMeasure));
-  setSessionStatus(`Lesson ready for bar ${nextMeasure}.`);
+  appState.lessonMeasureIndex = payload.measure_index;
+  appState.lessonStage = payload.lesson_stage;
+  focusLessonMeasure(payload.measure_index, {
+    start: payload.note_start_index,
+    end: payload.note_end_index,
+  });
+  appendCaption("Lesson", payload.prompt);
+  setSessionStatus(payload.status);
   updatePrimaryActionButton();
   updateMusicFlowHint();
 }

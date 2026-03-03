@@ -140,6 +140,34 @@ class MusicPerformanceCompareResponse(BaseModel):
     comparisons: list[dict]
 
 
+class MusicLessonStepRequest(BaseModel):
+    """Request body for guided lesson progression."""
+
+    current_measure_index: int | None = Field(
+        None,
+        ge=1,
+        description="Current 1-based measure index in the lesson, or null to start from bar 1.",
+    )
+    lesson_stage: Literal["idle", "awaiting-compare", "reviewed", "complete"] = Field(
+        "idle",
+        description="Current frontend lesson stage.",
+    )
+
+
+class MusicLessonStepResponse(BaseModel):
+    """Next-step guidance for a guided lesson."""
+
+    score_id: UUID
+    lesson_stage: Literal["awaiting-compare", "complete"]
+    lesson_complete: bool
+    measure_index: int | None
+    total_measures: int
+    prompt: str
+    status: str
+    note_start_index: int | None
+    note_end_index: int | None
+
+
 class MusicRuntimeStatusResponse(BaseModel):
     """Runtime diagnostics for Eurydice integrations."""
 
@@ -157,6 +185,29 @@ async def _get_owned_score(db: AsyncSession, score_id: UUID, user_id: str) -> Mu
     if score.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorised to access this score")
     return score
+
+
+def _flatten_expected_notes(score: MusicScore) -> list[dict]:
+    return [note for measure in (score.measures or []) for note in measure.get("notes", [])]
+
+
+def _measure_note_range(score: MusicScore, measure_index: int) -> tuple[int, int]:
+    measures = list(score.measures or [])
+    start = 0
+    for measure in measures[: measure_index - 1]:
+        start += len(measure.get("notes", []))
+    count = len(measures[measure_index - 1].get("notes", []))
+    return start, start + count
+
+
+def _guided_lesson_prompt(score: MusicScore, measure_index: int) -> str:
+    measures = list(score.measures or [])
+    measure = measures[measure_index - 1]
+    note_names = [note.get("note_name", "?") for note in measure.get("notes", [])]
+    if note_names:
+        readable_notes = ", ".join(note_names)
+        return f"Bar {measure_index}: play {readable_notes}. Then compare your take."
+    return f"Play bar {measure_index} clearly, then compare your take."
 
 
 @router.post("/transcribe", response_model=MusicTranscriptionResponse)
@@ -265,8 +316,62 @@ async def render_stored_music_score(
         musicxml=rendered.musicxml,
         svg=rendered.svg,
         warnings=list(rendered.warnings),
-        expected_notes=[note for measure in (score.measures or []) for note in measure.get("notes", [])],
+        expected_notes=_flatten_expected_notes(score),
         note_layout=list(rendered.note_layout),
+    )
+
+
+@router.post("/score/{score_id}/lesson-step", response_model=MusicLessonStepResponse)
+async def next_guided_lesson_step(
+    score_id: UUID,
+    payload: MusicLessonStepRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicLessonStepResponse:
+    """Return the next guided-lesson step for a stored score."""
+    score = await _get_owned_score(db, score_id, current_user["uid"])
+    measures = list(score.measures or [])
+    total_measures = len(measures)
+    if total_measures == 0:
+        raise HTTPException(status_code=400, detail="The prepared score does not contain readable bars yet.")
+
+    current_measure = payload.current_measure_index
+    if current_measure is not None and current_measure > total_measures:
+        raise HTTPException(status_code=400, detail="current_measure_index is outside the stored score.")
+
+    if payload.lesson_stage == "reviewed" and current_measure is not None and current_measure >= total_measures:
+        return MusicLessonStepResponse(
+            score_id=score.id,
+            lesson_stage="complete",
+            lesson_complete=True,
+            measure_index=None,
+            total_measures=total_measures,
+            prompt="Lesson complete. Use the main button to restart from bar 1 if you want another pass.",
+            status="Lesson complete.",
+            note_start_index=None,
+            note_end_index=None,
+        )
+
+    if payload.lesson_stage == "complete":
+        next_measure = 1
+    elif current_measure is None:
+        next_measure = 1
+    elif payload.lesson_stage == "reviewed":
+        next_measure = current_measure + 1
+    else:
+        next_measure = current_measure
+
+    start_index, end_index = _measure_note_range(score, next_measure)
+    return MusicLessonStepResponse(
+        score_id=score.id,
+        lesson_stage="awaiting-compare",
+        lesson_complete=False,
+        measure_index=next_measure,
+        total_measures=total_measures,
+        prompt=_guided_lesson_prompt(score, next_measure),
+        status=f"Lesson ready for bar {next_measure}.",
+        note_start_index=start_index,
+        note_end_index=end_index,
     )
 
 

@@ -46,6 +46,7 @@ app.include_router(sessions_router)
 app.include_router(music_router)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+ROOT_LOGO = Path(__file__).resolve().parents[2] / "logo.svg"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -76,6 +77,12 @@ async def index() -> FileResponse:
 async def music_index() -> FileResponse:
     """Serve the Eurydice browser client shell."""
     return FileResponse(STATIC_DIR / "music.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> FileResponse:
+    """Serve the shared logo as the site favicon."""
+    return FileResponse(ROOT_LOGO, media_type="image/svg+xml")
 
 
 @app.get("/health")

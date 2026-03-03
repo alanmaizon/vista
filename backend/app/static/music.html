@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Eurydice</title>
+    <link rel="icon" href="/favicon.ico" type="image/svg+xml">
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body data-brand="Eurydice" data-domain="MUSIC">
@@ -35,7 +36,6 @@
               <button id="snapshot" class="secondary" type="button">Capture Screenshot</button>
             </div>
             <div class="action-row">
-              <button id="transcribe-once" class="secondary action-button" type="button">Transcribe clip</button>
               <button id="start" class="primary action-button" type="button">Start session</button>
             </div>
           </div>
@@ -50,10 +50,8 @@
           spellcheck="false"
           placeholder="C4/q D4/q E4/h | G4/q A4/q B4/h"
         ></textarea>
-        <div class="action-row">
-          <button id="import-score" class="secondary action-button" type="button">Import score</button>
-          <button id="render-score" class="secondary action-button" type="button">Render notation</button>
-          <button id="compare-performance" class="secondary action-button" type="button">Compare take</button>
+        <div id="music-flow-hint" class="music-flow-hint" aria-live="polite">
+          Enter a score line, then use the main button to prepare and compare it.
         </div>
         <div id="music-analysis" class="hint" aria-live="polite">One-shot phrase transcription will appear here.</div>
         <div class="score-stage">

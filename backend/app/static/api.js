@@ -6,6 +6,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
 import { appState, elements } from "./state.js";
 import { setAuthStatus, sessionRunning } from "./ui.js";
+import { sanitizeInput, sanitizeJson, isValidEmail, validateFirebaseConfig } from "./sanitize.js";
 
 export async function readApiPayload(response) {
   const raw = await response.text();
@@ -23,11 +24,22 @@ export async function readApiPayload(response) {
 }
 
 export function parseFirebaseConfig() {
-  const raw = elements.firebaseConfig.value.trim();
+  const raw = sanitizeInput(elements.firebaseConfig.value, { maxLength: 10000 });
   if (!raw) {
     throw new Error("Firebase config is missing. Paste it in, or set VISTA_FIREBASE_WEB_CONFIG on the backend.");
   }
-  return JSON.parse(raw);
+
+  const config = sanitizeJson(raw);
+  if (!config) {
+    throw new Error("Firebase config must be valid JSON.");
+  }
+
+  const validation = validateFirebaseConfig(config);
+  if (!validation.isValid) {
+    throw new Error(`Invalid Firebase config: ${validation.errors.join(", ")}`);
+  }
+
+  return config;
 }
 
 export async function loadClientConfig() {
@@ -116,11 +128,14 @@ export async function ensureFirebase() {
 export async function signIn() {
   await loadClientConfig();
   const auth = await ensureFirebase();
-  const email = elements.email.value.trim();
+  const email = sanitizeInput(elements.email.value, { maxLength: 254 });
   const password = elements.password.value;
 
   let credential;
   if (email && password) {
+    if (!isValidEmail(email)) {
+      throw new Error("Please enter a valid email address.");
+    }
     credential = await signInWithEmailAndPassword(auth, email, password);
   } else {
     credential = await signInAnonymously(auth);

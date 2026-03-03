@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+.venv/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Coverage
+coverage/
+htmlcov/
+
+# Logs
+*.log
+
+# Database
+*.sqlite
+*.db

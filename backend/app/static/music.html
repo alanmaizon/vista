@@ -14,21 +14,24 @@
         <span class="navbar-title">Eurydice</span>
       </a>
       <div class="navbar-settings">
-        <button id="settings-toggle" class="settings-toggle" type="button" aria-label="Settings" aria-expanded="false" aria-controls="settings-dropdown">⚙️</button>
-        <div id="settings-dropdown" class="settings-dropdown is-hidden" role="menu">
+        <button id="settings-toggle" class="settings-toggle" type="button" aria-label="Open settings menu" aria-expanded="false" aria-controls="settings-dropdown" aria-haspopup="true">⚙️</button>
+        <div id="settings-dropdown" class="settings-dropdown is-hidden" role="menu" aria-label="Settings">
           <section class="settings-section">
             <div class="grid">
               <div class="stack">
                 <label for="firebase-config">Firebase Config JSON</label>
-                <textarea id="firebase-config" rows="6" spellcheck="false" placeholder='{"apiKey":"","authDomain":"","projectId":"","appId":""}'></textarea>
+                <textarea id="firebase-config" rows="6" spellcheck="false" placeholder='{"apiKey":"","authDomain":"","projectId":"","appId":""}' aria-describedby="firebase-config-hint"></textarea>
+                <span id="firebase-config-hint" class="sr-only">Paste your Firebase web app configuration as JSON</span>
 
                 <label for="email">Email (optional)</label>
-                <input id="email" type="email" autocomplete="username">
+                <input id="email" type="email" autocomplete="username" aria-describedby="email-hint">
+                <span id="email-hint" class="sr-only">Enter your email for password authentication, or leave blank for anonymous sign-in</span>
 
                 <label for="password">Password (optional)</label>
-                <input id="password" type="password" autocomplete="current-password">
+                <input id="password" type="password" autocomplete="current-password" aria-describedby="password-hint">
+                <span id="password-hint" class="sr-only">Enter your password, or leave blank for anonymous sign-in</span>
 
-                <button id="sign-in" class="secondary" type="button">Sign In</button>
+                <button id="sign-in" class="secondary" type="button" aria-describedby="auth-status">Sign In</button>
                 <p id="auth-status" class="hint" aria-live="polite">Signed out.</p>
               </div>
 
@@ -75,10 +78,10 @@
 
           <div class="control-dock">
             <div class="media-actions" role="group" aria-label="Media controls">
-              <button id="mic-toggle" class="secondary" type="button">Mic On</button>
-              <button id="camera-toggle" class="secondary" type="button">Camera Off</button>
-              <button id="screen-toggle" class="secondary" type="button">Share Screen Off</button>
-              <button id="snapshot" class="secondary" type="button">Capture Screenshot</button>
+              <button id="mic-toggle" class="secondary" type="button" aria-pressed="true" aria-label="Toggle microphone">Mic On</button>
+              <button id="camera-toggle" class="secondary" type="button" aria-pressed="false" aria-label="Toggle camera">Camera Off</button>
+              <button id="screen-toggle" class="secondary" type="button" aria-pressed="false" aria-label="Toggle screen sharing">Share Screen Off</button>
+              <button id="snapshot" class="secondary" type="button" aria-label="Capture a screenshot">Capture Screenshot</button>
             </div>
             <div class="action-row">
               <button id="start" class="primary action-button" type="button">Start session</button>

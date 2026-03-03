@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from .models import MusicScore
+from .music_symbolic import note_name_to_midi
 from .music_transcription import transcribe_pcm16, transcription_to_dict
 
 REPLAY_CONFIDENCE_THRESHOLD = 0.72
@@ -23,6 +24,8 @@ class ComparedEvent:
     played_start_ms: int | None
     played_duration_ms: int | None
     pitch_match: bool
+    pitch_class_match: bool
+    octave_displacement: int | None
     onset_match: bool
     duration_match: bool
     rhythm_match: bool
@@ -76,6 +79,14 @@ def _compare_expected_window(
         expected_beats = float(expected.get("beats", 0.0))
 
         pitch_match = bool(played and played.note_name == expected_note_name)
+        pitch_class_match = False
+        octave_displacement: int | None = None
+        if played and not pitch_match:
+            expected_midi = note_name_to_midi(expected_note_name)
+            played_midi = note_name_to_midi(played.note_name)
+            pitch_class_match = expected_midi % 12 == played_midi % 12
+            if pitch_class_match:
+                octave_displacement = (played_midi - expected_midi) // 12
         onset_match = False
         duration_match = False
         rhythm_match = False
@@ -110,6 +121,8 @@ def _compare_expected_window(
                 played_start_ms=played.start_ms if played else None,
                 played_duration_ms=played.duration_ms if played else None,
                 pitch_match=pitch_match,
+                pitch_class_match=pitch_class_match,
+                octave_displacement=octave_displacement,
                 onset_match=onset_match,
                 duration_match=duration_match,
                 rhythm_match=rhythm_match,
@@ -119,6 +132,16 @@ def _compare_expected_window(
         note_units = 0.0
         if pitch_match:
             note_units += 0.6
+        elif pitch_class_match:
+            note_units += 0.35
+            if played is not None:
+                octave_steps = abs(octave_displacement or 0)
+                octave_count = "one octave" if octave_steps == 1 else f"{octave_steps} octaves"
+                direction = "high" if (octave_displacement or 0) > 0 else "low"
+                mismatches.append(
+                    f"Note {index + 1}: expected {expected_note_name}, heard {played.note_name} "
+                    f"(same pitch class, {octave_count} {direction})."
+                )
         else:
             if played is None:
                 mismatches.append(

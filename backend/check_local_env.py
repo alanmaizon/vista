@@ -1,4 +1,4 @@
-"""Validate the local Vista AI backend environment.
+"""Validate the local Eurydice backend environment.
 
 Usage:
   set -a

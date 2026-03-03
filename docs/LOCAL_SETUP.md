@@ -1,6 +1,6 @@
 # Local Setup
 
-This is the shortest path to a working local Vista AI environment.
+This is the shortest path to a working local Eurydice environment.
 
 ## Python version
 

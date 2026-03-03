@@ -1,4 +1,4 @@
-"""Main FastAPI application entry point."""
+"""Eurydice – main FastAPI application entry point."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from .sessions import router as sessions_router
 from .settings import settings
 
 
-logger = logging.getLogger("vista-ai")
+logger = logging.getLogger("eurydice")
 PUBLIC_FIREBASE_WEB_CONFIG_KEYS = {
     "apiKey",
     "authDomain",
@@ -41,7 +41,7 @@ PUBLIC_FIREBASE_WEB_CONFIG_KEYS = {
     "databaseURL",
 }
 
-app = FastAPI(title="Vista AI Backend", version="0.2.0")
+app = FastAPI(title="Eurydice", version="0.3.0")
 app.include_router(sessions_router)
 app.include_router(music_router)
 
@@ -69,13 +69,7 @@ async def startup_event() -> None:
 
 @app.get("/")
 async def index() -> FileResponse:
-    """Serve the Janey Mac browser client."""
-    return FileResponse(STATIC_DIR / "index.html")
-
-
-@app.get("/music")
-async def music_index() -> FileResponse:
-    """Serve the Eurydice browser client shell."""
+    """Serve the Eurydice browser client."""
     return FileResponse(STATIC_DIR / "music.html")
 
 
@@ -202,12 +196,12 @@ async def _forward_bridge_events(
 
 @app.websocket("/ws/live")
 async def websocket_endpoint(ws: WebSocket) -> None:
-    """Handle live websocket connections for audio-first Vista sessions."""
+    """Handle live websocket connections for Eurydice sessions."""
     await ws.accept()
 
     token = ws.query_params.get("token", "").strip()
     session_id_raw = ws.query_params.get("session_id", "").strip()
-    skill = ws.query_params.get("mode", "NAV_FIND").strip().upper() or "NAV_FIND"
+    skill = ws.query_params.get("mode", "HEAR_PHRASE").strip().upper() or "HEAR_PHRASE"
     if not token or not session_id_raw:
         try:
             init_message = await ws.receive_json()
@@ -231,7 +225,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
         token = str(init_message.get("token", "")).strip()
         session_id_raw = str(init_message.get("session_id", "")).strip()
-        skill = str(init_message.get("mode", "NAV_FIND")).strip().upper() or "NAV_FIND"
+        skill = str(init_message.get("mode", "HEAR_PHRASE")).strip().upper() or "HEAR_PHRASE"
         if not token or not session_id_raw:
             await ws.send_json({"type": "error", "message": "Missing token or session_id in client.init"})
             await ws.close(code=1008)

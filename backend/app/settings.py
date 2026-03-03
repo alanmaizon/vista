@@ -11,7 +11,7 @@ DEPRECATED_LIVE_MODEL_ID = "gemini-live-2.5-flash-preview-native-audio-09-2025"
 
 
 class Settings(BaseSettings):
-    """Global configuration for the Vista AI backend."""
+    """Global configuration for the Eurydice backend."""
 
     model_id: str = "gemini-live-2.5-flash-native-audio"
     location: str = "us-central1"

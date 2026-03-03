@@ -1,4 +1,4 @@
-"""Shared SQLAlchemy models for the Vista AI platform.
+"""Shared SQLAlchemy models for Eurydice.
 
 The shared layer only keeps cross-domain tables such as interaction
 sessions. Domain-specific persistence (for example, Eurydice's music

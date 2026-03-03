@@ -1,18 +1,17 @@
-"""Shared domain runtime interfaces for the Janey Mac / Eurydice platform."""
+"""Shared domain runtime interfaces for Eurydice."""
 
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
 
-VISION_DOMAIN = "VISION"
 MUSIC_DOMAIN = "MUSIC"
-DEFAULT_DOMAIN = VISION_DOMAIN
-SUPPORTED_DOMAINS = {VISION_DOMAIN, MUSIC_DOMAIN}
+DEFAULT_DOMAIN = MUSIC_DOMAIN
+SUPPORTED_DOMAINS = {MUSIC_DOMAIN}
 
 
 def normalize_domain(value: str | None) -> str:
-    """Normalize a requested domain, defaulting to VISION."""
+    """Normalize a requested domain, defaulting to MUSIC."""
     normalized = (value or DEFAULT_DOMAIN).strip().upper()
     if normalized in SUPPORTED_DOMAINS:
         return normalized

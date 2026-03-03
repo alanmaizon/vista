@@ -1,4 +1,4 @@
-"""Minimal backend state machine for Vista AI live sessions."""
+"""Minimal backend state machine for Eurydice live sessions."""
 
 from __future__ import annotations
 

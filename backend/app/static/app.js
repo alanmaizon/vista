@@ -34,8 +34,8 @@ const elements = {
 };
 
 const appState = {
-  brand: document.body.dataset.brand || "Janey Mac",
-  domain: (document.body.dataset.domain || "VISION").toUpperCase(),
+  brand: document.body.dataset.brand || "Eurydice",
+  domain: (document.body.dataset.domain || "MUSIC").toUpperCase(),
   firebaseApp: null,
   auth: null,
   user: null,

@@ -19,8 +19,8 @@ def build_session(
     *,
     session_id: uuid.UUID | None = None,
     user_id: str = "user-123",
-    domain: str = "VISION",
-    mode: str = "NAV_FIND",
+    domain: str = "MUSIC",
+    mode: str = "HEAR_PHRASE",
 ) -> Session:
     session = Session(
         id=session_id or uuid.uuid4(),
@@ -28,7 +28,7 @@ def build_session(
         domain=domain,
         mode=mode,
         risk_mode="NORMAL",
-        goal="Find the exit sign",
+        goal="Identify the phrase",
         summary=None,
         success=None,
         model_id=None,
@@ -98,7 +98,7 @@ class FakeCreateDB(FakeExecuteDB):
             instance.started_at = datetime.now(timezone.utc)
         instance.ended_at = None
         if getattr(instance, "domain", None) is None:
-            instance.domain = "VISION"
+            instance.domain = "MUSIC"
         instance.summary = None
         instance.success = None
         instance.model_id = None
@@ -110,27 +110,27 @@ async def test_create_session_sets_owner_and_defaults() -> None:
     db = FakeCreateDB()
 
     result = await sessions_api.create_session(
-        payload=SessionCreate(mode="READ_TEXT", goal="Read the menu"),
+        payload=SessionCreate(mode="HEAR_PHRASE", goal="Identify the arpeggio"),
         current_user={"uid": "firebase-user"},
         db=db,
     )
 
     assert db.added is not None
     assert db.commit_calls == 1
-    assert db.added.domain == "VISION"
+    assert db.added.domain == "MUSIC"
     assert result.user_id == "firebase-user"
-    assert result.domain == "VISION"
-    assert result.mode == "READ_TEXT"
+    assert result.domain == "MUSIC"
+    assert result.mode == "HEAR_PHRASE"
     assert result.risk_mode == "NORMAL"
-    assert result.goal == "Read the menu"
+    assert result.goal == "Identify the arpeggio"
     assert result.ended_at is None
 
 
 @pytest.mark.asyncio
 async def test_list_sessions_serializes_owned_sessions() -> None:
     sessions = [
-        build_session(mode="NAV_FIND"),
-        build_session(mode="SHOP_VERIFY"),
+        build_session(mode="HEAR_PHRASE"),
+        build_session(mode="GUIDED_LESSON"),
     ]
     db = FakeExecuteDB(FakeResult(values=sessions))
 
@@ -139,7 +139,7 @@ async def test_list_sessions_serializes_owned_sessions() -> None:
         db=db,
     )
 
-    assert [item.mode for item in result] == ["NAV_FIND", "SHOP_VERIFY"]
+    assert [item.mode for item in result] == ["HEAR_PHRASE", "GUIDED_LESSON"]
     assert len(db.executed) == 1
 
 

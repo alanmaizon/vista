@@ -1,4 +1,4 @@
-"""Message protocol definitions for the Vista AI WebSocket.
+"""Message protocol definitions for the Eurydice WebSocket.
 
 This module defines helper functions and constants for encoding and
 decoding messages exchanged over the client WebSocket connection.  A

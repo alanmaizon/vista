@@ -135,6 +135,37 @@ def build_stored_score() -> music_api_module.MusicScore:
     )
 
 
+def build_multimeasure_score() -> music_api_module.MusicScore:
+    return music_api_module.MusicScore(
+        id=uuid.uuid4(),
+        user_id="music-user",
+        source_format="NOTE_LINE",
+        time_signature="4/4",
+        note_count=4,
+        normalized="C4/q D4/q | G4/q A4/q",
+        summary="Imported 4 notes across 2 measures.",
+        warnings=[],
+        measures=[
+            {
+                "index": 1,
+                "total_beats": 2.0,
+                "notes": [
+                    {"note_name": "C4", "midi_note": 60, "duration_code": "q", "beats": 1.0, "token": "C4/q"},
+                    {"note_name": "D4", "midi_note": 62, "duration_code": "q", "beats": 1.0, "token": "D4/q"},
+                ],
+            },
+            {
+                "index": 2,
+                "total_beats": 2.0,
+                "notes": [
+                    {"note_name": "G4", "midi_note": 67, "duration_code": "q", "beats": 1.0, "token": "G4/q"},
+                    {"note_name": "A4", "midi_note": 69, "duration_code": "q", "beats": 1.0, "token": "A4/q"},
+                ],
+            },
+        ],
+    )
+
+
 def test_score_to_musicxml_emits_score_partwise() -> None:
     score = build_stored_score()
 
@@ -508,3 +539,27 @@ def test_compare_performance_endpoint_returns_alignment_feedback(
     assert body["match"] is False
     assert body["played_phrase"]["notes"]
     assert body["mismatches"]
+
+
+def test_compare_performance_endpoint_can_scope_to_one_measure(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    stored = build_multimeasure_score()
+    fake_music_db.scores[stored.id] = stored
+
+    response = client.post(
+        f"/api/music/score/{stored.id}/compare",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "audio_b64": base64.b64encode(synth_phrase([392.0, 440.0])).decode("ascii"),
+            "mime": "audio/pcm;rate=16000",
+            "max_notes": 12,
+            "measure_index": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [note["note_name"] for note in body["expected_notes"]] == ["G4", "A4"]
+    assert body["match"] is True

@@ -240,13 +240,20 @@ function primaryActionState() {
   return appState.assistantResponseReady ? "confirm" : "stop";
 }
 
+function usesDeterministicLivePhraseCapture() {
+  return appState.domain === "MUSIC" && elements.mode.value === "HEAR_PHRASE";
+}
+
 function updatePrimaryActionButton() {
   const state = primaryActionState();
   elements.start.classList.remove("primary", "accent", "danger");
 
   if (state === "confirm") {
     elements.start.classList.add("accent");
-    renderButton(elements.start, { icon: "confirm", label: "Confirm step" });
+    renderButton(elements.start, {
+      icon: "confirm",
+      label: usesDeterministicLivePhraseCapture() ? "Capture phrase" : "Confirm step",
+    });
     return;
   }
   if (state === "stop") {
@@ -736,6 +743,9 @@ function updateCaptureGuidance() {
   const rule = getCaptureRule();
   if (rule) {
     elements.captureHint.textContent = rule.hint;
+  } else if (usesDeterministicLivePhraseCapture()) {
+    elements.captureHint.textContent =
+      "In HEAR_PHRASE live mode, use Capture phrase to record one short, clean replay for analysis.";
   } else {
     elements.captureHint.textContent =
       "Audio-first checks work without camera. Dense visual tasks need a clean close-up.";
@@ -1282,7 +1292,7 @@ function waitForSocketOpen(ws) {
 }
 
 async function enableMicCapture() {
-  if (!appState.micEnabled || !sessionRunning() || appState.micStream) {
+  if (!appState.micEnabled || !sessionRunning() || appState.micStream || usesDeterministicLivePhraseCapture()) {
     return;
   }
 
@@ -1640,13 +1650,20 @@ async function startSession() {
   );
 
   if (appState.micEnabled) {
-    await enableMicCapture();
+    if (!usesDeterministicLivePhraseCapture()) {
+      await enableMicCapture();
+    }
   }
   await syncVisualCapture();
 
   const captureRule = getCaptureRule();
   if (captureRule) {
     appendCaption("Setup", captureRule.hint);
+  } else if (usesDeterministicLivePhraseCapture()) {
+    appendCaption(
+      "Setup",
+      "Capture phrase records a short focused replay. Play immediately after pressing it."
+    );
   } else if (!hasVisualSourceEnabled()) {
     appendCaption("Setup", "Audio-only mode is active. Use a short spoken question.");
   }
@@ -1676,7 +1693,23 @@ elements.start.addEventListener("click", async () => {
       }
       appState.assistantResponseReady = false;
       updatePrimaryActionButton();
-      appState.ws.send(JSON.stringify({ type: "client.confirm" }));
+      if (usesDeterministicLivePhraseCapture()) {
+        setSessionStatus("Recording phrase...");
+        const clip = await captureOneShotPcmClip({ durationMs: 2400 });
+        if (!clip.length) {
+          throw new Error("No phrase was captured.");
+        }
+        setSessionStatus("Analysing phrase...");
+        appState.ws.send(
+          JSON.stringify({
+            type: "client.confirm",
+            mime: "audio/pcm;rate=16000",
+            data_b64: toBase64(clip),
+          })
+        );
+      } else {
+        appState.ws.send(JSON.stringify({ type: "client.confirm" }));
+      }
       return;
     }
 
@@ -1700,7 +1733,9 @@ elements.micToggle.addEventListener("click", async () => {
   try {
     if (sessionRunning()) {
       if (appState.micEnabled) {
-        await enableMicCapture();
+        if (!usesDeterministicLivePhraseCapture()) {
+          await enableMicCapture();
+        }
       } else {
         await disableMicCapture();
       }

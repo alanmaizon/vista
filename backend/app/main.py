@@ -321,6 +321,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     runtime.on_client_video()
                     await bridge.send_image_jpeg(_decode_b64_payload(message))
                 elif message_type == CLIENT_CONFIRM:
+                    if "data_b64" in message:
+                        audio_bytes = _decode_b64_payload(message)
+                        for extra_event in runtime.on_client_audio(audio_bytes, str(message.get("mime", ""))):
+                            await ws.send_json(extra_event)
                     confirm_prompt = runtime.on_client_confirm()
                     for extra_event in runtime.on_client_confirm_events():
                         await ws.send_json(extra_event)

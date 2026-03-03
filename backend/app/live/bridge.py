@@ -1,4 +1,4 @@
-"""Gemini Live bridge for Vista AI.
+"""Gemini Live bridge for Eurydice.
 
 This module prefers Google's ADK live streaming stack when available,
 while preserving the existing direct Vertex Live websocket path as a
@@ -24,7 +24,7 @@ from google.auth.transport.requests import Request
 from websockets.exceptions import ConnectionClosed
 
 
-logger = logging.getLogger("vista-ai")
+logger = logging.getLogger("eurydice")
 
 LIVE_API_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 LIVE_API_PATH = "/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
@@ -652,7 +652,7 @@ class _AdkGeminiLiveBridge:
         self._types = types_module
 
         session_service = in_memory_session_service_cls()
-        app_name = "vista-ai-live"
+        app_name = "eurydice-live"
         existing_session = None
         if hasattr(session_service, "get_session"):
             existing_session = await _maybe_await(
@@ -672,10 +672,10 @@ class _AdkGeminiLiveBridge:
             )
 
         agent = agent_cls(
-            name="vista_live_agent",
+            name="eurydice_live_agent",
             model=self.model_id,
             instruction=self.system_prompt,
-            description=f"Vista AI live session for {self.skill}",
+            description=f"Eurydice live session for {self.skill}",
         )
         self._runner = runner_cls(
             app_name=app_name,

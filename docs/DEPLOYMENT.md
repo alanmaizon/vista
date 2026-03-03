@@ -1,4 +1,4 @@
-# Vista AI MVP Deployment Notes
+# Eurydice Deployment Notes
 
 ## Required environment variables
 

@@ -10,7 +10,7 @@ from .domains.base import DEFAULT_DOMAIN, normalize_domain
 class SessionCreate(BaseModel):
     """Schema for creating a new session."""
 
-    domain: str = Field(DEFAULT_DOMAIN, description="Domain selected (VISION or MUSIC)")
+    domain: str = Field(DEFAULT_DOMAIN, description="Domain selected (MUSIC)")
     mode: str = Field(..., description="Skill selected (e.g. NAV_FIND, SHOP_VERIFY)")
     goal: Optional[str] = Field(None, description="Short user-provided goal description")
 

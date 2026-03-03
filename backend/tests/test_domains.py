@@ -21,11 +21,11 @@ def test_build_session_runtime_preserves_guided_lesson_skill() -> None:
     assert runtime.skill == "GUIDED_LESSON"
 
 
-def test_build_session_runtime_defaults_to_vision() -> None:
-    runtime = build_session_runtime(domain="unknown-domain", skill="READ_TEXT", goal="Read the page")
+def test_build_session_runtime_defaults_to_music() -> None:
+    runtime = build_session_runtime(domain="unknown-domain", skill="HEAR_PHRASE", goal="Identify the phrase")
 
-    assert runtime.domain == "VISION"
-    assert runtime.skill == "READ_TEXT"
+    assert runtime.domain == "MUSIC"
+    assert runtime.skill == "HEAR_PHRASE"
 
 
 def test_music_runtime_uses_local_phrase_analysis_on_confirm(

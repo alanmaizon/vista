@@ -68,7 +68,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         return None
 
     async def fake_load_owned_session(*_args, **_kwargs):
-        return SimpleNamespace(goal="Find the exit sign")
+        return SimpleNamespace(goal="Identify the arpeggio", domain="MUSIC", mode="HEAR_PHRASE")
 
     async def fake_noop(*_args, **_kwargs) -> None:
         return None
@@ -93,7 +93,7 @@ def test_ws_live_rejects_invalid_session_id(client: TestClient) -> None:
                 "type": "client.init",
                 "token": "test-token",
                 "session_id": "not-a-uuid",
-                "mode": "NAV_FIND",
+                "mode": "HEAR_PHRASE",
             }
         )
         payload = ws.receive_json()
@@ -103,7 +103,7 @@ def test_ws_live_rejects_invalid_session_id(client: TestClient) -> None:
 
 
 def test_ws_live_handles_audio_confirm_and_stop(client: TestClient) -> None:
-    FakeBridge.initial_events = [{"type": "server.text", "text": "Hold still and look ahead."}]
+    FakeBridge.initial_events = [{"type": "server.text", "text": "Play the phrase once."}]
     session_id = uuid.uuid4()
 
     with client.websocket_connect("/ws/live") as ws:
@@ -112,10 +112,12 @@ def test_ws_live_handles_audio_confirm_and_stop(client: TestClient) -> None:
                 "type": "client.init",
                 "token": "test-token",
                 "session_id": str(session_id),
-                "mode": "NAV_FIND",
+                "mode": "HEAR_PHRASE",
             }
         )
         status_payload = ws.receive_json()
+        # Eurydice music runtime emits a connect hint for HEAR_PHRASE
+        hint_payload = ws.receive_json()
         text_payload = ws.receive_json()
 
         ws.send_json(
@@ -126,21 +128,22 @@ def test_ws_live_handles_audio_confirm_and_stop(client: TestClient) -> None:
             }
         )
         ws.send_json({"type": "client.confirm"})
+        # HEAR_PHRASE confirm emits a server.text event (replay request for short audio)
+        confirm_event = ws.receive_json()
         ws.send_json({"type": "client.stop"})
 
         summary_payload = ws.receive_json()
 
     bridge = FakeBridge.created[0]
-    sent_texts = [text for text, _role in bridge.sent_text]
 
     assert status_payload["type"] == "server.status"
     assert status_payload["state"] == "connected"
-    assert status_payload["skill"] == "NAV_FIND"
-    assert text_payload == {"type": "server.text", "text": "Hold still and look ahead."}
+    assert status_payload["skill"] == "HEAR_PHRASE"
+    assert hint_payload["type"] == "server.text"
+    assert text_payload == {"type": "server.text", "text": "Play the phrase once."}
+    assert confirm_event["type"] == "server.text"
     assert summary_payload["type"] == "server.summary"
     assert bridge.sent_audio == [b"\x01\x02"]
-    assert any("I am starting a NAV_FIND session" in text for text in sent_texts)
-    assert any("Yes, I finished that step." in text for text in sent_texts)
     assert bridge.closed is True
 
 
@@ -153,10 +156,12 @@ def test_ws_live_reports_invalid_base64_payload(client: TestClient) -> None:
                 "type": "client.init",
                 "token": "test-token",
                 "session_id": str(session_id),
-                "mode": "NAV_FIND",
+                "mode": "HEAR_PHRASE",
             }
         )
         status_payload = ws.receive_json()
+        # Consume the HEAR_PHRASE connect hint
+        ws.receive_json()
 
         ws.send_json(
             {

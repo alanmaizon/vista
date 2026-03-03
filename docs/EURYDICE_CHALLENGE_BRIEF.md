@@ -10,7 +10,7 @@ Most music-learning tools solve only one slice of the journey: they either scan 
 
 ## Challenge Positioning
 
-Eurydice is the primary challenge project for this repo. Janey Mac was the first domain concept, but the repo itself is being built during the Gemini Live Agent Challenge period and the submission should present Eurydice as a distinct new product.
+Eurydice is the challenge project for this repo, built during the Gemini Live Agent Challenge period.
 
 This project fits the **Live Agents** category directly:
 
@@ -204,7 +204,7 @@ Rationale:
 
 - musical and mythic, but still elegant
 - evokes guidance through uncertainty
-- distinct from the accessibility-first Janey Mac domain
+- distinct and recognizable as a music tutor identity
 - flexible enough for a premium music tutor identity
 
 ### Experience Principles

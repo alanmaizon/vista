@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+from .symbolic import note_name_to_midi
+from .transcription import transcribe_pcm16, transcription_to_dict
 from .models import MusicScore
-from .music_symbolic import note_name_to_midi
-from .music_transcription import transcribe_pcm16, transcription_to_dict
 
 REPLAY_CONFIDENCE_THRESHOLD = 0.72
 

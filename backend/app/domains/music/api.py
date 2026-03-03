@@ -10,19 +10,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth as auth_utils
-from .db import get_db
-from .music_compare import compare_performance_against_score, comparison_to_dict
-from .music_crepe import crepe_runtime_status
-from .models import MusicScore
-from .music_render import render_music_score, verovio_runtime_status
-from .music_symbolic import import_simple_score, score_to_dict
-from .music_transcription import (
+from ... import auth as auth_utils
+from ...db import get_db
+from .crepe import crepe_runtime_status
+from .symbolic import import_simple_score, score_to_dict
+from .transcription import (
     decode_audio_b64,
     parse_pcm_mime,
     transcribe_pcm16,
     transcription_to_dict,
 )
+from .compare import compare_performance_against_score, comparison_to_dict
+from .models import MusicScore
+from .render import render_music_score, verovio_runtime_status
 
 
 router = APIRouter(prefix="/api/music", tags=["music"])
@@ -179,6 +179,44 @@ class MusicLessonStepResponse(BaseModel):
     note_end_index: int | None
 
 
+class MusicLessonActionRequest(BaseModel):
+    """Request body for the main guided-lesson action."""
+
+    score_id: UUID | None = Field(
+        None,
+        description="Existing prepared score. Omit to prepare a new score from source_text.",
+    )
+    source_text: str | None = Field(
+        None,
+        description="Simple note-line source used when no score_id is provided.",
+    )
+    time_signature: str = Field("4/4", description="Expected time signature for score preparation.")
+    current_measure_index: int | None = Field(
+        None,
+        ge=1,
+        description="Current 1-based measure index in the lesson, if a score is already active.",
+    )
+    lesson_stage: Literal["idle", "awaiting-compare", "reviewed", "complete"] = Field(
+        "idle",
+        description="Current guided-lesson stage.",
+    )
+    audio_b64: str | None = Field(
+        None,
+        description="Optional base64-encoded mono PCM16 audio clip for the compare step.",
+    )
+    mime: str = Field("audio/pcm;rate=16000", description="PCM mime type for audio_b64.")
+    max_notes: int = Field(12, ge=1, le=12, description="Maximum note events to evaluate when comparing.")
+
+
+class MusicLessonActionResponse(BaseModel):
+    """Unified guided-lesson response for prepare, advance, and compare."""
+
+    outcome: Literal["awaiting-compare", "reviewed", "complete"]
+    score: MusicScorePrepareResponse | None = None
+    lesson: MusicLessonStepResponse | None = None
+    comparison: MusicPerformanceCompareResponse | None = None
+
+
 class MusicRuntimeStatusResponse(BaseModel):
     """Runtime diagnostics for Eurydice integrations."""
 
@@ -219,6 +257,92 @@ def _guided_lesson_prompt(score: MusicScore, measure_index: int) -> str:
         readable_notes = ", ".join(note_names)
         return f"Bar {measure_index}: play {readable_notes}. Then compare your take."
     return f"Play bar {measure_index} clearly, then compare your take."
+
+
+def _prepare_music_score_payload(score, stored_score: MusicScore, time_signature: str) -> MusicScorePrepareResponse:
+    rendered = render_music_score(stored_score)
+    return MusicScorePrepareResponse(
+        score_id=stored_score.id,
+        format=score.format,
+        time_signature=time_signature,
+        note_count=score.note_count,
+        normalized=score.normalized,
+        summary=score.summary,
+        warnings=list(score.warnings),
+        measures=score_to_dict(score)["measures"],
+        render_backend=rendered.render_backend,
+        verovio_available=rendered.verovio_available,
+        musicxml=rendered.musicxml,
+        svg=rendered.svg,
+        expected_notes=_flatten_expected_notes(stored_score),
+        note_layout=list(rendered.note_layout),
+    )
+
+
+def _build_lesson_step_from_score(score: MusicScore, payload: MusicLessonStepRequest) -> MusicLessonStepResponse:
+    measures = list(score.measures or [])
+    total_measures = len(measures)
+    if total_measures == 0:
+        raise HTTPException(status_code=400, detail="The prepared score does not contain readable bars yet.")
+
+    current_measure = payload.current_measure_index
+    if current_measure is not None and current_measure > total_measures:
+        raise HTTPException(status_code=400, detail="current_measure_index is outside the stored score.")
+
+    if payload.lesson_stage == "reviewed" and current_measure is not None and current_measure >= total_measures:
+        return MusicLessonStepResponse(
+            score_id=score.id,
+            lesson_stage="complete",
+            lesson_complete=True,
+            measure_index=None,
+            total_measures=total_measures,
+            prompt="Lesson complete. Use the main button to restart from bar 1 if you want another pass.",
+            status="Lesson complete.",
+            note_start_index=None,
+            note_end_index=None,
+        )
+
+    if payload.lesson_stage == "complete":
+        next_measure = 1
+    elif current_measure is None:
+        next_measure = 1
+    elif payload.lesson_stage == "reviewed":
+        next_measure = current_measure + 1
+    else:
+        next_measure = current_measure
+
+    start_index, end_index = _measure_note_range(score, next_measure)
+    return MusicLessonStepResponse(
+        score_id=score.id,
+        lesson_stage="awaiting-compare",
+        lesson_complete=False,
+        measure_index=next_measure,
+        total_measures=total_measures,
+        prompt=_guided_lesson_prompt(score, next_measure),
+        status=f"Lesson ready for bar {next_measure}.",
+        note_start_index=start_index,
+        note_end_index=end_index,
+    )
+
+
+def _build_compare_score(score: MusicScore, measure_index: int | None) -> MusicScore:
+    if measure_index is None:
+        return score
+    measures = list(score.measures or [])
+    if measure_index > len(measures):
+        raise HTTPException(status_code=400, detail="measure_index is outside the stored score.")
+    selected_measure = measures[measure_index - 1]
+    return MusicScore(
+        id=score.id,
+        user_id=score.user_id,
+        source_format=score.source_format,
+        time_signature=score.time_signature,
+        note_count=len(selected_measure.get("notes", [])),
+        normalized=score.normalized,
+        summary=score.summary,
+        warnings=list(score.warnings or []),
+        measures=[selected_measure],
+    )
 
 
 @router.post("/transcribe", response_model=MusicTranscriptionResponse)
@@ -314,25 +438,10 @@ async def prepare_music_score(
         db.add(stored_score)
         await db.commit()
         await db.refresh(stored_score)
-
-    rendered = render_music_score(stored_score)
-    expected_notes = _flatten_expected_notes(stored_score)
-    return MusicScorePrepareResponse(
-        score_id=stored_score.id if payload.persist else None,
-        format=score.format,
-        time_signature=payload.time_signature,
-        note_count=score.note_count,
-        normalized=score.normalized,
-        summary=score.summary,
-        warnings=list(score.warnings),
-        measures=list(measures),
-        render_backend=rendered.render_backend,
-        verovio_available=rendered.verovio_available,
-        musicxml=rendered.musicxml,
-        svg=rendered.svg,
-        expected_notes=expected_notes,
-        note_layout=list(rendered.note_layout),
-    )
+    prepared = _prepare_music_score_payload(score, stored_score, payload.time_signature)
+    if not payload.persist:
+        prepared.score_id = None
+    return prepared
 
 
 @router.get("/score/{score_id}", response_model=MusicScoreImportResponse)
@@ -386,49 +495,7 @@ async def next_guided_lesson_step(
 ) -> MusicLessonStepResponse:
     """Return the next guided-lesson step for a stored score."""
     score = await _get_owned_score(db, score_id, current_user["uid"])
-    measures = list(score.measures or [])
-    total_measures = len(measures)
-    if total_measures == 0:
-        raise HTTPException(status_code=400, detail="The prepared score does not contain readable bars yet.")
-
-    current_measure = payload.current_measure_index
-    if current_measure is not None and current_measure > total_measures:
-        raise HTTPException(status_code=400, detail="current_measure_index is outside the stored score.")
-
-    if payload.lesson_stage == "reviewed" and current_measure is not None and current_measure >= total_measures:
-        return MusicLessonStepResponse(
-            score_id=score.id,
-            lesson_stage="complete",
-            lesson_complete=True,
-            measure_index=None,
-            total_measures=total_measures,
-            prompt="Lesson complete. Use the main button to restart from bar 1 if you want another pass.",
-            status="Lesson complete.",
-            note_start_index=None,
-            note_end_index=None,
-        )
-
-    if payload.lesson_stage == "complete":
-        next_measure = 1
-    elif current_measure is None:
-        next_measure = 1
-    elif payload.lesson_stage == "reviewed":
-        next_measure = current_measure + 1
-    else:
-        next_measure = current_measure
-
-    start_index, end_index = _measure_note_range(score, next_measure)
-    return MusicLessonStepResponse(
-        score_id=score.id,
-        lesson_stage="awaiting-compare",
-        lesson_complete=False,
-        measure_index=next_measure,
-        total_measures=total_measures,
-        prompt=_guided_lesson_prompt(score, next_measure),
-        status=f"Lesson ready for bar {next_measure}.",
-        note_start_index=start_index,
-        note_end_index=end_index,
-    )
+    return _build_lesson_step_from_score(score, payload)
 
 
 @router.post("/score/{score_id}/compare", response_model=MusicPerformanceCompareResponse)
@@ -440,23 +507,7 @@ async def compare_performance_with_score(
 ) -> MusicPerformanceCompareResponse:
     """Compare a short played phrase against a stored symbolic score."""
     score = await _get_owned_score(db, score_id, current_user["uid"])
-    compare_score = score
-    if payload.measure_index is not None:
-        measures = list(score.measures or [])
-        if payload.measure_index > len(measures):
-            raise HTTPException(status_code=400, detail="measure_index is outside the stored score.")
-        selected_measure = measures[payload.measure_index - 1]
-        compare_score = MusicScore(
-            id=score.id,
-            user_id=score.user_id,
-            source_format=score.source_format,
-            time_signature=score.time_signature,
-            note_count=len(selected_measure.get("notes", [])),
-            normalized=score.normalized,
-            summary=score.summary,
-            warnings=list(score.warnings or []),
-            measures=[selected_measure],
-        )
+    compare_score = _build_compare_score(score, payload.measure_index)
     sample_rate = parse_pcm_mime(payload.mime)
     audio_bytes = decode_audio_b64(payload.audio_b64)
     result = compare_performance_against_score(
@@ -468,4 +519,73 @@ async def compare_performance_with_score(
     return MusicPerformanceCompareResponse(
         score_id=score.id,
         **comparison_to_dict(result),
+    )
+
+
+@router.post("/lesson-action", response_model=MusicLessonActionResponse)
+async def run_guided_lesson_action(
+    payload: MusicLessonActionRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicLessonActionResponse:
+    """Perform the main guided-lesson action: prepare, advance, or compare."""
+    score: MusicScore
+    prepared_payload: MusicScorePrepareResponse | None = None
+
+    if payload.score_id is None:
+        source_text = (payload.source_text or "").strip()
+        if not source_text:
+            raise HTTPException(status_code=400, detail="source_text is required when score_id is not provided.")
+        imported = import_simple_score(source_text, time_signature=payload.time_signature)
+        stored_score = MusicScore(
+            user_id=current_user["uid"],
+            source_format=imported.format,
+            time_signature=payload.time_signature,
+            note_count=imported.note_count,
+            normalized=imported.normalized,
+            summary=imported.summary,
+            warnings=list(imported.warnings),
+            measures=score_to_dict(imported)["measures"],
+        )
+        db.add(stored_score)
+        await db.commit()
+        await db.refresh(stored_score)
+        score = stored_score
+        prepared_payload = _prepare_music_score_payload(imported, stored_score, payload.time_signature)
+    else:
+        score = await _get_owned_score(db, payload.score_id, current_user["uid"])
+
+    if payload.lesson_stage == "awaiting-compare":
+        if not payload.audio_b64:
+            raise HTTPException(status_code=400, detail="audio_b64 is required while the lesson is awaiting comparison.")
+        compare_score = _build_compare_score(score, payload.current_measure_index or 1)
+        sample_rate = parse_pcm_mime(payload.mime)
+        audio_bytes = decode_audio_b64(payload.audio_b64)
+        result = compare_performance_against_score(
+            compare_score,
+            audio_bytes=audio_bytes,
+            sample_rate=sample_rate,
+            max_notes=payload.max_notes,
+        )
+        comparison = MusicPerformanceCompareResponse(
+            score_id=score.id,
+            **comparison_to_dict(result),
+        )
+        return MusicLessonActionResponse(
+            outcome="awaiting-compare" if result.needs_replay or not result.match else "reviewed",
+            score=prepared_payload,
+            comparison=comparison,
+        )
+
+    lesson = _build_lesson_step_from_score(
+        score,
+        MusicLessonStepRequest(
+            current_measure_index=payload.current_measure_index,
+            lesson_stage=payload.lesson_stage,
+        ),
+    )
+    return MusicLessonActionResponse(
+        outcome="complete" if lesson.lesson_complete else "awaiting-compare",
+        score=prepared_payload,
+        lesson=lesson,
     )

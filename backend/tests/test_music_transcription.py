@@ -19,14 +19,15 @@ from fastapi.testclient import TestClient
 from app import auth as auth_module
 from app import db as db_module
 from app import main as main_module
-from app import music_api as music_api_module
-from app import music_compare as music_compare_module
-from app import music_transcription as music_transcription_module
-from app.music_compare import compare_performance_against_score
-from app.music_pitch import PitchEstimate, estimate_pitch_fastyin
-from app.music_render import build_note_layout, render_music_score, score_to_musicxml
-from app.music_symbolic import NoteEvent, SymbolicPhrase, import_simple_score
-from app.music_transcription import transcribe_pcm16
+from app.domains.music import api as music_api_module
+from app.domains.music import compare as music_compare_module
+from app.domains.music import transcription as music_transcription_module
+from app.domains.music.compare import compare_performance_against_score
+from app.domains.music.models import MusicScore
+from app.domains.music.pitch import PitchEstimate, estimate_pitch_fastyin
+from app.domains.music.render import build_note_layout, render_music_score, score_to_musicxml
+from app.domains.music.symbolic import NoteEvent, SymbolicPhrase, import_simple_score
+from app.domains.music.transcription import transcribe_pcm16
 
 
 def synth_tone(frequency_hz: float, *, duration_ms: int = 900, sample_rate: int = 16000) -> bytes:
@@ -111,8 +112,8 @@ def test_import_simple_score_normalizes_note_line() -> None:
     assert not result.warnings
 
 
-def build_stored_score() -> music_api_module.MusicScore:
-    return music_api_module.MusicScore(
+def build_stored_score() -> MusicScore:
+    return MusicScore(
         id=uuid.uuid4(),
         user_id="music-user",
         source_format="NOTE_LINE",
@@ -135,8 +136,8 @@ def build_stored_score() -> music_api_module.MusicScore:
     )
 
 
-def build_multimeasure_score() -> music_api_module.MusicScore:
-    return music_api_module.MusicScore(
+def build_multimeasure_score() -> MusicScore:
+    return MusicScore(
         id=uuid.uuid4(),
         user_id="music-user",
         source_format="NOTE_LINE",
@@ -661,3 +662,58 @@ def test_guided_lesson_step_marks_completion_on_last_review(
     assert body["note_start_index"] is None
     assert body["note_end_index"] is None
     assert body["status"] == "Lesson complete."
+
+
+def test_guided_lesson_action_prepares_score_and_returns_first_step(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    response = client.post(
+        "/api/music/lesson-action",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "source_text": "C4/q D4/q | G4/q A4/q",
+            "time_signature": "4/4",
+            "lesson_stage": "idle",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["outcome"] == "awaiting-compare"
+    assert body["score"]["score_id"] is not None
+    assert body["score"]["normalized"] == "C4/q D4/q | G4/q A4/q"
+    assert body["lesson"]["measure_index"] == 1
+    assert body["lesson"]["lesson_complete"] is False
+
+    score_id = uuid.UUID(body["score"]["score_id"])
+    assert score_id in fake_music_db.scores
+
+
+def test_guided_lesson_action_compares_current_bar(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    stored = build_multimeasure_score()
+    fake_music_db.scores[stored.id] = stored
+
+    response = client.post(
+        "/api/music/lesson-action",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "score_id": str(stored.id),
+            "current_measure_index": 1,
+            "lesson_stage": "awaiting-compare",
+            "audio_b64": base64.b64encode(synth_phrase([261.63, 293.66])).decode("ascii"),
+            "mime": "audio/pcm;rate=16000",
+            "max_notes": 12,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["outcome"] == "reviewed"
+    assert body["score"] is None
+    assert body["lesson"] is None
+    assert body["comparison"]["score_id"] == str(stored.id)
+    assert body["comparison"]["match"] is True

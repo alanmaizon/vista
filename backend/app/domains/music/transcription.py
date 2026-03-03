@@ -9,9 +9,9 @@ import re
 import struct
 from dataclasses import asdict
 
-from .music_crepe import estimate_pitch_crepe
-from .music_pitch import estimate_pitch_fastyin
-from .music_symbolic import (
+from .crepe import estimate_pitch_crepe
+from .pitch import estimate_pitch_fastyin
+from .symbolic import (
     NOTE_NAMES,
     NoteEvent,
     SymbolicPhrase,

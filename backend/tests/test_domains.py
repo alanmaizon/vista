@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.domains.music.runtime import MusicRuntime
 from app.domains import build_session_runtime
 from app.domains.music.constitution import DEFAULT_MUSIC_SYSTEM_INSTRUCTIONS
-from app.music_symbolic import NoteEvent, SymbolicPhrase
+from app.domains.music.symbolic import NoteEvent, SymbolicPhrase
 
 
 def test_build_session_runtime_returns_music_runtime() -> None:

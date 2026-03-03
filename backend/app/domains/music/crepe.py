@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from .music_pitch import PitchEstimate
+from .pitch import PitchEstimate
 
 
 def crepe_runtime_status() -> tuple[bool, str]:

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from .domains.music import models as _music_models  # noqa: F401
 from .models import Base
 
 

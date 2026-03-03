@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Deque
 
 from ..base import MUSIC_DOMAIN, SessionRuntime
-from ...music_transcription import MusicTranscriptionError, transcribe_pcm16
+from .transcription import MusicTranscriptionError, transcribe_pcm16
 
 
 @dataclass(frozen=True)

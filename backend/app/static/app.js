@@ -17,11 +17,7 @@ const elements = {
   cameraToggle: document.getElementById("camera-toggle"),
   screenToggle: document.getElementById("screen-toggle"),
   snapshot: document.getElementById("snapshot"),
-  transcribeOnce: document.getElementById("transcribe-once"),
   scoreLine: document.getElementById("score-line"),
-  importScore: document.getElementById("import-score"),
-  renderScore: document.getElementById("render-score"),
-  comparePerformance: document.getElementById("compare-performance"),
   start: document.getElementById("start"),
   captureHint: document.getElementById("capture-hint"),
   cameraWarning: document.getElementById("camera-warning"),
@@ -250,12 +246,9 @@ function primaryActionState() {
           if (!hasScoreDraft() && hasVisualSourceEnabled()) {
             return "camera-score";
           }
-          return "prepare-score";
+          return "guided-lesson";
         }
-        if (appState.lessonStage === "awaiting-compare") {
-          return "lesson-compare";
-        }
-        return "lesson-next";
+        return "guided-lesson";
       }
       if (
         elements.mode.value === "READ_SCORE" &&
@@ -383,14 +376,18 @@ function updatePrimaryActionButton() {
     elements.start.disabled = !hasVisualSourceEnabled();
     return;
   }
-  if (state === "prepare-score") {
+  if (state === "guided-lesson") {
     elements.start.classList.add("primary");
-    renderButton(elements.start, { icon: "confirm", label: "Prepare score" });
-    elements.start.disabled = !hasScoreDraft();
-    return;
-  }
-  if (state === "lesson-next") {
-    elements.start.classList.add("primary");
+    if (!hasFreshPreparedScore() || appState.musicScoreDirty) {
+      renderButton(elements.start, { icon: "confirm", label: "Prepare lesson" });
+      elements.start.disabled = !hasScoreDraft();
+      return;
+    }
+    if (appState.lessonStage === "awaiting-compare") {
+      renderButton(elements.start, { icon: "analyze", label: "Compare bar" });
+      elements.start.disabled = !appState.micEnabled;
+      return;
+    }
     const finalBar = activeMeasureCount() > 0 && appState.lessonMeasureIndex === activeMeasureCount();
     renderButton(elements.start, {
       icon: "start",
@@ -403,10 +400,10 @@ function updatePrimaryActionButton() {
     });
     return;
   }
-  if (state === "lesson-compare") {
+  if (state === "prepare-score") {
     elements.start.classList.add("primary");
-    renderButton(elements.start, { icon: "analyze", label: "Compare bar" });
-    elements.start.disabled = !appState.micEnabled;
+    renderButton(elements.start, { icon: "confirm", label: "Prepare score" });
+    elements.start.disabled = !hasScoreDraft();
     return;
   }
   if (state === "compare") {
@@ -484,23 +481,6 @@ function refreshMediaButtons() {
   setToggleButton(elements.screenToggle, appState.screenEnabled, "Screen share on", "Screen share off", "screen");
   renderButton(elements.snapshot, { icon: "snapshot", label: "Capture screenshot", iconOnly: true });
   elements.snapshot.disabled = !sessionRunning() || !hasVisualSourceEnabled();
-  if (elements.transcribeOnce) {
-    renderButton(elements.transcribeOnce, { icon: "analyze", label: "Transcribe clip" });
-    elements.transcribeOnce.disabled = sessionRunning();
-  }
-  if (elements.importScore) {
-    renderButton(elements.importScore, { icon: "confirm", label: "Import score" });
-    elements.importScore.disabled = sessionRunning();
-  }
-  if (elements.renderScore) {
-    renderButton(elements.renderScore, { icon: "start", label: "Render notation" });
-    elements.renderScore.disabled = sessionRunning() || !appState.activeMusicScoreId;
-  }
-  if (elements.comparePerformance) {
-    renderButton(elements.comparePerformance, { icon: "analyze", label: "Compare take" });
-    elements.comparePerformance.disabled =
-      sessionRunning() || !appState.activeMusicScoreId || !appState.micEnabled;
-  }
 }
 
 function markAssistantResponseReady() {
@@ -1372,62 +1352,6 @@ async function transcribeOneShotClip() {
   setSessionStatus("Transcription ready.");
 }
 
-async function importScoreLine() {
-  if (sessionRunning()) {
-    throw new Error("Stop the live session before importing a score.");
-  }
-  if (!appState.user) {
-    throw new Error("Sign in before importing a score.");
-  }
-
-  const sourceText = elements.scoreLine?.value.trim() || "";
-  if (!sourceText) {
-    throw new Error("Enter a score line before importing.");
-  }
-
-  setSessionStatus("Importing score...");
-  const idToken = await appState.user.getIdToken(true);
-  const response = await fetch("/api/music/score/import", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({
-      source_text: sourceText,
-      source_format: "NOTE_LINE",
-      time_signature: "4/4",
-    }),
-  });
-
-  const payload = await readApiPayload(response);
-  if (!response.ok) {
-    throw new Error(payload?.detail || payload?.message || `Score import failed with ${response.status}`);
-  }
-
-  appState.activeMusicScoreId = payload.score_id || null;
-  appState.activeMusicMeasures = Array.isArray(payload.measures) ? payload.measures : [];
-  appState.activeMusicNotes = flattenNotesFromMeasures(payload.measures);
-  appState.scoreLayoutHints = [];
-  appState.musicScoreDirty = false;
-  appState.scorePrepared = false;
-  resetLessonFlow({ keepPrepared: false });
-  setScoreOverlayState({ mode: "idle" });
-  renderImportedScore(payload);
-  renderScoreSurface(null);
-  renderScoreNoteStrip();
-  refreshMediaButtons();
-  appendCaption("Score", payload.summary || "Score import complete.");
-  if (Array.isArray(payload.warnings)) {
-    for (const warning of payload.warnings) {
-      appendCaption("Warning", warning);
-    }
-  }
-  setSessionStatus("Score import ready.");
-  updatePrimaryActionButton();
-  updateMusicFlowHint();
-}
-
 function applyPreparedScorePayload(payload) {
   appState.activeMusicScoreId = payload.score_id || null;
   appState.activeMusicMeasures = Array.isArray(payload.measures) ? payload.measures : [];
@@ -1462,99 +1386,38 @@ function applyPreparedScorePayload(payload) {
   updateMusicFlowHint();
 }
 
-async function renderStoredScore() {
-  if (sessionRunning()) {
-    throw new Error("Stop the live session before rendering notation.");
-  }
-  if (!appState.user) {
-    throw new Error("Sign in before rendering notation.");
-  }
-  if (!appState.activeMusicScoreId) {
-    throw new Error("Import a score before rendering notation.");
+function applyGuidedLessonStepPayload(payload) {
+  if (payload.lesson_complete) {
+    appState.lessonMeasureIndex = null;
+    appState.lessonStage = "complete";
+    appState.highlightedScoreNoteIndexes = [];
+    appState.focusedScoreNoteIndex = null;
+    setScoreOverlayState({
+      mode: "match",
+      summary: "Lesson complete.",
+      markers: buildScoreOverlayMarkersForState("match"),
+    });
+    renderScoreNoteStrip();
+    appendCaption("Lesson", payload.prompt);
+    setSessionStatus(payload.status);
+    updatePrimaryActionButton();
+    updateMusicFlowHint();
+    return;
   }
 
-  setSessionStatus("Rendering notation...");
-  const idToken = await appState.user.getIdToken(true);
-  const response = await fetch(`/api/music/score/${appState.activeMusicScoreId}/render`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${idToken}`,
-    },
+  appState.lessonMeasureIndex = payload.measure_index;
+  appState.lessonStage = payload.lesson_stage;
+  focusLessonMeasure(payload.measure_index, {
+    start: payload.note_start_index,
+    end: payload.note_end_index,
   });
-
-  const payload = await readApiPayload(response);
-  if (!response.ok) {
-    throw new Error(payload?.detail || payload?.message || `Render failed with ${response.status}`);
-  }
-
-  appState.activeMusicNotes = Array.isArray(payload.expected_notes) ? payload.expected_notes : appState.activeMusicNotes;
-  appState.scorePrepared = true;
-  appState.musicScoreDirty = false;
-  resetLessonFlow();
-  setScoreOverlayState({
-    mode: "score-ready",
-    summary: payload.render_backend === "VEROVIO" ? "Score rendered" : "MusicXML fallback",
-    markers: buildScoreOverlayMarkersForState("score-ready"),
-  });
-  renderScoreSurface(payload);
-  renderScoreNoteStrip();
-  appendCaption(
-    "Render",
-    payload.render_backend === "VEROVIO"
-      ? "Rendered notation with Verovio."
-      : "Verovio was unavailable, so MusicXML fallback is shown."
-  );
-  if (Array.isArray(payload.warnings)) {
-    for (const warning of payload.warnings) {
-      appendCaption("Warning", warning);
-    }
-  }
-  setSessionStatus("Notation ready.");
+  appendCaption("Lesson", payload.prompt);
+  setSessionStatus(payload.status);
   updatePrimaryActionButton();
   updateMusicFlowHint();
 }
 
-async function comparePerformanceClip({ measureIndex = null } = {}) {
-  if (sessionRunning()) {
-    throw new Error("Stop the live session before comparing a take.");
-  }
-  if (!appState.user) {
-    throw new Error("Sign in before comparing a performance.");
-  }
-  if (!appState.activeMusicScoreId) {
-    throw new Error("Import a score before comparing a take.");
-  }
-  if (!appState.micEnabled) {
-    throw new Error("Turn the microphone on before comparing a take.");
-  }
-
-  setSessionStatus("Recording a comparison take...");
-  const clip = await captureOneShotPcmClip({ durationMs: 2800 });
-  if (!clip.length) {
-    throw new Error("No audio was captured.");
-  }
-
-  setSessionStatus("Comparing performance...");
-  const idToken = await appState.user.getIdToken(true);
-  const response = await fetch(`/api/music/score/${appState.activeMusicScoreId}/compare`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({
-      audio_b64: toBase64(clip),
-      mime: "audio/pcm;rate=16000",
-      max_notes: 12,
-      measure_index: measureIndex,
-    }),
-  });
-
-  const payload = await readApiPayload(response);
-  if (!response.ok) {
-    throw new Error(payload?.detail || payload?.message || `Comparison failed with ${response.status}`);
-  }
-
+function applyComparisonPayload(payload, { measureIndex = null } = {}) {
   const measureOffset = measureIndex ? noteOffsetForMeasure(measureIndex) : 0;
   const overlayMode = payload.needs_replay ? "replay" : payload.match ? "match" : "difference";
   let overlayMarkers = buildScoreOverlayMarkersForState(overlayMode, payload.comparisons);
@@ -1619,14 +1482,59 @@ async function comparePerformanceClip({ measureIndex = null } = {}) {
   setSessionStatus(payload.needs_replay ? "Replay requested." : "Comparison ready.");
   updatePrimaryActionButton();
   updateMusicFlowHint();
+}
+
+async function comparePerformanceClip({ measureIndex = null } = {}) {
+  if (sessionRunning()) {
+    throw new Error("Stop the live session before comparing a take.");
+  }
+  if (!appState.user) {
+    throw new Error("Sign in before comparing a performance.");
+  }
+  if (!appState.activeMusicScoreId) {
+    throw new Error("Import a score before comparing a take.");
+  }
+  if (!appState.micEnabled) {
+    throw new Error("Turn the microphone on before comparing a take.");
+  }
+
+  setSessionStatus("Recording a comparison take...");
+  const clip = await captureOneShotPcmClip({ durationMs: 2800 });
+  if (!clip.length) {
+    throw new Error("No audio was captured.");
+  }
+
+  setSessionStatus("Comparing performance...");
+  const idToken = await appState.user.getIdToken(true);
+  const response = await fetch(`/api/music/score/${appState.activeMusicScoreId}/compare`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      audio_b64: toBase64(clip),
+      mime: "audio/pcm;rate=16000",
+      max_notes: 12,
+      measure_index: measureIndex,
+    }),
+  });
+
+  const payload = await readApiPayload(response);
+  if (!response.ok) {
+    throw new Error(payload?.detail || payload?.message || `Comparison failed with ${response.status}`);
+  }
+
+  applyComparisonPayload(payload, { measureIndex });
   return payload;
 }
 
-async function prepareScoreFlow() {
+async function prepareScoreFlow(sourceTextOverride = null) {
   if (!appState.user) {
     throw new Error("Sign in before preparing a score.");
   }
-  if (!hasScoreDraft()) {
+  const sourceText = (sourceTextOverride ?? elements.scoreLine?.value.trim() ?? "").trim();
+  if (!sourceText) {
     throw new Error("Enter a score line before preparing it.");
   }
 
@@ -1639,7 +1547,7 @@ async function prepareScoreFlow() {
       Authorization: `Bearer ${idToken}`,
     },
     body: JSON.stringify({
-      source_text: elements.scoreLine?.value.trim() || "",
+      source_text: sourceText,
       source_format: "NOTE_LINE",
       time_signature: "4/4",
       persist: true,
@@ -1654,72 +1562,72 @@ async function prepareScoreFlow() {
   applyPreparedScorePayload(payload);
 }
 
-async function requestGuidedLessonStep() {
+async function runGuidedLessonAction({ sourceTextOverride = null } = {}) {
   if (!appState.user) {
     throw new Error("Sign in before starting the guided lesson.");
   }
-  if (!appState.activeMusicScoreId) {
-    throw new Error("Prepare a score before starting the lesson.");
+
+  const sourceText = (sourceTextOverride ?? elements.scoreLine?.value.trim() ?? "").trim();
+  const awaitingCompare = hasFreshPreparedScore() && appState.lessonStage === "awaiting-compare";
+  let audioBase64 = null;
+
+  if (awaitingCompare) {
+    if (!appState.micEnabled) {
+      throw new Error("Turn the microphone on before comparing this bar.");
+    }
+    setSessionStatus("Recording a comparison take...");
+    const clip = await captureOneShotPcmClip({ durationMs: 2800 });
+    if (!clip.length) {
+      throw new Error("No audio was captured.");
+    }
+    audioBase64 = toBase64(clip);
+    setSessionStatus("Comparing bar...");
+  } else if (!hasFreshPreparedScore() || appState.musicScoreDirty) {
+    if (!sourceText) {
+      throw new Error("Enter a score line before preparing the lesson.");
+    }
+    setSessionStatus("Preparing lesson...");
+  } else if (!activeMeasureCount()) {
+    throw new Error("The prepared score does not contain readable bars yet.");
+  } else {
+    setSessionStatus("Loading next lesson step...");
   }
 
-  const idToken = await appState.user.getIdToken();
-  const response = await fetch(`/api/music/score/${appState.activeMusicScoreId}/lesson-step`, {
+  const idToken = await appState.user.getIdToken(true);
+  const response = await fetch("/api/music/lesson-action", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`,
     },
     body: JSON.stringify({
+      score_id: hasFreshPreparedScore() && !appState.musicScoreDirty ? appState.activeMusicScoreId : null,
+      source_text: !hasFreshPreparedScore() || appState.musicScoreDirty ? sourceText : null,
+      time_signature: "4/4",
       current_measure_index: appState.lessonMeasureIndex,
       lesson_stage: appState.lessonStage,
+      audio_b64: audioBase64,
+      mime: audioBase64 ? "audio/pcm;rate=16000" : undefined,
+      max_notes: 12,
     }),
   });
 
   const payload = await readApiPayload(response);
   if (!response.ok) {
-    throw new Error(payload?.detail || payload?.message || `Lesson step failed with ${response.status}`);
-  }
-  return payload;
-}
-
-async function beginOrAdvanceGuidedLesson() {
-  if (!hasFreshPreparedScore()) {
-    throw new Error("Prepare a score before starting the lesson.");
-  }
-  if (!activeMeasureCount()) {
-    throw new Error("The prepared score does not contain readable bars yet.");
+    throw new Error(payload?.detail || payload?.message || `Guided lesson step failed with ${response.status}`);
   }
 
-  const payload = await requestGuidedLessonStep();
-
-  if (payload.lesson_complete) {
-    appState.lessonMeasureIndex = null;
-    appState.lessonStage = "complete";
-    appState.highlightedScoreNoteIndexes = [];
-    appState.focusedScoreNoteIndex = null;
-    setScoreOverlayState({
-      mode: "match",
-      summary: "Lesson complete.",
-      markers: buildScoreOverlayMarkersForState("match"),
+  if (payload?.score) {
+    applyPreparedScorePayload(payload.score);
+  }
+  if (payload?.lesson) {
+    applyGuidedLessonStepPayload(payload.lesson);
+  }
+  if (payload?.comparison) {
+    applyComparisonPayload(payload.comparison, {
+      measureIndex: appState.lessonMeasureIndex || 1,
     });
-    renderScoreNoteStrip();
-    appendCaption("Lesson", payload.prompt);
-    setSessionStatus(payload.status);
-    updatePrimaryActionButton();
-    updateMusicFlowHint();
-    return;
   }
-
-  appState.lessonMeasureIndex = payload.measure_index;
-  appState.lessonStage = payload.lesson_stage;
-  focusLessonMeasure(payload.measure_index, {
-    start: payload.note_start_index,
-    end: payload.note_end_index,
-  });
-  appendCaption("Lesson", payload.prompt);
-  setSessionStatus(payload.status);
-  updatePrimaryActionButton();
-  updateMusicFlowHint();
 }
 
 async function handleCapturedScoreLine(noteLine) {
@@ -1729,12 +1637,13 @@ async function handleCapturedScoreLine(noteLine) {
   }
   appState.musicScoreDirty = false;
   appendCaption("Score", `Captured score line: ${noteLine}`);
-  setSessionStatus("Preparing captured score...");
   await stopSession({ notifyServer: false });
-  await prepareScoreFlow();
   if (elements.mode.value === "GUIDED_LESSON") {
-    await beginOrAdvanceGuidedLesson();
+    await runGuidedLessonAction({ sourceTextOverride: noteLine });
+    return;
   }
+  setSessionStatus("Preparing captured score...");
+  await prepareScoreFlow(noteLine);
 }
 
 async function startCameraScoreReadFlow() {
@@ -2246,13 +2155,8 @@ elements.start.addEventListener("click", async () => {
       return;
     }
 
-    if (action === "lesson-next") {
-      await beginOrAdvanceGuidedLesson();
-      return;
-    }
-
-    if (action === "lesson-compare") {
-      await comparePerformanceClip({ measureIndex: appState.lessonMeasureIndex || 1 });
+    if (action === "guided-lesson") {
+      await runGuidedLessonAction();
       return;
     }
 
@@ -2335,50 +2239,6 @@ elements.screenToggle.addEventListener("click", async () => {
 elements.snapshot.addEventListener("click", async () => {
   await captureScreenshot();
 });
-
-if (elements.transcribeOnce) {
-  elements.transcribeOnce.addEventListener("click", async () => {
-    try {
-      await transcribeOneShotClip();
-    } catch (error) {
-      appendCaption("Error", error.message || "Unable to transcribe the clip.");
-      setSessionStatus("Transcription failed.");
-    }
-  });
-}
-
-if (elements.importScore) {
-  elements.importScore.addEventListener("click", async () => {
-    try {
-      await importScoreLine();
-    } catch (error) {
-      appendCaption("Error", error.message || "Unable to import the score.");
-      setSessionStatus("Score import failed.");
-    }
-  });
-}
-
-if (elements.renderScore) {
-  elements.renderScore.addEventListener("click", async () => {
-    try {
-      await renderStoredScore();
-    } catch (error) {
-      appendCaption("Error", error.message || "Unable to render notation.");
-      setSessionStatus("Render failed.");
-    }
-  });
-}
-
-if (elements.comparePerformance) {
-  elements.comparePerformance.addEventListener("click", async () => {
-    try {
-      await comparePerformanceClip();
-    } catch (error) {
-      appendCaption("Error", error.message || "Unable to compare this take.");
-      setSessionStatus("Comparison failed.");
-    }
-  });
-}
 
 elements.mode.addEventListener("change", () => {
   resetLessonFlow({ keepPrepared: true });

@@ -20,10 +20,10 @@ from sqlalchemy import select
 from .auth import init_firebase, verify_firebase_token
 from .db import AsyncSessionLocal, init_db
 from .domains import SessionRuntime, build_session_runtime
+from .domains.music.api import router as music_router
+from .domains.music.render import verovio_runtime_status
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
 from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_INIT, CLIENT_STOP, CLIENT_VIDEO
-from .music_api import router as music_router
-from .music_render import verovio_runtime_status
 from .models import Session
 from .sessions import router as sessions_router
 from .settings import settings

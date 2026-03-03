@@ -1,17 +1,15 @@
-"""SQLAlchemy models for the Vista AI application.
+"""Shared SQLAlchemy models for the Vista AI platform.
 
-The application tracks user sessions for each interaction with the
-assistant.  Each session stores metadata such as the user ID, the
-selected mode (skill), risk mode, start/end timestamps, and a JSON
-summary of the completed task.  Additional models can be added in
-future to support user preferences and other features.
+The shared layer only keeps cross-domain tables such as interaction
+sessions. Domain-specific persistence (for example, Eurydice's music
+scores) lives alongside the owning domain instead of in this module.
 """
 
 import uuid
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Boolean, Column, DateTime, String, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase
 
 from .domains.base import DEFAULT_DOMAIN
@@ -55,23 +53,3 @@ class Session(Base):
 
     model_id: Optional[str] = Column(String(128), nullable=True)
     region: Optional[str] = Column(String(32), nullable=True)
-
-
-class MusicScore(Base):
-    """Persisted symbolic score data for Eurydice."""
-
-    __tablename__ = "music_scores"
-
-    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: str = Column(String, nullable=False)
-    session_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), nullable=True)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-    source_format: str = Column(String(32), nullable=False)
-    time_signature: str = Column(String(16), nullable=False, default="4/4", server_default="4/4")
-    note_count: int = Column(Integer, nullable=False)
-    normalized: str = Column(Text, nullable=False)
-    summary: str = Column(Text, nullable=False)
-    warnings: list[str] | None = Column(JSONB, nullable=True)
-    measures: list[dict] = Column(JSONB, nullable=False)

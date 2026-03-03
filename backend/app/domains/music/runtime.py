@@ -86,6 +86,7 @@ class MusicRuntime(SessionRuntime):
     notes: Deque[str] = field(default_factory=lambda: deque(maxlen=8))
     recent_audio_bytes: bytearray = field(default_factory=bytearray)
     pending_client_events: Deque[dict[str, str]] = field(default_factory=deque)
+    read_score_buffer: str = ""
     skill_spec: MusicSkillSpec = field(init=False)
 
     def __post_init__(self) -> None:
@@ -236,8 +237,13 @@ class MusicRuntime(SessionRuntime):
         self.last_instruction = self._first_sentence(clean)
         lower = clean.lower()
 
+        if self.skill == "READ_SCORE":
+            structured_events = self._handle_read_score_text(clean)
+            if structured_events:
+                return structured_events
+
         if self.skill_spec.frame_first and not self.frame_ready:
-            if "readable" in lower or "clear" in lower:
+            if "unclear" not in lower and ("readable" in lower or "clear" in lower):
                 self.frame_ready = True
                 self.phase = "GUIDE"
             else:
@@ -303,6 +309,33 @@ class MusicRuntime(SessionRuntime):
         if "melody" in goal_lower:
             return "PHRASE"
         return "AUTO"
+
+    def _handle_read_score_text(self, text: str) -> list[dict[str, str]]:
+        self.read_score_buffer = f"{self.read_score_buffer} {text}".strip()
+        upper_buffer = self.read_score_buffer.upper()
+        note_line = self._parse_buffered_note_line()
+        if note_line:
+            self.read_score_buffer = ""
+            self.frame_ready = True
+            self.phase = "GUIDE"
+            self.awaiting_confirmation = True
+            return [{"type": "server.score_capture", "note_line": note_line}]
+        if "SCORE_UNCLEAR" in upper_buffer:
+            self.read_score_buffer = ""
+            self.frame_ready = False
+            self.phase = "FRAME"
+            self.awaiting_confirmation = True
+            return [{"type": "server.score_unclear"}]
+        return []
+
+    def _parse_buffered_note_line(self) -> str | None:
+        marker = "NOTE_LINE:"
+        upper_buffer = self.read_score_buffer.upper()
+        marker_index = upper_buffer.find(marker)
+        if marker_index < 0:
+            return None
+        note_line = self.read_score_buffer[marker_index + len(marker) :].strip()
+        return note_line or None
 
     def _build_hear_phrase_events(self) -> list[dict[str, str]]:
         clip = bytes(self.recent_audio_bytes)

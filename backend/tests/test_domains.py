@@ -117,3 +117,23 @@ def test_music_runtime_marks_deterministic_modes_as_text_first() -> None:
 
     assert read_score.uses_model_opening_prompt() is True
     assert read_score.allow_model_audio() is False
+
+
+def test_music_runtime_emits_structured_score_capture_event() -> None:
+    runtime = MusicRuntime(skill="READ_SCORE", goal="Read one clear bar")
+
+    events = runtime.on_model_text("Readable bar. NOTE_LINE: C4/q D4/q")
+
+    assert events == [{"type": "server.score_capture", "note_line": "C4/q D4/q"}]
+    assert runtime.frame_ready is True
+    assert runtime.phase == "GUIDE"
+
+
+def test_music_runtime_emits_structured_score_unclear_event() -> None:
+    runtime = MusicRuntime(skill="READ_SCORE", goal="Read one clear bar")
+
+    events = runtime.on_model_text("SCORE_UNCLEAR")
+
+    assert events == [{"type": "server.score_unclear"}]
+    assert runtime.frame_ready is False
+    assert runtime.phase == "FRAME"

@@ -62,7 +62,6 @@ const appState = {
   lessonMeasureIndex: null,
   lessonStage: "idle",
   cameraScoreImportPending: false,
-  cameraScoreReadBuffer: "",
   assistantResponseReady: false,
   ws: null,
   sessionId: null,
@@ -355,17 +354,6 @@ function focusLessonMeasure(measureIndex, explicitRange = null) {
     markers: buildScoreOverlayMarkersForState("score-ready"),
   });
   renderScoreNoteStrip();
-}
-
-function parseLiveNoteLine(text) {
-  if (typeof text !== "string") {
-    return null;
-  }
-  const match = text.match(/NOTE_LINE:\s*(.+)$/i);
-  if (!match) {
-    return null;
-  }
-  return match[1].trim() || null;
 }
 
 function usesDeterministicLivePhraseCapture(modeOverride = elements.mode.value) {
@@ -1679,34 +1667,19 @@ async function beginOrAdvanceGuidedLesson() {
   updateMusicFlowHint();
 }
 
-async function handleCameraScoreLiveText(text) {
-  appState.cameraScoreReadBuffer = `${appState.cameraScoreReadBuffer} ${text}`.trim();
-  const noteLine = parseLiveNoteLine(appState.cameraScoreReadBuffer);
-  if (noteLine) {
-    appState.cameraScoreImportPending = false;
-    appState.cameraScoreReadBuffer = "";
-    if (elements.scoreLine) {
-      elements.scoreLine.value = noteLine;
-    }
-    appState.musicScoreDirty = false;
-    appendCaption("Score", `Captured score line: ${noteLine}`);
-    setSessionStatus("Preparing captured score...");
-    await stopSession({ notifyServer: false });
-    await prepareScoreFlow();
-    if (elements.mode.value === "GUIDED_LESSON") {
-      await beginOrAdvanceGuidedLesson();
-    }
-    return true;
+async function handleCapturedScoreLine(noteLine) {
+  appState.cameraScoreImportPending = false;
+  if (elements.scoreLine) {
+    elements.scoreLine.value = noteLine;
   }
-
-  if (appState.cameraScoreReadBuffer.toUpperCase().includes("SCORE_UNCLEAR")) {
-    appState.cameraScoreReadBuffer = "";
-    appendCaption("Score", "The score is still unclear. Move closer, reduce glare, and center one short bar.");
-    setSessionStatus("Sheet still unclear.");
-    return true;
+  appState.musicScoreDirty = false;
+  appendCaption("Score", `Captured score line: ${noteLine}`);
+  setSessionStatus("Preparing captured score...");
+  await stopSession({ notifyServer: false });
+  await prepareScoreFlow();
+  if (elements.mode.value === "GUIDED_LESSON") {
+    await beginOrAdvanceGuidedLesson();
   }
-
-  return true;
 }
 
 async function startCameraScoreReadFlow() {
@@ -1714,7 +1687,6 @@ async function startCameraScoreReadFlow() {
     throw new Error("Turn on camera or screen sharing before reading a score from the sheet.");
   }
   appState.cameraScoreImportPending = true;
-  appState.cameraScoreReadBuffer = "";
   setSessionStatus("Opening live score reader...");
   await startSession({
     sessionMode: "READ_SCORE",
@@ -2048,11 +2020,18 @@ function attachSocketHandlers(ws) {
         queuePlaybackChunk(payload.data_b64, payload.mime);
         break;
       case "server.text":
-        if (appState.cameraScoreImportPending && (await handleCameraScoreLiveText(payload.text))) {
+        if (appState.cameraScoreImportPending) {
           break;
         }
         markAssistantResponseReady();
         appendCaption("Live", payload.text);
+        break;
+      case "server.score_capture":
+        await handleCapturedScoreLine(payload.note_line || "");
+        break;
+      case "server.score_unclear":
+        appendCaption("Score", "The score is still unclear. Move closer, reduce glare, and center one short bar.");
+        setSessionStatus("Sheet still unclear.");
         break;
       case "server.status":
         setRiskBadge(payload.mode || "NORMAL");
@@ -2083,7 +2062,6 @@ function attachSocketHandlers(ws) {
     appState.ws = null;
     appState.sessionId = null;
     appState.cameraScoreImportPending = false;
-    appState.cameraScoreReadBuffer = "";
     setRunningState(false);
     refreshMediaButtons();
   };

@@ -38,6 +38,7 @@ const appState = {
   auth: null,
   user: null,
   clientConfigLoaded: false,
+  activeMusicScoreId: null,
   assistantResponseReady: false,
   ws: null,
   sessionId: null,
@@ -342,6 +343,9 @@ function renderImportedScore(result) {
   ];
   if (typeof result.normalized === "string" && result.normalized) {
     lines.push(`Normalized: ${result.normalized}`);
+  }
+  if (result.score_id) {
+    lines.push(`Saved score: ${result.score_id}`);
   }
   if (Array.isArray(result.measures) && result.measures.length) {
     const measureSummary = result.measures
@@ -705,6 +709,7 @@ async function importScoreLine() {
     throw new Error(payload?.detail || payload?.message || `Score import failed with ${response.status}`);
   }
 
+  appState.activeMusicScoreId = payload.score_id || null;
   renderImportedScore(payload);
   appendCaption("Score", payload.summary || "Score import complete.");
   if (Array.isArray(payload.warnings)) {

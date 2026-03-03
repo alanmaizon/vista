@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from uuid import UUID
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field, field_validator
 
 from . import auth as auth_utils
+from .db import get_db
+from .models import MusicScore
 from .music_symbolic import import_simple_score, score_to_dict
 from .music_transcription import (
     decode_audio_b64,
@@ -61,6 +66,7 @@ class MusicScoreImportRequest(BaseModel):
         description="Import format. The MVP currently supports only NOTE_LINE.",
     )
     time_signature: str = Field("4/4", description="Expected time signature for beat warnings.")
+    persist: bool = Field(True, description="Whether the imported score should be stored for later use.")
 
     @field_validator("source_text")
     @classmethod
@@ -73,7 +79,9 @@ class MusicScoreImportRequest(BaseModel):
 class MusicScoreImportResponse(BaseModel):
     """Imported symbolic score payload."""
 
+    score_id: UUID | None = None
     format: str
+    time_signature: str
     note_count: int
     normalized: str
     summary: str
@@ -104,9 +112,56 @@ async def transcribe_music(
 async def import_music_score(
     payload: MusicScoreImportRequest,
     current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> MusicScoreImportResponse:
     """Import a minimal symbolic score from a simple note-line format."""
-    del current_user
-
     score = import_simple_score(payload.source_text, time_signature=payload.time_signature)
-    return MusicScoreImportResponse(**score_to_dict(score))
+    result = {
+        "score_id": None,
+        "time_signature": payload.time_signature,
+        **score_to_dict(score),
+    }
+
+    if payload.persist:
+        stored_score = MusicScore(
+            user_id=current_user["uid"],
+            source_format=score.format,
+            time_signature=payload.time_signature,
+            note_count=score.note_count,
+            normalized=score.normalized,
+            summary=score.summary,
+            warnings=list(score.warnings),
+            measures=result["measures"],
+        )
+        db.add(stored_score)
+        await db.commit()
+        await db.refresh(stored_score)
+        result["score_id"] = stored_score.id
+
+    return MusicScoreImportResponse(**result)
+
+
+@router.get("/score/{score_id}", response_model=MusicScoreImportResponse)
+async def get_music_score(
+    score_id: UUID,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicScoreImportResponse:
+    """Fetch a stored symbolic score owned by the current user."""
+    result = await db.execute(select(MusicScore).where(MusicScore.id == score_id))
+    score = result.scalar_one_or_none()
+    if score is None:
+        raise HTTPException(status_code=404, detail="Score not found")
+    if score.user_id != current_user["uid"]:
+        raise HTTPException(status_code=403, detail="Not authorised to access this score")
+
+    return MusicScoreImportResponse(
+        score_id=score.id,
+        format=score.source_format,
+        time_signature=score.time_signature,
+        note_count=score.note_count,
+        normalized=score.normalized,
+        summary=score.summary,
+        warnings=list(score.warnings or []),
+        measures=list(score.measures or []),
+    )

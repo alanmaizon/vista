@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import math
 import struct
+import uuid
 
 import pytest
 
@@ -16,7 +17,9 @@ pytest.importorskip("websockets")
 from fastapi.testclient import TestClient
 
 from app import auth as auth_module
+from app import db as db_module
 from app import main as main_module
+from app import music_api as music_api_module
 from app.music_symbolic import import_simple_score
 from app.music_transcription import transcribe_pcm16
 
@@ -51,18 +54,59 @@ def test_import_simple_score_normalizes_note_line() -> None:
     assert not result.warnings
 
 
+class FakeScalarResult:
+    def __init__(self, scalar=None) -> None:
+        self._scalar = scalar
+
+    def scalar_one_or_none(self):
+        return self._scalar
+
+
+class FakeMusicDB:
+    def __init__(self) -> None:
+        self.scores = {}
+
+    def add(self, instance) -> None:
+        if getattr(instance, "id", None) is None:
+            instance.id = uuid.uuid4()
+        self._pending = instance
+
+    async def commit(self) -> None:
+        pending = getattr(self, "_pending", None)
+        if pending is not None:
+            self.scores[pending.id] = pending
+
+    async def refresh(self, instance) -> None:
+        if getattr(instance, "id", None) is None:
+            instance.id = uuid.uuid4()
+
+    async def execute(self, statement):
+        score_id = statement.whereclause.right.value
+        return FakeScalarResult(self.scores.get(score_id))
+
+
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def fake_music_db() -> FakeMusicDB:
+    return FakeMusicDB()
+
+
+@pytest.fixture
+def client(monkeypatch: pytest.MonkeyPatch, fake_music_db: FakeMusicDB) -> TestClient:
     async def fake_init_db() -> None:
         return None
+
+    async def fake_get_db():
+        yield fake_music_db
 
     monkeypatch.setattr(main_module, "init_firebase", lambda: None)
     monkeypatch.setattr(main_module, "init_db", fake_init_db)
     monkeypatch.setattr(main_module, "adk_runtime_status", lambda: (False, "test"))
     monkeypatch.setattr(auth_module, "verify_firebase_token", lambda _token: {"uid": "music-user"})
 
+    main_module.app.dependency_overrides[db_module.get_db] = fake_get_db
     with TestClient(main_module.app) as test_client:
         yield test_client
+    main_module.app.dependency_overrides.clear()
 
 
 def test_music_transcribe_endpoint_returns_symbolic_notes(client: TestClient) -> None:
@@ -84,7 +128,10 @@ def test_music_transcribe_endpoint_returns_symbolic_notes(client: TestClient) ->
     assert body["notes"][0]["note_name"] == "A4"
 
 
-def test_music_score_import_endpoint_returns_symbolic_score(client: TestClient) -> None:
+def test_music_score_import_endpoint_returns_symbolic_score(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
     response = client.post(
         "/api/music/score/import",
         headers={"Authorization": "Bearer test-token"},
@@ -99,6 +146,47 @@ def test_music_score_import_endpoint_returns_symbolic_score(client: TestClient) 
     body = response.json()
     assert body["format"] == "NOTE_LINE"
     assert body["note_count"] == 6
+    assert body["score_id"] is not None
     assert body["normalized"] == "C4/q D4/q E4/h | G4/q A4/q B4/h"
     assert len(body["measures"]) == 2
     assert body["measures"][0]["notes"][0]["note_name"] == "C4"
+
+    score_id = uuid.UUID(body["score_id"])
+    stored = fake_music_db.scores[score_id]
+    assert stored.user_id == "music-user"
+    assert stored.time_signature == "4/4"
+
+
+def test_get_music_score_endpoint_returns_owned_score(client: TestClient, fake_music_db: FakeMusicDB) -> None:
+    stored = music_api_module.MusicScore(
+        id=uuid.uuid4(),
+        user_id="music-user",
+        source_format="NOTE_LINE",
+        time_signature="4/4",
+        note_count=3,
+        normalized="C4/q D4/q E4/h",
+        summary="Imported 3 notes across 1 measure.",
+        warnings=[],
+        measures=[
+            {
+                "index": 1,
+                "total_beats": 4.0,
+                "notes": [
+                    {"note_name": "C4", "midi_note": 60, "duration_code": "q", "beats": 1.0, "token": "C4/q"},
+                    {"note_name": "D4", "midi_note": 62, "duration_code": "q", "beats": 1.0, "token": "D4/q"},
+                    {"note_name": "E4", "midi_note": 64, "duration_code": "h", "beats": 2.0, "token": "E4/h"},
+                ],
+            }
+        ],
+    )
+    fake_music_db.scores[stored.id] = stored
+
+    response = client.get(
+        f"/api/music/score/{stored.id}",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["score_id"] == str(stored.id)
+    assert body["normalized"] == "C4/q D4/q E4/h"

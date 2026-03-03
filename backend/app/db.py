@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from .domains.base import DEFAULT_DOMAIN
 from .domains.music import models as _music_models  # noqa: F401
 from .models import Base
 
@@ -59,8 +60,13 @@ async def init_db() -> None:
         await conn.execute(
             text(
                 "ALTER TABLE sessions "
-                "ADD COLUMN IF NOT EXISTS domain VARCHAR(16) NOT NULL DEFAULT 'VISION'"
-            )
+                "ADD COLUMN IF NOT EXISTS domain VARCHAR(16) NOT NULL DEFAULT :default_domain"
+            ),
+            {"default_domain": DEFAULT_DOMAIN},
+        )
+        await conn.execute(
+            text("ALTER TABLE sessions ALTER COLUMN domain SET DEFAULT :default_domain"),
+            {"default_domain": DEFAULT_DOMAIN},
         )
 
 

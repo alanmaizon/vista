@@ -162,6 +162,62 @@ def test_compare_performance_against_score_reports_pitch_mismatch() -> None:
     assert any("expected D4, heard D#4" in mismatch for mismatch in result.mismatches)
 
 
+def test_compare_performance_against_score_detects_octave_displacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    score = build_stored_score()
+
+    def fake_transcribe(*_args, **_kwargs) -> SymbolicPhrase:
+        return SymbolicPhrase(
+            kind="melody_fragment",
+            notes=(
+                NoteEvent(
+                    midi_note=72,
+                    note_name="C5",
+                    frequency_hz=523.25,
+                    start_ms=0,
+                    duration_ms=320,
+                    confidence=0.98,
+                ),
+                NoteEvent(
+                    midi_note=62,
+                    note_name="D4",
+                    frequency_hz=293.66,
+                    start_ms=400,
+                    duration_ms=320,
+                    confidence=0.97,
+                ),
+                NoteEvent(
+                    midi_note=64,
+                    note_name="E4",
+                    frequency_hz=329.63,
+                    start_ms=800,
+                    duration_ms=620,
+                    confidence=0.97,
+                ),
+            ),
+            duration_ms=1500,
+            confidence=0.97,
+            summary="Octave-displaced opening note.",
+            warnings=(),
+        )
+
+    monkeypatch.setattr(music_compare_module, "transcribe_pcm16", fake_transcribe)
+
+    result = compare_performance_against_score(
+        score,
+        audio_bytes=b"\x00\x00",
+        sample_rate=16000,
+    )
+
+    assert result.match is False
+    assert result.accuracy > 0.5
+    assert result.comparisons[0].pitch_match is False
+    assert result.comparisons[0].pitch_class_match is True
+    assert result.comparisons[0].octave_displacement == 1
+    assert any("same pitch class, one octave high" in mismatch for mismatch in result.mismatches)
+
+
 def test_compare_performance_against_score_aligns_to_best_phrase_window() -> None:
     score = build_stored_score()
     clip = synth_phrase([220.0, 261.63, 293.66, 329.63, 392.0])  # extra A3 + G4 around the target

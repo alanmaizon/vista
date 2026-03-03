@@ -100,6 +100,7 @@ class MusicScoreRenderResponse(BaseModel):
     musicxml: str
     svg: str | None
     warnings: list[str]
+    expected_notes: list[dict]
 
 
 class MusicPerformanceCompareRequest(BaseModel):
@@ -251,6 +252,7 @@ async def render_stored_music_score(
         musicxml=rendered.musicxml,
         svg=rendered.svg,
         warnings=list(rendered.warnings),
+        expected_notes=[note for measure in (score.measures or []) for note in measure.get("notes", [])],
     )
 
 

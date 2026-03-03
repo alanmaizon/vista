@@ -30,6 +30,7 @@ const elements = {
   summary: document.getElementById("summary"),
   musicAnalysis: document.getElementById("music-analysis"),
   scoreRender: document.getElementById("score-render"),
+  scoreNoteStrip: document.getElementById("score-note-strip"),
   riskBadge: document.getElementById("risk-badge"),
   preview: document.getElementById("preview"),
 };
@@ -41,7 +42,12 @@ const appState = {
   auth: null,
   user: null,
   clientConfigLoaded: false,
+  musicRuntimeLoaded: false,
+  verovioAvailable: null,
   activeMusicScoreId: null,
+  activeMusicNotes: [],
+  highlightedScoreNoteIndexes: [],
+  focusedScoreNoteIndex: null,
   assistantResponseReady: false,
   ws: null,
   sessionId: null,
@@ -376,6 +382,56 @@ function renderImportedScore(result) {
   elements.musicAnalysis.textContent = lines.join(" ");
 }
 
+function flattenNotesFromMeasures(measures) {
+  if (!Array.isArray(measures)) {
+    return [];
+  }
+  const notes = [];
+  for (const measure of measures) {
+    if (!Array.isArray(measure?.notes)) {
+      continue;
+    }
+    for (const note of measure.notes) {
+      notes.push(note);
+    }
+  }
+  return notes;
+}
+
+function renderScoreNoteStrip() {
+  if (!elements.scoreNoteStrip) {
+    return;
+  }
+
+  elements.scoreNoteStrip.innerHTML = "";
+  if (!Array.isArray(appState.activeMusicNotes) || !appState.activeMusicNotes.length) {
+    elements.scoreNoteStrip.textContent = "Imported and rendered score notes will appear here for focused practice.";
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  appState.activeMusicNotes.forEach((note, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "score-note-pill";
+    button.textContent = `${note.note_name}`;
+    if (index === appState.focusedScoreNoteIndex) {
+      button.classList.add("is-focused");
+    }
+    if (appState.highlightedScoreNoteIndexes.includes(index)) {
+      button.classList.add("is-highlighted");
+    }
+    button.title = `${note.note_name} (${note.duration_code})`;
+    button.addEventListener("click", () => {
+      appState.focusedScoreNoteIndex = index;
+      renderScoreNoteStrip();
+      appendCaption("Score", `Focused note ${index + 1}: ${note.note_name}, duration ${note.duration_code}.`);
+    });
+    fragment.appendChild(button);
+  });
+  elements.scoreNoteStrip.appendChild(fragment);
+}
+
 function renderScoreSurface(result) {
   if (!elements.scoreRender) {
     return;
@@ -507,6 +563,43 @@ async function loadClientConfig() {
   }
 }
 
+async function loadMusicRuntimeStatus() {
+  if (appState.domain !== "MUSIC" || appState.musicRuntimeLoaded) {
+    return;
+  }
+  appState.musicRuntimeLoaded = true;
+  if (!elements.scoreRender) {
+    return;
+  }
+
+  try {
+    if (!appState.user) {
+      return;
+    }
+    const idToken = await appState.user.getIdToken(true);
+    const response = await fetch("/api/music/runtime", {
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+    });
+    if (!response.ok) {
+      return;
+    }
+    const payload = await response.json();
+    appState.verovioAvailable = Boolean(payload?.verovio_available);
+    if (!appState.activeMusicScoreId && !sessionRunning()) {
+      elements.scoreRender.textContent = appState.verovioAvailable
+        ? "Verovio is available. Render notation will return SVG when a score is loaded."
+        : "Verovio is not installed on the backend yet. Render notation will use MusicXML fallback until it is added.";
+    }
+    if (payload?.verovio_detail) {
+      console.info(`[${appState.brand}][Verovio]`, payload.verovio_detail);
+    }
+  } catch {
+    // Keep the default render placeholder when runtime status cannot be loaded.
+  }
+}
+
 async function ensureFirebase() {
   if (appState.auth) {
     return appState.auth;
@@ -532,6 +625,7 @@ async function signIn() {
 
   appState.user = credential.user;
   setAuthStatus(`Signed in as ${appState.user.email || appState.user.uid}`);
+  await loadMusicRuntimeStatus();
 }
 
 function toBase64(uint8Array) {
@@ -774,8 +868,12 @@ async function importScoreLine() {
   }
 
   appState.activeMusicScoreId = payload.score_id || null;
+  appState.activeMusicNotes = flattenNotesFromMeasures(payload.measures);
+  appState.highlightedScoreNoteIndexes = [];
+  appState.focusedScoreNoteIndex = null;
   renderImportedScore(payload);
   renderScoreSurface(null);
+  renderScoreNoteStrip();
   refreshMediaButtons();
   appendCaption("Score", payload.summary || "Score import complete.");
   if (Array.isArray(payload.warnings)) {
@@ -811,7 +909,11 @@ async function renderStoredScore() {
     throw new Error(payload?.detail || payload?.message || `Render failed with ${response.status}`);
   }
 
+  appState.activeMusicNotes = Array.isArray(payload.expected_notes) ? payload.expected_notes : appState.activeMusicNotes;
+  appState.highlightedScoreNoteIndexes = [];
+  appState.focusedScoreNoteIndex = null;
   renderScoreSurface(payload);
+  renderScoreNoteStrip();
   appendCaption(
     "Render",
     payload.render_backend === "VEROVIO"
@@ -866,6 +968,14 @@ async function comparePerformanceClip() {
     throw new Error(payload?.detail || payload?.message || `Comparison failed with ${response.status}`);
   }
 
+  appState.activeMusicNotes = Array.isArray(payload.expected_notes) ? payload.expected_notes : appState.activeMusicNotes;
+  appState.highlightedScoreNoteIndexes = Array.isArray(payload.comparisons)
+    ? payload.comparisons
+        .filter((item) => !item.pitch_match || !item.rhythm_match)
+        .map((item) => Math.max(0, Number(item.index || 1) - 1))
+    : [];
+  appState.focusedScoreNoteIndex = appState.highlightedScoreNoteIndexes[0] ?? null;
+  renderScoreNoteStrip();
   renderPerformanceComparison(payload);
   appendCaption("Compare", payload.summary || "Comparison complete.");
   if (Array.isArray(payload.mismatches)) {
@@ -1440,4 +1550,5 @@ updateGoalHint();
 updateCaptureGuidance();
 updatePrimaryActionButton();
 refreshMediaButtons();
+renderScoreNoteStrip();
 void loadClientConfig();

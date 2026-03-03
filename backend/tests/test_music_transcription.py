@@ -213,6 +213,25 @@ def test_music_transcribe_endpoint_returns_symbolic_notes(client: TestClient) ->
     assert body["notes"][0]["note_name"] == "A4"
 
 
+def test_music_runtime_status_endpoint_reports_verovio_state(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(music_api_module, "verovio_runtime_status", lambda: (False, "verovio missing"))
+
+    response = client.get(
+        "/api/music/runtime",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "verovio_available": False,
+        "verovio_detail": "verovio missing",
+    }
+
+
 def test_music_score_import_endpoint_returns_symbolic_score(
     client: TestClient,
     fake_music_db: FakeMusicDB,
@@ -271,6 +290,7 @@ def test_render_music_score_endpoint_returns_musicxml(client: TestClient, fake_m
     assert body["score_id"] == str(stored.id)
     assert body["render_backend"] in {"VEROVIO", "MUSICXML_FALLBACK"}
     assert body["musicxml"].startswith("<?xml")
+    assert [note["note_name"] for note in body["expected_notes"]] == ["C4", "D4", "E4"]
 
 
 def test_compare_performance_endpoint_returns_alignment_feedback(

@@ -91,3 +91,6 @@
 - Run Postgres locally and point the backend to it with `DB_HOST` and `DB_PORT`.
 - Use a Firebase dev project and paste the Firebase web config JSON into the browser client.
 - If email/password fields are blank, the browser client attempts anonymous sign-in.
+- For real Eurydice SVG score rendering, install the optional music stack:
+  - `pip install -r backend/requirements-music.txt`
+  - Without that extra dependency, Eurydice render endpoints still return MusicXML fallback payloads.

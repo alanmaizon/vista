@@ -23,6 +23,7 @@ from .domains import SessionRuntime, build_session_runtime
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
 from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_INIT, CLIENT_STOP, CLIENT_VIDEO
 from .music_api import router as music_router
+from .music_render import verovio_runtime_status
 from .models import Session
 from .sessions import router as sessions_router
 from .settings import settings
@@ -54,11 +55,14 @@ async def startup_event() -> None:
     init_firebase()
     await init_db()
     adk_available, adk_detail = adk_runtime_status()
+    verovio_available, verovio_detail = verovio_runtime_status()
     logger.info(
-        "Firebase and database initialised; ADK enabled=%s; ADK importable=%s; detail=%s",
+        "Firebase and database initialised; ADK enabled=%s; ADK importable=%s; ADK detail=%s; Verovio importable=%s; Verovio detail=%s",
         settings.use_adk,
         adk_available,
         adk_detail,
+        verovio_available,
+        verovio_detail,
     )
 
 

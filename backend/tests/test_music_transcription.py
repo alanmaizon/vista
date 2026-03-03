@@ -20,6 +20,8 @@ from app import auth as auth_module
 from app import db as db_module
 from app import main as main_module
 from app import music_api as music_api_module
+from app.music_compare import compare_performance_against_score
+from app.music_render import render_music_score, score_to_musicxml
 from app.music_symbolic import import_simple_score
 from app.music_transcription import transcribe_pcm16
 
@@ -32,6 +34,23 @@ def synth_tone(frequency_hz: float, *, duration_ms: int = 900, sample_rate: int 
         value = math.sin(2 * math.pi * frequency_hz * index / sample_rate) * amplitude
         samples.append(max(-32767, min(32767, int(value * 32767))))
     return b"".join(struct.pack("<h", sample) for sample in samples)
+
+
+def synth_phrase(
+    frequencies_hz: list[float],
+    *,
+    note_duration_ms: int = 320,
+    gap_ms: int = 90,
+    sample_rate: int = 16000,
+) -> bytes:
+    gap_samples = int(sample_rate * gap_ms / 1000)
+    gap = b"\x00\x00" * gap_samples
+    chunks = []
+    for index, frequency in enumerate(frequencies_hz):
+        chunks.append(synth_tone(frequency, duration_ms=note_duration_ms, sample_rate=sample_rate))
+        if index != len(frequencies_hz) - 1:
+            chunks.append(gap)
+    return b"".join(chunks)
 
 
 def test_transcribe_pcm16_detects_a4() -> None:
@@ -52,6 +71,72 @@ def test_import_simple_score_normalizes_note_line() -> None:
     assert len(result.measures) == 2
     assert result.measures[0].notes[0].midi_note == 60
     assert not result.warnings
+
+
+def build_stored_score() -> music_api_module.MusicScore:
+    return music_api_module.MusicScore(
+        id=uuid.uuid4(),
+        user_id="music-user",
+        source_format="NOTE_LINE",
+        time_signature="4/4",
+        note_count=3,
+        normalized="C4/q D4/q E4/h",
+        summary="Imported 3 notes across 1 measure.",
+        warnings=[],
+        measures=[
+            {
+                "index": 1,
+                "total_beats": 4.0,
+                "notes": [
+                    {"note_name": "C4", "midi_note": 60, "duration_code": "q", "beats": 1.0, "token": "C4/q"},
+                    {"note_name": "D4", "midi_note": 62, "duration_code": "q", "beats": 1.0, "token": "D4/q"},
+                    {"note_name": "E4", "midi_note": 64, "duration_code": "h", "beats": 2.0, "token": "E4/h"},
+                ],
+            }
+        ],
+    )
+
+
+def test_score_to_musicxml_emits_score_partwise() -> None:
+    score = build_stored_score()
+
+    musicxml = score_to_musicxml(score)
+    rendered = render_music_score(score)
+
+    assert "<score-partwise" in musicxml
+    assert "<measure number=\"1\">" in musicxml
+    assert "<step>C</step>" in musicxml
+    assert rendered.musicxml.startswith("<?xml")
+    assert rendered.render_backend in {"VEROVIO", "MUSICXML_FALLBACK"}
+
+
+def test_compare_performance_against_score_detects_exact_match() -> None:
+    score = build_stored_score()
+    clip = synth_phrase([261.63, 293.66, 329.63])
+
+    result = compare_performance_against_score(
+        score,
+        audio_bytes=clip,
+        sample_rate=16000,
+    )
+
+    assert result.match is True
+    assert result.accuracy >= 0.95
+    assert not result.mismatches
+
+
+def test_compare_performance_against_score_reports_pitch_mismatch() -> None:
+    score = build_stored_score()
+    clip = synth_phrase([261.63, 311.13, 329.63])  # C4, D#4, E4
+
+    result = compare_performance_against_score(
+        score,
+        audio_bytes=clip,
+        sample_rate=16000,
+    )
+
+    assert result.match is False
+    assert any("expected D4, heard D#4" in mismatch for mismatch in result.mismatches)
 
 
 class FakeScalarResult:
@@ -158,27 +243,7 @@ def test_music_score_import_endpoint_returns_symbolic_score(
 
 
 def test_get_music_score_endpoint_returns_owned_score(client: TestClient, fake_music_db: FakeMusicDB) -> None:
-    stored = music_api_module.MusicScore(
-        id=uuid.uuid4(),
-        user_id="music-user",
-        source_format="NOTE_LINE",
-        time_signature="4/4",
-        note_count=3,
-        normalized="C4/q D4/q E4/h",
-        summary="Imported 3 notes across 1 measure.",
-        warnings=[],
-        measures=[
-            {
-                "index": 1,
-                "total_beats": 4.0,
-                "notes": [
-                    {"note_name": "C4", "midi_note": 60, "duration_code": "q", "beats": 1.0, "token": "C4/q"},
-                    {"note_name": "D4", "midi_note": 62, "duration_code": "q", "beats": 1.0, "token": "D4/q"},
-                    {"note_name": "E4", "midi_note": 64, "duration_code": "h", "beats": 2.0, "token": "E4/h"},
-                ],
-            }
-        ],
-    )
+    stored = build_stored_score()
     fake_music_db.scores[stored.id] = stored
 
     response = client.get(
@@ -190,3 +255,44 @@ def test_get_music_score_endpoint_returns_owned_score(client: TestClient, fake_m
     body = response.json()
     assert body["score_id"] == str(stored.id)
     assert body["normalized"] == "C4/q D4/q E4/h"
+
+
+def test_render_music_score_endpoint_returns_musicxml(client: TestClient, fake_music_db: FakeMusicDB) -> None:
+    stored = build_stored_score()
+    fake_music_db.scores[stored.id] = stored
+
+    response = client.get(
+        f"/api/music/score/{stored.id}/render",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["score_id"] == str(stored.id)
+    assert body["render_backend"] in {"VEROVIO", "MUSICXML_FALLBACK"}
+    assert body["musicxml"].startswith("<?xml")
+
+
+def test_compare_performance_endpoint_returns_alignment_feedback(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    stored = build_stored_score()
+    fake_music_db.scores[stored.id] = stored
+
+    response = client.post(
+        f"/api/music/score/{stored.id}/compare",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "audio_b64": base64.b64encode(synth_phrase([261.63, 311.13, 329.63])).decode("ascii"),
+            "mime": "audio/pcm;rate=16000",
+            "max_notes": 12,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["score_id"] == str(stored.id)
+    assert body["match"] is False
+    assert body["played_phrase"]["notes"]
+    assert body["mismatches"]

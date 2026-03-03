@@ -144,6 +144,31 @@ h2 {
   background: var(--glass-soft);
 }
 
+.score-render-surface {
+  margin-top: 0.8rem;
+  min-height: 12rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(6, 10, 18, 0.52);
+  overflow: auto;
+}
+
+.score-render-surface svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.score-render-fallback {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--muted-strong);
+}
+
 .dev-drawer-floating {
   position: fixed;
   left: 0.9rem;

@@ -50,8 +50,13 @@
           spellcheck="false"
           placeholder="C4/q D4/q E4/h | G4/q A4/q B4/h"
         ></textarea>
-        <button id="import-score" class="secondary action-button" type="button">Import score</button>
+        <div class="action-row">
+          <button id="import-score" class="secondary action-button" type="button">Import score</button>
+          <button id="render-score" class="secondary action-button" type="button">Render notation</button>
+          <button id="compare-performance" class="secondary action-button" type="button">Compare take</button>
+        </div>
         <div id="music-analysis" class="hint" aria-live="polite">One-shot phrase transcription will appear here.</div>
+        <div id="score-render" class="score-render-surface hint" aria-live="polite">Rendered notation will appear here.</div>
       </section>
 
       <details class="dev-drawer-floating">

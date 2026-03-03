@@ -20,6 +20,8 @@ const elements = {
   transcribeOnce: document.getElementById("transcribe-once"),
   scoreLine: document.getElementById("score-line"),
   importScore: document.getElementById("import-score"),
+  renderScore: document.getElementById("render-score"),
+  comparePerformance: document.getElementById("compare-performance"),
   start: document.getElementById("start"),
   captureHint: document.getElementById("capture-hint"),
   cameraWarning: document.getElementById("camera-warning"),
@@ -27,6 +29,7 @@ const elements = {
   captions: document.getElementById("captions"),
   summary: document.getElementById("summary"),
   musicAnalysis: document.getElementById("music-analysis"),
+  scoreRender: document.getElementById("score-render"),
   riskBadge: document.getElementById("risk-badge"),
   preview: document.getElementById("preview"),
 };
@@ -258,6 +261,15 @@ function refreshMediaButtons() {
     renderButton(elements.importScore, { icon: "confirm", label: "Import score" });
     elements.importScore.disabled = sessionRunning();
   }
+  if (elements.renderScore) {
+    renderButton(elements.renderScore, { icon: "start", label: "Render notation" });
+    elements.renderScore.disabled = sessionRunning() || !appState.activeMusicScoreId;
+  }
+  if (elements.comparePerformance) {
+    renderButton(elements.comparePerformance, { icon: "analyze", label: "Compare take" });
+    elements.comparePerformance.disabled =
+      sessionRunning() || !appState.activeMusicScoreId || !appState.micEnabled;
+  }
 }
 
 function markAssistantResponseReady() {
@@ -361,6 +373,58 @@ function renderImportedScore(result) {
   if (Array.isArray(result.warnings) && result.warnings.length) {
     lines.push(`Warnings: ${result.warnings.join(" ")}`);
   }
+  elements.musicAnalysis.textContent = lines.join(" ");
+}
+
+function renderScoreSurface(result) {
+  if (!elements.scoreRender) {
+    return;
+  }
+
+  elements.scoreRender.innerHTML = "";
+  if (!result || typeof result !== "object") {
+    elements.scoreRender.textContent = "No rendered notation is available.";
+    return;
+  }
+
+  if (typeof result.svg === "string" && result.svg.trim()) {
+    elements.scoreRender.innerHTML = result.svg;
+    return;
+  }
+
+  const fallback = document.createElement("pre");
+  fallback.className = "score-render-fallback";
+  fallback.textContent = result.musicxml || "No MusicXML fallback was returned.";
+  elements.scoreRender.appendChild(fallback);
+}
+
+function renderPerformanceComparison(result) {
+  if (!elements.musicAnalysis) {
+    return;
+  }
+
+  if (!result || typeof result !== "object") {
+    elements.musicAnalysis.textContent = "No comparison result.";
+    return;
+  }
+
+  const lines = [
+    result.summary || "No comparison summary.",
+  ];
+  if (Array.isArray(result.mismatches) && result.mismatches.length) {
+    lines.push(`Differences: ${result.mismatches.join(" ")}`);
+  }
+  if (result.played_phrase?.notes?.length) {
+    lines.push(
+      `Played: ${result.played_phrase.notes.map((note) => note.note_name).join(", ")}`
+    );
+  }
+  if (Array.isArray(result.expected_notes) && result.expected_notes.length) {
+    lines.push(
+      `Expected: ${result.expected_notes.map((note) => note.note_name).join(", ")}`
+    );
+  }
+  lines.push(`Accuracy: ${Math.round((Number(result.accuracy) || 0) * 100)}%.`);
   elements.musicAnalysis.textContent = lines.join(" ");
 }
 
@@ -711,6 +775,8 @@ async function importScoreLine() {
 
   appState.activeMusicScoreId = payload.score_id || null;
   renderImportedScore(payload);
+  renderScoreSurface(null);
+  refreshMediaButtons();
   appendCaption("Score", payload.summary || "Score import complete.");
   if (Array.isArray(payload.warnings)) {
     for (const warning of payload.warnings) {
@@ -718,6 +784,101 @@ async function importScoreLine() {
     }
   }
   setSessionStatus("Score import ready.");
+}
+
+async function renderStoredScore() {
+  if (sessionRunning()) {
+    throw new Error("Stop the live session before rendering notation.");
+  }
+  if (!appState.user) {
+    throw new Error("Sign in before rendering notation.");
+  }
+  if (!appState.activeMusicScoreId) {
+    throw new Error("Import a score before rendering notation.");
+  }
+
+  setSessionStatus("Rendering notation...");
+  const idToken = await appState.user.getIdToken(true);
+  const response = await fetch(`/api/music/score/${appState.activeMusicScoreId}/render`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.detail || payload?.message || `Render failed with ${response.status}`);
+  }
+
+  renderScoreSurface(payload);
+  appendCaption(
+    "Render",
+    payload.render_backend === "VEROVIO"
+      ? "Rendered notation with Verovio."
+      : "Verovio was unavailable, so MusicXML fallback is shown."
+  );
+  if (Array.isArray(payload.warnings)) {
+    for (const warning of payload.warnings) {
+      appendCaption("Warning", warning);
+    }
+  }
+  setSessionStatus("Notation ready.");
+}
+
+async function comparePerformanceClip() {
+  if (sessionRunning()) {
+    throw new Error("Stop the live session before comparing a take.");
+  }
+  if (!appState.user) {
+    throw new Error("Sign in before comparing a performance.");
+  }
+  if (!appState.activeMusicScoreId) {
+    throw new Error("Import a score before comparing a take.");
+  }
+  if (!appState.micEnabled) {
+    throw new Error("Turn the microphone on before comparing a take.");
+  }
+
+  setSessionStatus("Recording a comparison take...");
+  const clip = await captureOneShotPcmClip({ durationMs: 2800 });
+  if (!clip.length) {
+    throw new Error("No audio was captured.");
+  }
+
+  setSessionStatus("Comparing performance...");
+  const idToken = await appState.user.getIdToken(true);
+  const response = await fetch(`/api/music/score/${appState.activeMusicScoreId}/compare`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      audio_b64: toBase64(clip),
+      mime: "audio/pcm;rate=16000",
+      max_notes: 12,
+    }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.detail || payload?.message || `Comparison failed with ${response.status}`);
+  }
+
+  renderPerformanceComparison(payload);
+  appendCaption("Compare", payload.summary || "Comparison complete.");
+  if (Array.isArray(payload.mismatches)) {
+    for (const mismatch of payload.mismatches) {
+      appendCaption("Difference", mismatch);
+    }
+  }
+  if (Array.isArray(payload.warnings)) {
+    for (const warning of payload.warnings) {
+      appendCaption("Warning", warning);
+    }
+  }
+  setSessionStatus("Comparison ready.");
 }
 
 async function createSession(idToken) {
@@ -1245,6 +1406,28 @@ if (elements.importScore) {
     } catch (error) {
       appendCaption("Error", error.message || "Unable to import the score.");
       setSessionStatus("Score import failed.");
+    }
+  });
+}
+
+if (elements.renderScore) {
+  elements.renderScore.addEventListener("click", async () => {
+    try {
+      await renderStoredScore();
+    } catch (error) {
+      appendCaption("Error", error.message || "Unable to render notation.");
+      setSessionStatus("Render failed.");
+    }
+  });
+}
+
+if (elements.comparePerformance) {
+  elements.comparePerformance.addEventListener("click", async () => {
+    try {
+      await comparePerformanceClip();
+    } catch (error) {
+      appendCaption("Error", error.message || "Unable to compare this take.");
+      setSessionStatus("Comparison failed.");
     }
   });
 }

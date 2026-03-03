@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Deque
 
 from ..base import MUSIC_DOMAIN, SessionRuntime
+from ...music_transcription import MusicTranscriptionError, transcribe_pcm16
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,8 @@ class MusicSkillSpec:
 
 
 DEFAULT_MUSIC_SKILL = "HEAR_PHRASE"
+LIVE_HEAR_PHRASE_MAX_BYTES = 16000 * 2 * 6
+LIVE_HEAR_PHRASE_MIN_BYTES = 16000
 
 MUSIC_SKILLS: dict[str, MusicSkillSpec] = {
     "SHEET_FRAME_COACH": MusicSkillSpec(
@@ -77,6 +80,8 @@ class MusicRuntime(SessionRuntime):
     last_instruction: str | None = None
     last_assistant_text: str | None = None
     notes: Deque[str] = field(default_factory=lambda: deque(maxlen=8))
+    recent_audio_bytes: bytearray = field(default_factory=bytearray)
+    pending_client_events: Deque[dict[str, str]] = field(default_factory=deque)
     skill_spec: MusicSkillSpec = field(init=False)
 
     def __post_init__(self) -> None:
@@ -104,12 +109,19 @@ class MusicRuntime(SessionRuntime):
             if self.skill_spec.frame_first and self.skill_spec.capture_prompt
             else ""
         )
+        live_phrase_fragment = (
+            "For HEAR_PHRASE, do not guess interval, chord, or arpeggio identities from the raw live stream alone. "
+            "Wait for the user to confirm the replay, then keep your verbal response brief because a server-side phrase analysis may follow. "
+            if self.skill == "HEAR_PHRASE"
+            else ""
+        )
         return (
             f"I am starting a {self.skill} music tutoring session. "
             f"Skill objective: {self.skill_spec.anchor} "
             f"Completion condition: {self.skill_spec.done_when} "
             f"{goal_fragment}"
             f"{frame_fragment}"
+            f"{live_phrase_fragment}"
             "Never guess musical details. If the score view or the performance is unclear, "
             "ask for one narrower replay or one clearer frame before you analyze."
         )
@@ -119,7 +131,21 @@ class MusicRuntime(SessionRuntime):
         if self.skill_spec.frame_first and not self.frame_ready:
             self.phase = "FRAME"
 
+    def on_client_audio(self, audio_bytes: bytes, mime: str | None = None) -> list[dict[str, str]]:
+        del mime
+        if not audio_bytes:
+            return []
+        self.recent_audio_bytes.extend(audio_bytes)
+        if len(self.recent_audio_bytes) > LIVE_HEAR_PHRASE_MAX_BYTES:
+            overflow = len(self.recent_audio_bytes) - LIVE_HEAR_PHRASE_MAX_BYTES
+            del self.recent_audio_bytes[:overflow]
+        return []
+
     def on_client_confirm(self) -> str | None:
+        if self.skill == "HEAR_PHRASE":
+            self.awaiting_confirmation = False
+            self.pending_client_events.extend(self._build_hear_phrase_events())
+            return None
         if not self.awaiting_confirmation:
             return None
         self.confirmations += 1
@@ -138,6 +164,13 @@ class MusicRuntime(SessionRuntime):
             "Yes, I tried that. Verify the musical result before moving on, "
             "then give exactly one next correction or one next exercise."
         )
+
+    def on_client_confirm_events(self) -> list[dict[str, str]]:
+        if not self.pending_client_events:
+            return []
+        events = list(self.pending_client_events)
+        self.pending_client_events.clear()
+        return events
 
     def on_model_text(self, text: str) -> list[dict[str, str]]:
         clean = " ".join(text.split())
@@ -201,6 +234,77 @@ class MusicRuntime(SessionRuntime):
         else:
             bullets.append("No assistant response was captured.")
         return {"bullets": bullets[:6]}
+
+    def _expected_phrase_kind(self) -> str:
+        goal_lower = (self.goal or "").lower()
+        if "arpeggio" in goal_lower:
+            return "ARPEGGIO"
+        if "chord" in goal_lower:
+            return "CHORD"
+        if "interval" in goal_lower:
+            return "INTERVAL"
+        if "melody" in goal_lower:
+            return "PHRASE"
+        return "AUTO"
+
+    def _build_hear_phrase_events(self) -> list[dict[str, str]]:
+        clip = bytes(self.recent_audio_bytes)
+        self.recent_audio_bytes.clear()
+        self.confirmations += 1
+        if len(clip) < LIVE_HEAR_PHRASE_MIN_BYTES:
+            self.phase = "VERIFY"
+            self.completed = False
+            return [
+                {
+                    "type": "server.text",
+                    "text": (
+                        "I need one clear replay of the phrase before I can analyse it. "
+                        "Play the full phrase once, then press confirm again."
+                    ),
+                }
+            ]
+
+        expected = self._expected_phrase_kind()
+        try:
+            phrase = transcribe_pcm16(clip, sample_rate=16000, expected=expected, max_notes=8)
+        except MusicTranscriptionError as exc:
+            self.phase = "VERIFY"
+            self.completed = False
+            return [{"type": "server.text", "text": str(exc)}]
+
+        analysis = self._format_live_phrase_analysis(phrase, expected)
+        needs_replay = phrase.confidence < 0.68 or not phrase.notes
+        self.phase = "VERIFY" if needs_replay else "COMPLETE"
+        self.completed = not needs_replay
+        return [{"type": "server.text", "text": analysis}]
+
+    def _format_live_phrase_analysis(self, phrase, expected: str) -> str:
+        if not phrase.notes:
+            return (
+                "I could not confirm a stable pitched phrase from that replay. "
+                "Play it again more slowly, one note at a time if needed."
+            )
+
+        note_names = ", ".join(note.note_name for note in phrase.notes)
+        parts = [f"I heard {len(phrase.notes)} notes: {note_names}."]
+
+        harmony_text = phrase.harmony_hint or ""
+        normalized_harmony = harmony_text.replace("Likely ", "").replace(" harmony.", "").strip()
+        if expected == "ARPEGGIO" and normalized_harmony:
+            parts.append(f"This sounds like an arpeggio outlining {normalized_harmony}.")
+        elif harmony_text:
+            parts.append(harmony_text)
+        elif phrase.interval_hint:
+            parts.append(phrase.interval_hint)
+
+        if phrase.confidence < 0.68:
+            parts.append("Confidence is still low, so replay it once more for a tighter confirmation.")
+        elif phrase.warnings:
+            parts.append(phrase.warnings[0])
+        else:
+            parts.append(f"Confidence {round(phrase.confidence * 100)}%.")
+
+        return " ".join(part for part in parts if part)
 
     @staticmethod
     def _first_sentence(text: str) -> str:

@@ -45,8 +45,15 @@ class VisionRuntime(SessionRuntime):
     def on_client_video(self) -> None:
         self._state.on_client_video()
 
+    def on_client_audio(self, audio_bytes: bytes, mime: str | None = None) -> list[dict[str, Any]]:
+        del audio_bytes, mime
+        return []
+
     def on_client_confirm(self) -> str | None:
         return self._state.on_client_confirm()
+
+    def on_client_confirm_events(self) -> list[dict[str, Any]]:
+        return []
 
     def on_model_text(self, text: str) -> list[dict[str, Any]]:
         return self._state.on_model_text(text)

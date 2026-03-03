@@ -313,12 +313,17 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             message_type = str(message.get("type", "")).strip()
             try:
                 if message_type == CLIENT_AUDIO:
-                    await bridge.send_audio(_decode_b64_payload(message))
+                    audio_bytes = _decode_b64_payload(message)
+                    await bridge.send_audio(audio_bytes)
+                    for extra_event in runtime.on_client_audio(audio_bytes, str(message.get("mime", ""))):
+                        await ws.send_json(extra_event)
                 elif message_type == CLIENT_VIDEO:
                     runtime.on_client_video()
                     await bridge.send_image_jpeg(_decode_b64_payload(message))
                 elif message_type == CLIENT_CONFIRM:
                     confirm_prompt = runtime.on_client_confirm()
+                    for extra_event in runtime.on_client_confirm_events():
+                        await ws.send_json(extra_event)
                     if confirm_prompt:
                         await bridge.send_text(confirm_prompt, role="user")
                 elif message_type == CLIENT_STOP:

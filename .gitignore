@@ -30,3 +30,8 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Landing (Next.js)
+landing/node_modules/
+landing/.next/
+landing/out/

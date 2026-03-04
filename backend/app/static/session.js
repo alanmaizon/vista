@@ -12,6 +12,7 @@ import {
   hasVisualSourceEnabled,
 } from "./ui.js";
 import { readApiPayload } from "./api.js";
+import { sanitizeInput } from "./sanitize.js";
 import { queuePlaybackChunk } from "./audio.js";
 import { enableMicCapture, syncVisualCapture, stopMedia } from "./media.js";
 import { renderSummary, usesDeterministicLivePhraseCapture } from "./music-score.js";
@@ -27,7 +28,7 @@ export async function createSession(idToken, { sessionMode = elements.mode.value
     body: JSON.stringify({
       domain: appState.domain,
       mode: sessionMode,
-      goal: (goalOverride ?? elements.goal.value.trim()) || null,
+      goal: sanitizeInput(goalOverride ?? elements.goal.value, { maxLength: 500 }) || null,
     }),
   });
 
@@ -106,6 +107,11 @@ export function attachSocketHandlers(ws) {
     }
   };
 
+  ws.onerror = () => {
+    appendCaption("Error", "WebSocket connection error. Check your network and try again.");
+    setSessionStatus("Connection error.");
+  };
+
   ws.onclose = async () => {
     await stopMedia();
     appState.ws = null;
@@ -142,9 +148,24 @@ export async function startSession({
   appState.sessionId = session.id;
 
   setSessionStatus("Opening live websocket...");
-  appState.ws = createLiveSocket();
+  let ws;
+  try {
+    ws = createLiveSocket();
+  } catch (error) {
+    setSessionStatus("Connection failed.");
+    appendCaption("Error", "Unable to open WebSocket connection. Please check your network and try again.");
+    throw new Error("WebSocket connection could not be established.");
+  }
+  appState.ws = ws;
   attachSocketHandlers(appState.ws);
-  await waitForSocketOpen(appState.ws);
+  try {
+    await waitForSocketOpen(appState.ws);
+  } catch (error) {
+    appState.ws = null;
+    setSessionStatus("Connection failed.");
+    appendCaption("Error", "WebSocket connection failed. The server may be unavailable. Please try again later.");
+    throw error;
+  }
   appState.ws.send(
     JSON.stringify({
       type: "client.init",

@@ -10,6 +10,7 @@ import {
   resetLessonFlow,
 } from "./ui.js";
 import { readApiPayload } from "./api.js";
+import { sanitizeInput } from "./sanitize.js";
 import { toBase64, captureOneShotPcmClip } from "./audio.js";
 import {
   flattenNotesFromMeasures,
@@ -208,7 +209,7 @@ export async function prepareScoreFlow(sourceTextOverride = null) {
   if (!appState.user) {
     throw new Error("Sign in before preparing a score.");
   }
-  const sourceText = (sourceTextOverride ?? elements.scoreLine?.value.trim() ?? "").trim();
+  const sourceText = sanitizeInput(sourceTextOverride ?? elements.scoreLine?.value ?? "", { maxLength: 5000 });
   if (!sourceText) {
     throw new Error("Enter a score line before preparing it.");
   }
@@ -242,7 +243,7 @@ export async function runGuidedLessonAction({ sourceTextOverride = null } = {}) 
     throw new Error("Sign in before starting the guided lesson.");
   }
 
-  const sourceText = (sourceTextOverride ?? elements.scoreLine?.value.trim() ?? "").trim();
+  const sourceText = sanitizeInput(sourceTextOverride ?? elements.scoreLine?.value ?? "", { maxLength: 5000 });
   const awaitingCompare = hasFreshPreparedScore() && appState.lessonStage === "awaiting-compare";
   let audioBase64 = null;
 

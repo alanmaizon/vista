@@ -61,6 +61,17 @@ if FRONTEND_DIST is not None and (FRONTEND_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
 
 
+def _find_logo_file() -> Path | None:
+    """Resolve a logo path from the built frontend first, then the repo root."""
+    if FRONTEND_DIST is not None:
+        frontend_logo = FRONTEND_DIST / "logo.svg"
+        if frontend_logo.is_file():
+            return frontend_logo
+    if ROOT_LOGO.is_file():
+        return ROOT_LOGO
+    return None
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
     """Initialise Firebase and create the sessions table if needed."""
@@ -93,7 +104,19 @@ async def index() -> FileResponse:
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon() -> FileResponse:
     """Serve the shared logo as the site favicon."""
-    return FileResponse(ROOT_LOGO, media_type="image/svg+xml")
+    logo_path = _find_logo_file()
+    if logo_path is None:
+        raise HTTPException(status_code=404, detail="favicon not found")
+    return FileResponse(logo_path, media_type="image/svg+xml")
+
+
+@app.get("/logo.svg", include_in_schema=False)
+async def logo() -> FileResponse:
+    """Serve the Eurydice logo for frontend hero and branding assets."""
+    logo_path = _find_logo_file()
+    if logo_path is None:
+        raise HTTPException(status_code=404, detail="logo not found")
+    return FileResponse(logo_path, media_type="image/svg+xml")
 
 
 @app.get("/health")

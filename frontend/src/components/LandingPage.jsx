@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   BarChart3,
   BookOpenText,
@@ -143,9 +144,44 @@ export default function LandingPage({
   onEmailChange,
   onPasswordChange,
   onSignIn,
+  isTransitioning = false,
 }) {
+  useEffect(() => {
+    const targets = Array.from(document.querySelectorAll(".feature-observe"));
+    if (!targets.length) {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) {
+            continue;
+          }
+          entry.target.classList.add("is-visible");
+          observer.unobserve(entry.target);
+        }
+      },
+      {
+        root: null,
+        rootMargin: "0px 0px -12% 0px",
+        threshold: 0.22,
+      },
+    );
+
+    for (const node of targets) {
+      observer.observe(node);
+    }
+
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="text-slate-100">
+    <div
+      className={`text-slate-100 transition-all duration-500 ${
+        isTransitioning ? "pointer-events-none scale-[1.01] opacity-0 blur-[2px]" : "opacity-100"
+      }`}
+    >
       <section className="landing-hero-gradient relative flex min-h-screen items-center justify-center overflow-hidden px-5 py-16 text-center">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.16),transparent_40%),radial-gradient(circle_at_80%_80%,rgba(99,102,241,0.14),transparent_36%)]" />
         <div className="relative z-10 mx-auto max-w-4xl">
@@ -180,7 +216,7 @@ export default function LandingPage({
             type="button"
             onClick={onSignIn}
             disabled={signingIn}
-            className="mt-10 rounded-2xl bg-sky-400 px-10 py-3 text-lg font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-wait disabled:opacity-75"
+            className="landing-cta mt-10 rounded-2xl bg-sky-400 px-10 py-3 text-lg font-semibold text-slate-950 transition hover:-translate-y-0.5 hover:bg-sky-300 hover:shadow-[0_18px_35px_rgba(56,189,248,0.34)] disabled:cursor-wait disabled:opacity-75"
           >
             {signingIn ? "Signing In..." : "Sign In to Start"}
           </button>
@@ -229,7 +265,13 @@ export default function LandingPage({
 
       <div id="eurydice-features">
         {FEATURE_SECTIONS.map((feature, index) => (
-          <FeatureCard key={feature.title} feature={feature} index={index} />
+          <div
+            key={feature.title}
+            className="feature-observe"
+            style={{ transitionDelay: `${(index % 3) * 90}ms` }}
+          >
+            <FeatureCard feature={feature} index={index} />
+          </div>
         ))}
       </div>
     </div>

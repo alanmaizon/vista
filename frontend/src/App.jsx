@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AppLayout from "./components/AppLayout";
 import LandingPage from "./components/LandingPage";
 import useEurydiceApp, { SKILLS } from "./hooks/useEurydiceApp";
 
 export default function App() {
   const [signingIn, setSigningIn] = useState(false);
+  const [isEnteringWorkspace, setIsEnteringWorkspace] = useState(false);
   const {
     firebaseConfigText,
     setFirebaseConfigText,
@@ -50,12 +51,23 @@ export default function App() {
     setSigningIn(true);
     try {
       await handleSignIn();
+      setIsEnteringWorkspace(true);
     } finally {
       setSigningIn(false);
     }
   };
 
-  if (!isAuthenticated) {
+  useEffect(() => {
+    if (!isAuthenticated || !isEnteringWorkspace) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setIsEnteringWorkspace(false);
+    }, 520);
+    return () => window.clearTimeout(timer);
+  }, [isAuthenticated, isEnteringWorkspace]);
+
+  if (!isAuthenticated || isEnteringWorkspace) {
     return (
       <LandingPage
         authStatus={authStatus}
@@ -68,6 +80,7 @@ export default function App() {
         onEmailChange={setEmail}
         onPasswordChange={setPassword}
         onSignIn={handleLandingSignIn}
+        isTransitioning={isEnteringWorkspace}
       />
     );
   }

@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function WorkspacePage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-6">
@@ -13,12 +15,12 @@ export default function WorkspacePage() {
           connect with your teacher.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <a
+          <Link
             href="/"
             className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
           >
             ← Back to Home
-          </a>
+          </Link>
         </div>
       </div>
     </main>

@@ -9,7 +9,6 @@ import {
   Network,
   Route,
   SlidersHorizontal,
-  Sparkles,
   Waves,
 } from "lucide-react";
 
@@ -25,54 +24,63 @@ const FEATURE_SECTIONS = [
     description:
       "Eurydice listens with bar-level precision and explains where pitch, timing, or articulation drifted. Feedback is immediate, specific, and actionable so every repetition has purpose.",
     icon: Waves,
+    image: "/features/deep-performance-feedback.png",
   },
   {
     title: "Adaptive Learning Paths",
     description:
       "Lessons evolve based on how you actually play, not a fixed script. Eurydice adjusts tempo, complexity, and repetition patterns to keep challenge and momentum balanced.",
     icon: Route,
+    image: "/features/adaptive-learning-paths.png",
   },
   {
     title: "Progress Analytics & Teacher Dashboard",
     description:
       "Track improvement over sessions with measurable performance signals and progression snapshots. Teachers can review attempts quickly and focus live instruction where it matters most.",
     icon: BarChart3,
+    image: "/features/progress-analytics-dashboard.png",
   },
   {
     title: "Multi-Instrument Intelligence",
     description:
       "From voice to strings to keys, Eurydice adapts recognition and coaching to instrument context. The same lesson loop supports technique-specific interpretation without fragmenting your workflow.",
     icon: Guitar,
+    image: "/features/multi-instrument-intelligence.png",
   },
   {
     title: "Gamified Practice",
     description:
       "Structured streaks, milestones, and challenge loops turn repetition into progress-driven play. Motivation is tied to musical quality, not shallow interaction metrics.",
     icon: Gamepad2,
+    image: "/features/gamified-practice.png",
   },
   {
     title: "Integrated Playback & Accompaniment",
     description:
       "Hear target phrases instantly, loop difficult bars, and practice with responsive accompaniment. Eurydice keeps playback and guidance in one coherent practice surface.",
     icon: SlidersHorizontal,
+    image: "/features/integrated-playback-accompaniment.png",
   },
   {
     title: "Real-Time Collaboration",
     description:
       "Students, teachers, and peers can align on the same score context and performance feedback in real time. Collaboration flows through shared musical artifacts, not disconnected chat threads.",
     icon: Network,
+    image: "/features/realtime-collaboration.png",
   },
   {
     title: "Content Library & Repertoire",
     description:
       "Build a structured catalog of songs, exercises, and practice variants mapped to your goals. Eurydice keeps each repertoire item tied to measurable progress and lesson history.",
     icon: BookOpenText,
+    image: "/features/content-library-repertoire.png",
   },
   {
     title: "Conversational AI Music Tutor",
     description:
       "Ask naturally, play immediately, and receive coaching that understands both musical intent and performance reality. Eurydice is designed as a live tutor, not a static notation viewer.",
     icon: MessageCircleMore,
+    image: "/features/conversational-ai-tutor.png",
   },
 ];
 
@@ -119,13 +127,18 @@ function FeatureCard({ feature, index }) {
               : "border-white/15 bg-slate-950/35 text-slate-300"
           }`}
         >
-          <div className="text-xs font-semibold uppercase tracking-[0.2em]">Icon Placeholder</div>
+          <div className="text-xs font-semibold uppercase tracking-[0.2em]">Visual Preview</div>
           <div
             className={`mt-6 flex h-52 items-center justify-center rounded-2xl border border-dashed ${
               isLight ? "border-slate-400/60 bg-slate-100/70" : "border-slate-600/70 bg-slate-900/40"
             }`}
           >
-            <Sparkles className={`h-12 w-12 ${isLight ? "text-sky-700" : "text-sky-300"}`} />
+            <img
+              src={feature.image}
+              alt={`${feature.title} preview`}
+              loading="lazy"
+              className="h-full w-full rounded-2xl object-cover"
+            />
           </div>
         </div>
       </div>

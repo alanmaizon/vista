@@ -177,6 +177,7 @@ def _build_pitch_contour(
 
     for start in range(0, len(samples), hop_samples):
         end = min(len(samples), start + window_samples)
+        # Minimum window for reliable pitch estimation (~20 ms)
         if end - start < sample_rate // 50:
             contour.append((None, 0.0))
             continue

@@ -14,6 +14,11 @@ from .domains.music import models as _music_models  # noqa: F401
 from .models import Base
 
 
+def _sql_string_literal(value: str) -> str:
+    """Render a safe SQL string literal for simple internal DDL patches."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _make_database_url() -> str:
     """Construct a database URL based on environment variables.
 
@@ -54,19 +59,18 @@ AsyncSessionLocal = async_sessionmaker(
 
 async def init_db() -> None:
     """Create tables if they do not already exist."""
+    default_domain_literal = _sql_string_literal(DEFAULT_DOMAIN)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # Lightweight schema evolution until full migrations are in place.
         await conn.execute(
             text(
                 "ALTER TABLE sessions "
-                "ADD COLUMN IF NOT EXISTS domain VARCHAR(16) NOT NULL DEFAULT :default_domain"
-            ),
-            {"default_domain": DEFAULT_DOMAIN},
+                f"ADD COLUMN IF NOT EXISTS domain VARCHAR(16) NOT NULL DEFAULT {default_domain_literal}"
+            )
         )
         await conn.execute(
-            text("ALTER TABLE sessions ALTER COLUMN domain SET DEFAULT :default_domain"),
-            {"default_domain": DEFAULT_DOMAIN},
+            text(f"ALTER TABLE sessions ALTER COLUMN domain SET DEFAULT {default_domain_literal}")
         )
 
 

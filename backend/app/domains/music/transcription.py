@@ -156,6 +156,115 @@ def _estimate_pitch(segment: list[float], sample_rate: int) -> tuple[float | Non
     return fastyin_estimate.frequency_hz, max(0.0, min(fastyin_estimate.confidence, 0.82))
 
 
+_FRAME_CONFIDENCE_MIN = 0.3
+_PITCH_CHANGE_CENTS = 80
+_MIN_NOTE_DURATION_MS = 80
+
+
+def _build_pitch_contour(
+    samples: list[float],
+    sample_rate: int,
+    hop_ms: int = 10,
+) -> list[tuple[float | None, float]]:
+    """Estimate f0 at every *hop_ms* across the clip.
+
+    Returns a list of (frequency_hz | None, confidence) per frame.
+    """
+    hop_samples = max(1, int(sample_rate * hop_ms / 1000))
+    # Use a window ~2x the hop for overlap
+    window_samples = hop_samples * 4
+    contour: list[tuple[float | None, float]] = []
+
+    for start in range(0, len(samples), hop_samples):
+        end = min(len(samples), start + window_samples)
+        if end - start < sample_rate // 50:
+            contour.append((None, 0.0))
+            continue
+        frame = samples[start:end]
+        freq, conf = _estimate_pitch(frame, sample_rate)
+        contour.append((freq, conf))
+
+    return contour
+
+
+def _segment_notes_from_contour(
+    contour: list[tuple[float | None, float]],
+    sample_rate: int,
+    hop_ms: int = 10,
+    confidence_min: float = _FRAME_CONFIDENCE_MIN,
+    pitch_change_cents: float = _PITCH_CHANGE_CENTS,
+    min_note_duration_ms: float = _MIN_NOTE_DURATION_MS,
+) -> list[NoteEvent]:
+    """Group contiguous contour frames into note events.
+
+    Frames are grouped when confidence is above *confidence_min* and pitch
+    stays within *pitch_change_cents* of the running median.  Each resulting
+    note must last at least *min_note_duration_ms*.
+    """
+    events: list[NoteEvent] = []
+    min_frames = max(1, int(min_note_duration_ms / hop_ms))
+
+    # Accumulate frames for current note region
+    region_freqs: list[float] = []
+    region_confs: list[float] = []
+    region_start: int | None = None
+
+    def _flush() -> None:
+        if region_start is None or len(region_freqs) < min_frames:
+            return
+        sorted_freqs = sorted(region_freqs)
+        median_freq = sorted_freqs[len(sorted_freqs) // 2]
+        midi_note = frequency_to_midi(median_freq)
+        avg_conf = sum(region_confs) / len(region_confs)
+        start_ms = region_start * hop_ms
+        duration_ms = max(1, len(region_freqs) * hop_ms)
+        events.append(
+            NoteEvent(
+                midi_note=midi_note,
+                note_name=midi_to_note_name(midi_note),
+                frequency_hz=round(median_freq, 2),
+                start_ms=start_ms,
+                duration_ms=duration_ms,
+                confidence=round(avg_conf, 3),
+            )
+        )
+
+    for frame_idx, (freq, conf) in enumerate(contour):
+        if freq is None or conf < confidence_min:
+            _flush()
+            region_freqs = []
+            region_confs = []
+            region_start = None
+            continue
+
+        if region_start is None:
+            # Start a new region
+            region_start = frame_idx
+            region_freqs = [freq]
+            region_confs = [conf]
+        else:
+            # Check pitch deviation from running median
+            sorted_freqs = sorted(region_freqs)
+            median_freq = sorted_freqs[len(sorted_freqs) // 2]
+            if median_freq > 0 and freq > 0:
+                cents = abs(1200.0 * math.log2(freq / median_freq))
+            else:
+                cents = float("inf")
+
+            if cents <= pitch_change_cents:
+                region_freqs.append(freq)
+                region_confs.append(conf)
+            else:
+                # Pitch jumped — flush current note and start new
+                _flush()
+                region_start = frame_idx
+                region_freqs = [freq]
+                region_confs = [conf]
+
+    _flush()
+    return events
+
+
 def _dedupe_similar_notes(events: list[NoteEvent]) -> list[NoteEvent]:
     deduped: list[NoteEvent] = []
     for event in events:
@@ -217,31 +326,35 @@ def transcribe_pcm16(
     if not samples:
         raise MusicTranscriptionError("The audio clip is empty.")
 
-    segments = _find_active_segments(samples, sample_rate)
-    events: list[NoteEvent] = []
+    # Frame-level pitch contour for improved segmentation
+    contour = _build_pitch_contour(samples, sample_rate)
+    events = _segment_notes_from_contour(contour, sample_rate)
     warnings: list[str] = []
 
-    if not segments:
-        warnings.append("No stable pitched phrase was detected. Try a cleaner, slower monophonic replay.")
-
-    for start, stop in segments[:max_notes]:
-        segment = samples[start:stop]
-        frequency_hz, confidence = _estimate_pitch(segment, sample_rate)
-        if frequency_hz is None or confidence < MIN_CONFIDENCE:
-            continue
-        midi_note = frequency_to_midi(frequency_hz)
-        events.append(
-            NoteEvent(
-                midi_note=midi_note,
-                note_name=midi_to_note_name(midi_note),
-                frequency_hz=round(frequency_hz, 2),
-                start_ms=round(start * 1000 / sample_rate),
-                duration_ms=max(1, round((stop - start) * 1000 / sample_rate)),
-                confidence=round(confidence, 3),
+    if not events:
+        # Fall back to legacy energy-gate segmentation
+        segments = _find_active_segments(samples, sample_rate)
+        if not segments:
+            warnings.append("No stable pitched phrase was detected. Try a cleaner, slower monophonic replay.")
+        for start, stop in segments[:max_notes]:
+            segment = samples[start:stop]
+            frequency_hz, confidence = _estimate_pitch(segment, sample_rate)
+            if frequency_hz is None or confidence < MIN_CONFIDENCE:
+                continue
+            midi_note = frequency_to_midi(frequency_hz)
+            events.append(
+                NoteEvent(
+                    midi_note=midi_note,
+                    note_name=midi_to_note_name(midi_note),
+                    frequency_hz=round(frequency_hz, 2),
+                    start_ms=round(start * 1000 / sample_rate),
+                    duration_ms=max(1, round((stop - start) * 1000 / sample_rate)),
+                    confidence=round(confidence, 3),
+                )
             )
-        )
 
     events = _dedupe_similar_notes(events)
+    events = events[:max_notes]
     if any(event.confidence < 0.6 for event in events):
         warnings.append("One or more detected notes are lower confidence. Replay slowly for a cleaner result.")
 

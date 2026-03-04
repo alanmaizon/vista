@@ -140,7 +140,6 @@ export function updatePrimaryActionButton() {
     return;
   }
   if (state === "guided-lesson") {
-    elements.start.classList.add("primary");
     if (!hasFreshPreparedScore() || appState.musicScoreDirty) {
       applyPrimaryAction("primary", "confirm", "Prepare lesson", !hasScoreDraft());
       return;
@@ -150,15 +149,13 @@ export function updatePrimaryActionButton() {
       return;
     }
     const finalBar = activeMeasureCount() > 0 && appState.lessonMeasureIndex === activeMeasureCount();
-    renderButton(elements.start, {
-      icon: "start",
-      label:
-        appState.lessonStage === "complete"
-          ? "Restart lesson"
-          : finalBar && appState.lessonStage === "reviewed"
-            ? "Finish lesson"
-            : "Next bar",
-    });
+    const label =
+      appState.lessonStage === "complete"
+        ? "Restart lesson"
+        : finalBar && appState.lessonStage === "reviewed"
+          ? "Finish lesson"
+          : "Next bar";
+    applyPrimaryAction("primary", "start", label);
     return;
   }
   if (state === "prepare-score") {

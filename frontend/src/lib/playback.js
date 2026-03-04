@@ -14,8 +14,8 @@ export function playPhrase({ notes, tempo_bpm = 120, waveform = "sine" }) {
 
   for (const note of notes) {
     const frequency = midiToFrequency(note.midi_note);
-    const durationSec =
-      ((note.beats ?? note.duration_ms / beatMs) * beatMs) / 1000;
+    const beats = note.beats ?? (note.duration_ms != null ? note.duration_ms / beatMs : 1);
+    const durationSec = (beats * beatMs) / 1000;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = waveform;

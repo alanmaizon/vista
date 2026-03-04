@@ -291,8 +291,8 @@ def compare_performance_against_score(
         )
 
     # Warn if played tempo differs significantly from score tempo
-    if played_tempo is not None and hasattr(score, "tempo_bpm") and getattr(score, "tempo_bpm", None):
-        score_tempo = score.tempo_bpm
+    score_tempo = getattr(score, "tempo_bpm", None)
+    if played_tempo is not None and score_tempo is not None:
         tempo_ratio = abs(played_tempo - score_tempo) / score_tempo
         if tempo_ratio > 0.20:
             warnings.append(

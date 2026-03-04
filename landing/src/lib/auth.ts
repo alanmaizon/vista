@@ -1,8 +1,14 @@
 import { SignJWT, jwtVerify } from "jose";
 
-const SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? "eurydice-dev-secret-change-in-production"
-);
+function getSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret && process.env.NODE_ENV === "production") {
+    throw new Error("JWT_SECRET environment variable is required in production");
+  }
+  return new TextEncoder().encode(
+    secret ?? "eurydice-dev-secret-change-in-production"
+  );
+}
 
 const COOKIE_NAME = "eurydice_token";
 const ISSUER = "eurydice";
@@ -17,11 +23,11 @@ export async function createToken(payload: Record<string, unknown>) {
     .setIssuer(ISSUER)
     .setAudience(AUDIENCE)
     .setExpirationTime("8h")
-    .sign(SECRET);
+    .sign(getSecret());
 }
 
 export async function verifyToken(token: string) {
-  const { payload } = await jwtVerify(token, SECRET, {
+  const { payload } = await jwtVerify(token, getSecret(), {
     issuer: ISSUER,
     audience: AUDIENCE,
   });

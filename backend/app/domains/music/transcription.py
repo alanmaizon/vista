@@ -6,6 +6,7 @@ import base64
 import binascii
 import math
 import re
+import statistics
 import struct
 from dataclasses import asdict
 
@@ -312,6 +313,45 @@ def _interval_hint(events: list[NoteEvent]) -> str | None:
     return f"{direction.capitalize()} {interval_name_for_semitones(semitones)}."
 
 
+def _estimate_tempo(events: list[NoteEvent]) -> float | None:
+    """Estimate tempo in BPM from inter-onset intervals of note events.
+
+    Returns the estimated BPM if at least two notes exist, else ``None``.
+    """
+    if len(events) < 2:
+        return None
+    ioi_ms_values: list[float] = []
+    for i in range(1, len(events)):
+        ioi = events[i].start_ms - events[i - 1].start_ms
+        if ioi > 0:
+            ioi_ms_values.append(float(ioi))
+    if not ioi_ms_values:
+        return None
+    median_ioi_ms = statistics.median(ioi_ms_values)
+    if median_ioi_ms <= 0:
+        return None
+    return round(60000.0 / median_ioi_ms, 1)
+
+
+def _add_beats_to_events(events: list[NoteEvent], tempo_bpm: float | None) -> list[NoteEvent]:
+    """Return a copy of *events* with the ``beats`` field populated."""
+    if not tempo_bpm or tempo_bpm <= 0:
+        return events
+    beat_ms = 60000.0 / tempo_bpm
+    return [
+        NoteEvent(
+            midi_note=e.midi_note,
+            note_name=e.note_name,
+            frequency_hz=e.frequency_hz,
+            start_ms=e.start_ms,
+            duration_ms=e.duration_ms,
+            confidence=e.confidence,
+            beats=round(e.duration_ms / beat_ms, 3),
+        )
+        for e in events
+    ]
+
+
 def transcribe_pcm16(
     audio_bytes: bytes,
     *,
@@ -356,6 +396,11 @@ def transcribe_pcm16(
 
     events = _dedupe_similar_notes(events)
     events = events[:max_notes]
+
+    # Estimate tempo and attach beats to each note
+    tempo_bpm = _estimate_tempo(events)
+    events = _add_beats_to_events(events, tempo_bpm)
+
     if any(event.confidence < 0.6 for event in events):
         warnings.append("One or more detected notes are lower confidence. Replay slowly for a cleaner result.")
 
@@ -407,6 +452,7 @@ def transcribe_pcm16(
         harmony_hint=harmony_hint,
         summary="".join(summary_parts).strip(),
         warnings=tuple(dict.fromkeys(warnings)),
+        tempo_bpm=tempo_bpm,
     )
 
 
@@ -420,5 +466,6 @@ def transcription_to_dict(result: SymbolicPhrase) -> dict:
         "harmony_hint": result.harmony_hint,
         "summary": result.summary,
         "warnings": list(result.warnings),
+        "tempo_bpm": result.tempo_bpm,
         "notes": [asdict(note) for note in result.notes],
     }

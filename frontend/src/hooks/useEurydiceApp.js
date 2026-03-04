@@ -3,6 +3,7 @@ import useLiveConnection from "./useLiveConnection";
 import { apiRequest } from "../lib/api";
 import { capturePcmClip } from "../lib/audioCapture";
 import { signInWithFirebase } from "../lib/firebaseBrowser";
+import { playPhrase } from "../lib/playback";
 
 export const SKILLS = [
   {
@@ -111,6 +112,8 @@ export default function useEurydiceApp() {
   const [liveMode, setLiveMode] = useState(null);
   const [cameraCapturePending, setCameraCapturePending] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [tempoOverride, setTempoOverride] = useState("");
 
   const videoRef = useRef(null);
   const cameraStreamRef = useRef(null);
@@ -574,6 +577,49 @@ export default function useEurydiceApp() {
     liveMessageHandlerRef.current = handleLiveMessage;
   }, [handleLiveMessage]);
 
+  const detectedTempo = useMemo(() => {
+    return analysis?.tempo_bpm ?? null;
+  }, [analysis]);
+
+  const handlePlayPhrase = useCallback(
+    async (notes, defaultTempo) => {
+      if (isPlaying || !notes?.length) {
+        return;
+      }
+      setIsPlaying(true);
+      try {
+        const tempo =
+          tempoOverride && Number(tempoOverride) > 0
+            ? Number(tempoOverride)
+            : defaultTempo || 120;
+        await playPhrase({ notes, tempo_bpm: tempo });
+      } finally {
+        setIsPlaying(false);
+      }
+    },
+    [isPlaying, tempoOverride],
+  );
+
+  const handlePlayAnalysis = useCallback(() => {
+    if (!analysis?.notes?.length) {
+      return;
+    }
+    return handlePlayPhrase(analysis.notes, analysis.tempo_bpm);
+  }, [analysis, handlePlayPhrase]);
+
+  const handlePlayScore = useCallback(() => {
+    if (!activeScore?.measures?.length) {
+      return;
+    }
+    const notes = activeScore.measures.flatMap((m) =>
+      (m.notes ?? []).map((n) => ({
+        midi_note: n.midi_note,
+        beats: n.beats,
+      })),
+    );
+    return handlePlayPhrase(notes, 120);
+  }, [activeScore, handlePlayPhrase]);
+
   const handlePrimaryAction = useCallback(async () => {
     if (isBusy) {
       return;
@@ -683,14 +729,20 @@ export default function useEurydiceApp() {
     sessionId,
     liveMode,
     isBusy,
+    isPlaying,
     isConnected,
     videoRef,
     primaryActionLabel,
     activeNoteRange,
     comparisonStateByIndex,
     runtimeSummary,
+    detectedTempo,
+    tempoOverride,
+    setTempoOverride,
     handleSignIn,
     handlePrimaryAction,
+    handlePlayAnalysis,
+    handlePlayScore,
     resetLessonState,
   };
 }

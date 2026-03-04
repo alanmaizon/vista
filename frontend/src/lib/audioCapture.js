@@ -59,8 +59,18 @@ export async function capturePcmClip({
   trailingSilenceMs = 400,
   onsetThresholdDb = -45,
   maxMs = 10000,
+  onset_delay_ms = 200,
+  tempo_hint_bpm = null,
 } = {}) {
   const isMusic = mode === "music";
+
+  // Scale trailing silence proportionally if a tempo hint is provided
+  let effectiveTrailingSilenceMs = trailingSilenceMs;
+  if (isMusic && tempo_hint_bpm != null && tempo_hint_bpm > 0) {
+    const referenceBpm = 120;
+    const tempoRatio = referenceBpm / tempo_hint_bpm;
+    effectiveTrailingSilenceMs = Math.round(trailingSilenceMs * tempoRatio);
+  }
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -88,7 +98,9 @@ export async function capturePcmClip({
     await audioContext.close();
   };
 
-  const buildResult = (sampleRate) => {
+  const captureStartTime = Date.now();
+
+  const buildResult = (sampleRate, detectedOnsetMs = null) => {
     const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
     const merged = new Float32Array(totalLength);
     let cursor = 0;
@@ -102,6 +114,8 @@ export async function capturePcmClip({
       bytes: pcmBytes,
       audioB64: bytesToBase64(pcmBytes),
       mime: "audio/pcm;rate=16000",
+      capture_duration_ms: Date.now() - captureStartTime,
+      detected_onset_ms: detectedOnsetMs,
     };
   };
 
@@ -130,11 +144,12 @@ export async function capturePcmClip({
     }
 
     // Music mode: adaptive energy-gated capture
-    const preRollMs = 200;
+    const preRollMs = 300;
     const checkIntervalMs = 10;
     const onsetFramesRequired = 3;
     let onsetDetected = false;
     let onsetTime = null;
+    let onsetDelayElapsed = false;
     let consecutiveOnsetFrames = 0;
     let lastAboveTime = null;
     const startTime = Date.now();
@@ -153,20 +168,30 @@ export async function capturePcmClip({
             if (consecutiveOnsetFrames >= onsetFramesRequired) {
               onsetDetected = true;
               onsetTime = Date.now();
+              onsetDelayElapsed = false;
               lastAboveTime = Date.now();
             }
           } else {
             consecutiveOnsetFrames = 0;
           }
 
-          // If no onset within maxMs, fall back to fixed duration
-          if (elapsed >= durationMs && !onsetDetected) {
+          // If no onset within maxMs, fall back to fixed-length capture
+          if (elapsed >= maxMs && !onsetDetected) {
             clearInterval(interval);
-            resolve(buildResult(audioContext.sampleRate));
+            resolve(buildResult(audioContext.sampleRate, null));
             await cleanup();
             return;
           }
         } else {
+          // Wait for onset_delay_ms before starting to evaluate silence
+          if (!onsetDelayElapsed) {
+            if (Date.now() - onsetTime >= onset_delay_ms) {
+              onsetDelayElapsed = true;
+              lastAboveTime = Date.now();
+            }
+            return;
+          }
+
           // Onset was detected — continue while energy is above threshold
           if (energyDb >= onsetThresholdDb) {
             lastAboveTime = Date.now();
@@ -175,8 +200,9 @@ export async function capturePcmClip({
           const silenceDuration = Date.now() - lastAboveTime;
           const totalElapsed = Date.now() - startTime;
 
-          if (silenceDuration >= trailingSilenceMs || totalElapsed >= maxMs) {
+          if (silenceDuration >= effectiveTrailingSilenceMs || totalElapsed >= maxMs) {
             clearInterval(interval);
+            const detectedOnsetMs = onsetTime - startTime;
 
             // Trim to include pre-roll before onset
             const preRollSamples = Math.round(
@@ -205,7 +231,7 @@ export async function capturePcmClip({
             chunks.length = 0;
             chunks.push(trimmed);
 
-            resolve(buildResult(audioContext.sampleRate));
+            resolve(buildResult(audioContext.sampleRate, detectedOnsetMs));
             await cleanup();
           }
         }

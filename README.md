@@ -80,6 +80,16 @@ vista/
     └── deploy_cloudrun.sh  # Cloud Run deployment automation
 ```
 
+## Architecture Overview
+
+Eurydice follows a **client ↔ server ↔ AI** architecture:
+
+1. **Browser client** (`backend/app/static/`) — A vanilla-JS single-page app that captures audio/video via WebRTC and communicates with the backend over REST and WebSocket.
+2. **FastAPI backend** (`backend/app/`) — Handles authentication (Firebase), session management (PostgreSQL via SQLAlchemy), music score processing (Verovio), and proxies real-time audio/video to the Gemini Live API over a WebSocket bridge.
+3. **Gemini Live API** — Provides multimodal AI responses (voice coaching, score reading, ear training) streamed back to the client in real time.
+
+Data flows in a loop: the client streams media frames to the backend, which forwards them to Gemini; Gemini's responses are relayed back through the WebSocket to the browser, where the UI updates captions, score overlays, and lesson state accordingly.
+
 ## Setup overview
 
 Use Python `3.11`, `3.12`, or `3.13` for local development. Python `3.14` is not supported yet by the pinned dependency stack.

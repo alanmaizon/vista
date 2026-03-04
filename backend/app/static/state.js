@@ -26,6 +26,50 @@ export const elements = {
   preview: document.getElementById("preview"),
 };
 
+/**
+ * Central application state object.
+ *
+ * @type {Object}
+ * @property {string} brand - Display name for the application, read from `data-brand` on `<body>`.
+ * @property {string} domain - Active domain identifier (e.g. "MUSIC"), read from `data-domain` on `<body>`.
+ * @property {Object|null} firebaseApp - Initialised Firebase app instance, or `null` before sign-in.
+ * @property {Object|null} auth - Firebase Auth instance, or `null` before initialisation.
+ * @property {Object|null} user - Current Firebase user object, or `null` when signed out.
+ * @property {boolean} clientConfigLoaded - Whether the Firebase client config has been loaded.
+ * @property {boolean} musicRuntimeLoaded - Whether the music-domain runtime (Verovio, CREPE) has been loaded.
+ * @property {boolean|null} verovioAvailable - `true`/`false` once probed, `null` before probe.
+ * @property {boolean|null} crepeAvailable - `true`/`false` once probed, `null` before probe.
+ * @property {string|null} activeMusicScoreId - Server-side ID of the currently prepared score, or `null`.
+ * @property {Array<Object>} activeMusicMeasures - Parsed measure objects for the active score.
+ * @property {Array<Object>} activeMusicNotes - Parsed note objects for the active score.
+ * @property {Array<number>} highlightedScoreNoteIndexes - Indexes of notes currently highlighted in the overlay.
+ * @property {number|null} focusedScoreNoteIndex - Index of the single note with focus, or `null`.
+ * @property {string} scoreOverlayMode - Current overlay display mode (e.g. "idle", "highlight").
+ * @property {string} scoreOverlaySummary - Text summary shown in the score overlay.
+ * @property {Array<Object>} scoreOverlayMarkers - Marker objects rendered on the score overlay.
+ * @property {Array<Object>} scoreLayoutHints - Layout hint objects from the score renderer.
+ * @property {Array<Object>} scoreGlyphAnchors - Glyph anchor positions from the score renderer.
+ * @property {boolean} scorePrepared - Whether the score has been successfully prepared on the server.
+ * @property {boolean} musicScoreDirty - Whether the local score draft has changed since last prepare.
+ * @property {number|null} lessonMeasureIndex - Current bar index during a guided lesson, or `null`.
+ * @property {string} lessonStage - Current stage of the guided lesson flow (e.g. "idle", "awaiting-compare", "reviewed", "complete").
+ * @property {boolean} cameraScoreImportPending - Whether a camera-based score import is in progress.
+ * @property {boolean} assistantResponseReady - Whether the assistant's latest response is ready for user confirmation.
+ * @property {WebSocket|null} ws - Active WebSocket connection to the backend, or `null`.
+ * @property {string|null} sessionId - Server-assigned session identifier, or `null`.
+ * @property {AudioContext|null} audioContext - Web Audio API context for capture/playback, or `null`.
+ * @property {MediaStreamAudioSourceNode|null} captureSource - Audio source node connected to the mic stream.
+ * @property {ScriptProcessorNode|null} processor - Audio processor node for streaming PCM data.
+ * @property {GainNode|null} monitorGain - Gain node for local audio monitoring.
+ * @property {MediaStream|null} micStream - Active microphone MediaStream, or `null`.
+ * @property {boolean} micEnabled - Whether the microphone is currently enabled.
+ * @property {MediaStream|null} camStream - Active camera MediaStream, or `null`.
+ * @property {boolean} cameraEnabled - Whether the camera is currently enabled.
+ * @property {MediaStream|null} screenStream - Active screen-share MediaStream, or `null`.
+ * @property {boolean} screenEnabled - Whether screen sharing is currently enabled.
+ * @property {number|null} videoTimer - Interval ID for periodic video frame capture, or `null`.
+ * @property {number} playbackCursor - Current playback position index for audio playback.
+ */
 export const appState = {
   brand: document.body.dataset.brand || "Eurydice",
   domain: (document.body.dataset.domain || "MUSIC").toUpperCase(),

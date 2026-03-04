@@ -38,6 +38,15 @@ require_var FIREBASE_SERVICE_ACCOUNT_JSON_SECRET_NAME
 require_var VISTA_FIREBASE_WEB_CONFIG_SECRET_NAME
 require_var CLOUDSQL_INSTANCE_CONNECTION_NAME
 
+as_service_account_resource() {
+  local value="$1"
+  if [[ "$value" == projects/*/serviceAccounts/* ]]; then
+    printf '%s\n' "$value"
+    return
+  fi
+  printf 'projects/%s/serviceAccounts/%s\n' "$GOOGLE_CLOUD_PROJECT" "$value"
+}
+
 gcloud config set run/region "$GOOGLE_CLOUD_LOCATION" >/dev/null
 gcloud config set project "$GOOGLE_CLOUD_PROJECT" >/dev/null
 
@@ -49,7 +58,7 @@ build_cmd=(
 )
 
 if [[ -n "$CLOUD_RUN_BUILD_SERVICE_ACCOUNT" ]]; then
-  build_cmd+=(--service-account "$CLOUD_RUN_BUILD_SERVICE_ACCOUNT")
+  build_cmd+=(--service-account "$(as_service_account_resource "$CLOUD_RUN_BUILD_SERVICE_ACCOUNT")")
 fi
 
 "${build_cmd[@]}"

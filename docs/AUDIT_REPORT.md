@@ -6,6 +6,41 @@
 
 ---
 
+## March 4, 2026 Addendum
+
+This audit predates the merge of the Vite + React frontend scaffold from `copilot/transform-react-placeholder` and the first real React migration pass.
+
+Current branch reality:
+- `frontend/` is now the real React/Vite application and builds successfully.
+- The FastAPI backend now serves the React build when `frontend/dist` (local) or `backend/frontend-dist` (container) exists.
+- The React app now covers the main Eurydice path:
+  - Firebase config load and sign-in
+  - score preparation
+  - phrase transcription
+  - guided lesson progression
+  - performance comparison
+  - live camera score-read bootstrapping
+- The legacy browser client under `backend/app/static/` remains as a fallback/reference implementation while feature parity is still being completed.
+
+This changes the most important frontend conclusion:
+- The repo no longer has a "missing frontend", and the React app is no longer just a scaffold.
+- The remaining frontend concern is controlled duplication:
+  - the React app should become the clear primary product surface
+  - the legacy static client should only exist as a temporary fallback until any missing edge cases are ported
+
+So the highest-value frontend work is no longer "bootstrap React", but:
+1. Continue migrating any remaining niche static-client behavior into React.
+2. Retire or sharply reduce the legacy static fallback once parity is confirmed.
+3. Keep the backend API contracts stable so the React app owns the user workflow instead of mirroring legacy DOM logic.
+
+There is also a practical local development issue worth calling out:
+- If `CLOUDSQL_INSTANCE_CONNECTION_NAME` is set in `backend/.env` during local runs and no Cloud SQL Unix socket is mounted, backend startup fails with `FileNotFoundError` during database initialization.
+- For local development, prefer:
+  - `DB_HOST` / `DB_PORT` with local Postgres or Cloud SQL Proxy over TCP
+  - and leave `CLOUDSQL_INSTANCE_CONNECTION_NAME` blank unless you are in Cloud Run or explicitly mounting `/cloudsql/...`
+
+---
+
 ## Executive Summary
 
 The Eurydice project demonstrates strong architectural foundations with clean domain-driven design, comprehensive testing, and thoughtful separation of concerns. The codebase is well-organized with ~2,370 lines of frontend JavaScript and 34 Python backend files. However, there are opportunities to improve developer experience, security practices, accessibility, and code maintainability.
@@ -162,7 +197,7 @@ The Eurydice project demonstrates strong architectural foundations with clean do
 
 **Strengths:**
 - ✅ Clean domain-driven design with `/domains/` structure
-- ✅ Proper separation: backend (FastAPI), frontend (static client)
+- ✅ Proper separation: backend (FastAPI), frontend (React with a temporary static fallback)
 - ✅ Protocol-based interfaces for extensibility
 - ✅ Type hints throughout Python code
 - ✅ Async/await properly implemented

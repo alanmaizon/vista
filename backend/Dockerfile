@@ -1,8 +1,8 @@
 FROM node:20-slim AS frontend
 WORKDIR /frontend
-COPY frontend/react/package.json frontend/react/package-lock.json ./
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
-COPY frontend/react ./
+COPY frontend ./
 COPY logo.svg public/logo.svg
 RUN npm run build
 

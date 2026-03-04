@@ -47,9 +47,17 @@ app.include_router(music_router)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 ROOT_LOGO = Path(__file__).resolve().parents[2] / "logo.svg"
-FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend-dist"
+CONTAINER_FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend-dist"
+LOCAL_FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+FRONTEND_DIST = (
+    CONTAINER_FRONTEND_DIST
+    if CONTAINER_FRONTEND_DIST.is_dir()
+    else LOCAL_FRONTEND_DIST
+    if LOCAL_FRONTEND_DIST.is_dir()
+    else None
+)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-if FRONTEND_DIST.is_dir():
+if FRONTEND_DIST is not None and (FRONTEND_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
 
 
@@ -73,8 +81,11 @@ async def startup_event() -> None:
 @app.get("/")
 async def index() -> FileResponse:
     """Serve the Eurydice browser client."""
-    react_index = FRONTEND_DIST / "index.html"
-    if react_index.is_file():
+    if FRONTEND_DIST is not None:
+        react_index = FRONTEND_DIST / "index.html"
+    else:
+        react_index = None
+    if react_index is not None and react_index.is_file():
         return FileResponse(react_index)
     return FileResponse(STATIC_DIR / "music.html")
 
@@ -93,7 +104,7 @@ async def health_check() -> dict[str, str]:
 
 @app.get("/api/client-config")
 async def client_config() -> dict[str, object | None]:
-    """Expose non-secret browser config needed by the static client."""
+    """Expose non-secret browser config needed by the browser client."""
     raw_config = settings.firebase_web_config.strip()
     if not raw_config:
         return {"firebaseConfig": None}

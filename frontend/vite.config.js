@@ -11,6 +11,10 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      '/favicon.ico': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
       '/ws/live': {
         target: 'ws://localhost:8000',
         ws: true,

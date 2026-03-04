@@ -53,7 +53,7 @@ See the [Local Setup Guide](docs/LOCAL_SETUP.md) for detailed instructions on ru
 This repository is organised into two main parts:
 
 * `backend/` — A FastAPI service that exposes REST endpoints for session management, music score import/rendering, guided lesson workflows, user authentication via Firebase, and a WebSocket endpoint that proxies audio/video to the Gemini Live API. The service is designed to run on Google Cloud Run and connect to a Cloud SQL (PostgreSQL) database.
-* `frontend/` — A placeholder for a React application. For hackathon purposes the `backend/app/static/` directory includes a browser client that can be used directly.
+* `frontend/` — A Vite + React front-end. Its production build is served by the FastAPI backend when a `dist/` build is present. The legacy `backend/app/static/` client remains as a fallback and reference implementation during the transition.
 
 ### Key Directories
 ```
@@ -84,7 +84,7 @@ vista/
 
 Eurydice follows a **client ↔ server ↔ AI** architecture:
 
-1. **Browser client** (`backend/app/static/`) — A vanilla-JS single-page app that captures audio/video via WebRTC and communicates with the backend over REST and WebSocket.
+1. **Browser client** (`frontend/`) — A React/Vite single-page app for the primary Eurydice experience. When the React build is unavailable, the backend falls back to the legacy static client in `backend/app/static/`.
 2. **FastAPI backend** (`backend/app/`) — Handles authentication (Firebase), session management (PostgreSQL via SQLAlchemy), music score processing (Verovio), and proxies real-time audio/video to the Gemini Live API over a WebSocket bridge.
 3. **Gemini Live API** — Provides multimodal AI responses (voice coaching, score reading, ear training) streamed back to the client in real time.
 
@@ -113,7 +113,10 @@ For more details about the product specification, refer to `docs/EURYDICE_CHALLE
 - **CREPE** (optional) - ML-based pitch detection
 
 ### Frontend
-- **Vanilla JavaScript** (ES6 modules)
+- **React 19** - Main frontend UI
+- **Vite** - Frontend build/dev pipeline
+- **Tailwind CSS** - Styling
+- **Headless UI** - UI primitives
 - **Firebase Web SDK** - Client-side authentication
 - **WebRTC** - Audio/video capture
 - **WebSocket** - Real-time communication

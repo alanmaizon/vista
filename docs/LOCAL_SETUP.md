@@ -57,10 +57,28 @@ This is the shortest path to a working local Eurydice environment.
     - `source .venv/bin/activate`
   - `pip install -r backend/requirements.txt`
   - `pip install -r backend/requirements-dev.txt`
+- Optional: build the React frontend locally so `/` serves it instead of the legacy static fallback:
+  - `cd frontend`
+  - `npm install`
+  - `npm run build`
+  - `cd ../..`
 - Start the backend:
   - `cd backend`
   - `uvicorn app.main:app --reload`
 - Open `http://127.0.0.1:8000`
+
+### Common local startup failure
+
+If startup fails with a `FileNotFoundError` while connecting to Postgres, your local shell is probably still exporting `CLOUDSQL_INSTANCE_CONNECTION_NAME` even though you are not running inside Cloud Run.
+
+For local development:
+- unset `CLOUDSQL_INSTANCE_CONNECTION_NAME`
+- use `DB_HOST` / `DB_PORT` for local Postgres or Cloud SQL Proxy over TCP
+
+Example:
+- `DB_HOST=127.0.0.1`
+- `DB_PORT=5432`
+- `CLOUDSQL_INSTANCE_CONNECTION_NAME=`
 
 ## Official references
 

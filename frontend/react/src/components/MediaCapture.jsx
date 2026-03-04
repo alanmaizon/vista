@@ -87,7 +87,7 @@ export default function MediaCapture({ micEnabled, cameraEnabled, send, isConnec
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 1280, height: 720, facingMode: "environment" },
+        video: { width: 1280, height: 720, facingMode: "user" },
       });
       cameraStreamRef.current = stream;
       setCamActive(true);

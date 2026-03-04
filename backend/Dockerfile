@@ -3,8 +3,8 @@ WORKDIR /frontend
 COPY frontend/react/package.json frontend/react/package-lock.json ./
 RUN npm ci
 COPY frontend/react ./
-COPY logo.svg /logo.svg
-RUN cp /logo.svg public/logo.svg && npm run build
+COPY logo.svg public/logo.svg
+RUN npm run build
 
 FROM python:3.11-slim
 

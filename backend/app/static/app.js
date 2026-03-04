@@ -13,6 +13,7 @@ import {
   resetLessonFlow,
 } from "./ui.js";
 import { signIn, loadClientConfig } from "./api.js";
+import { sanitizeJson, validateFirebaseConfig } from "./sanitize.js";
 import { captureOneShotPcmClip, toBase64 } from "./audio.js";
 import { enableMicCapture, disableMicCapture, syncVisualCapture, captureScreenshot } from "./media.js";
 import { renderScoreNoteStrip, usesDeterministicLivePhraseCapture } from "./music-score.js";
@@ -198,6 +199,34 @@ if (settingsToggle && settingsDropdown) {
       settingsDropdown.classList.add("is-hidden");
       settingsToggle.setAttribute("aria-expanded", "false");
     }
+  });
+}
+const firebaseConfigWarning = document.getElementById("firebase-config-hint");
+if (elements.firebaseConfig && firebaseConfigWarning) {
+  elements.firebaseConfig.addEventListener("input", () => {
+    const raw = elements.firebaseConfig.value.trim();
+    if (!raw) {
+      firebaseConfigWarning.textContent = "Paste your Firebase web app configuration as JSON";
+      firebaseConfigWarning.classList.remove("warning");
+      firebaseConfigWarning.classList.add("sr-only");
+      return;
+    }
+    const parsed = sanitizeJson(raw);
+    if (!parsed) {
+      firebaseConfigWarning.textContent = "⚠ Malformed JSON. Please paste a valid Firebase config object.";
+      firebaseConfigWarning.classList.add("warning");
+      firebaseConfigWarning.classList.remove("sr-only");
+      return;
+    }
+    const validation = validateFirebaseConfig(parsed);
+    if (!validation.isValid) {
+      firebaseConfigWarning.textContent = `⚠ ${validation.errors.join(", ")}`;
+      firebaseConfigWarning.classList.add("warning");
+      firebaseConfigWarning.classList.remove("sr-only");
+      return;
+    }
+    firebaseConfigWarning.textContent = "✓ Valid Firebase configuration.";
+    firebaseConfigWarning.classList.remove("warning", "sr-only");
   });
 }
 

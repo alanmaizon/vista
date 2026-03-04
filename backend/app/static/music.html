@@ -37,7 +37,7 @@
 
               <div class="stack">
                 <label for="mode">Music Skill</label>
-                <select id="mode">
+                <select id="mode" aria-describedby="mode-hint">
                   <option value="GUIDED_LESSON" selected>GUIDED_LESSON</option>
                   <option value="HEAR_PHRASE">HEAR_PHRASE</option>
                   <option value="SHEET_FRAME_COACH">SHEET_FRAME_COACH</option>
@@ -46,9 +46,11 @@
                   <option value="EAR_TRAIN">EAR_TRAIN</option>
                   <option value="GENERATE_EXAMPLE">GENERATE_EXAMPLE</option>
                 </select>
+                <span id="mode-hint" class="sr-only">Select the music skill for this practice session</span>
 
                 <label for="goal">Goal</label>
-                <input id="goal" type="text" placeholder="Identify the arpeggio I just played">
+                <input id="goal" type="text" placeholder="Identify the arpeggio I just played" aria-describedby="goal-hint">
+                <span id="goal-hint" class="sr-only">Describe the specific goal for this practice session</span>
               </div>
             </div>
           </section>
@@ -97,7 +99,9 @@
           rows="3"
           spellcheck="false"
           placeholder="C4/q D4/q E4/h | G4/q A4/q B4/h"
+          aria-describedby="score-line-hint"
         ></textarea>
+        <span id="score-line-hint" class="sr-only">Enter musical notation using note/duration format separated by pipes for bar lines</span>
         <div id="music-flow-hint" class="music-flow-hint" aria-live="polite">
           Enter a score line, then use the main button to prepare and compare it.
         </div>

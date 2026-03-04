@@ -113,39 +113,40 @@ export function resetLessonFlow({ keepPrepared = true } = {}) {
   }
 }
 
+function applyPrimaryAction(cssClass, icon, label, disabled = false) {
+  elements.start.classList.add(cssClass);
+  renderButton(elements.start, { icon, label });
+  elements.start.disabled = disabled;
+}
+
 export function updatePrimaryActionButton() {
   const state = primaryActionState();
   elements.start.classList.remove("primary", "accent", "danger");
 
   if (state === "confirm") {
-    elements.start.classList.add("accent");
-    renderButton(elements.start, {
-      icon: "confirm",
-      label: usesDeterministicLivePhraseCapture() ? "Capture phrase" : "Confirm step",
-    });
+    applyPrimaryAction(
+      "accent",
+      "confirm",
+      usesDeterministicLivePhraseCapture() ? "Capture phrase" : "Confirm step",
+    );
     return;
   }
   if (state === "transcribe") {
-    elements.start.classList.add("primary");
-    renderButton(elements.start, { icon: "analyze", label: "Hear phrase" });
+    applyPrimaryAction("primary", "analyze", "Hear phrase");
     return;
   }
   if (state === "camera-score") {
-    elements.start.classList.add("primary");
-    renderButton(elements.start, { icon: "camera", label: "Read score" });
-    elements.start.disabled = !hasVisualSourceEnabled();
+    applyPrimaryAction("primary", "camera", "Read score", !hasVisualSourceEnabled());
     return;
   }
   if (state === "guided-lesson") {
     elements.start.classList.add("primary");
     if (!hasFreshPreparedScore() || appState.musicScoreDirty) {
-      renderButton(elements.start, { icon: "confirm", label: "Prepare lesson" });
-      elements.start.disabled = !hasScoreDraft();
+      applyPrimaryAction("primary", "confirm", "Prepare lesson", !hasScoreDraft());
       return;
     }
     if (appState.lessonStage === "awaiting-compare") {
-      renderButton(elements.start, { icon: "analyze", label: "Compare bar" });
-      elements.start.disabled = !appState.micEnabled;
+      applyPrimaryAction("primary", "analyze", "Compare bar", !appState.micEnabled);
       return;
     }
     const finalBar = activeMeasureCount() > 0 && appState.lessonMeasureIndex === activeMeasureCount();
@@ -161,24 +162,19 @@ export function updatePrimaryActionButton() {
     return;
   }
   if (state === "prepare-score") {
-    elements.start.classList.add("primary");
-    renderButton(elements.start, { icon: "confirm", label: "Prepare score" });
-    elements.start.disabled = !hasScoreDraft();
+    applyPrimaryAction("primary", "confirm", "Prepare score", !hasScoreDraft());
     return;
   }
   if (state === "compare") {
-    elements.start.classList.add("primary");
-    renderButton(elements.start, { icon: "analyze", label: "Compare take" });
+    applyPrimaryAction("primary", "analyze", "Compare take");
     return;
   }
   if (state === "stop") {
-    elements.start.classList.add("danger");
-    renderButton(elements.start, { icon: "stop", label: "Stop session" });
+    applyPrimaryAction("danger", "stop", "Stop session");
     return;
   }
 
-  elements.start.classList.add("primary");
-  renderButton(elements.start, { icon: "start", label: "Start session" });
+  applyPrimaryAction("primary", "start", "Start session");
 }
 
 export function updateMusicFlowHint() {

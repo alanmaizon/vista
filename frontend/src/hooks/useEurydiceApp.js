@@ -392,7 +392,7 @@ export default function useEurydiceApp() {
           throw new Error("Turn the microphone on before comparing this bar.");
         }
         setStatus("Recording a comparison take...");
-        const clip = await capturePcmClip({ durationMs: 2800 });
+        const clip = await capturePcmClip({ durationMs: 2800, mode: "music" });
         setStatus("Comparing bar...");
         body = {
           score_id: activeScore.score_id,
@@ -451,7 +451,7 @@ export default function useEurydiceApp() {
     }
     const token = await getIdToken();
     setStatus("Recording a short phrase...");
-    const clip = await capturePcmClip();
+    const clip = await capturePcmClip({ mode: "music" });
     setStatus("Transcribing phrase...");
     const payload = await apiRequest("/api/music/transcribe", {
       method: "POST",

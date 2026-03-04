@@ -72,6 +72,17 @@ def test_transcribe_pcm16_detects_a4() -> None:
     assert result.confidence > 0.5
 
 
+def test_transcribe_pcm16_stepped_sine_detects_three_notes() -> None:
+    """A stepped sine wave (C4, E4, G4) should yield three distinct notes."""
+    clip = synth_phrase([261.63, 329.63, 392.00], note_duration_ms=400, gap_ms=120)
+    result = transcribe_pcm16(clip, sample_rate=16000, max_notes=8)
+
+    assert len(result.notes) == 3
+    detected_names = [n.note_name for n in result.notes]
+    assert detected_names == ["C4", "E4", "G4"]
+    assert result.confidence > 0.4
+
+
 def test_estimate_pitch_fastyin_detects_a4() -> None:
     audio_bytes = synth_tone(440.0, duration_ms=700)
     samples = [sample / 32768.0 for (sample,) in struct.iter_unpack("<h", audio_bytes)]

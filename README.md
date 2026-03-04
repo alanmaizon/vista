@@ -36,7 +36,16 @@ See the [Local Setup Guide](docs/LOCAL_SETUP.md) for detailed instructions on ru
 - Monophonic pitch detection using FastYIN
 - Optional CREPE verification for higher accuracy
 - Silence detection and note segmentation
+- Frame-level pitch contour with contour-based note grouping
 - Interval and chord analysis
+
+🎹 **Music Capture Mode:**
+- Adaptive energy-gated recording (`mode: "music"`) with onset detection
+- Disables speech DSP (echo cancellation, noise suppression, auto gain)
+- Pre-roll preservation so note attacks aren't clipped
+- Configurable trailing silence timeout and max duration
+- Falls back to fixed-duration capture when no onset is detected
+- Speech mode (`mode: "speech"`) remains the default for backward compatibility
 
 📷 **Computer Vision:**
 - Camera-based score reading
@@ -147,7 +156,36 @@ pytest tests/test_music_transcription.py
 
 # With coverage
 pytest --cov=app --cov-report=html
+
+# Frontend tests
+cd frontend
+npm test
 ```
+
+### Music Capture Mode
+
+The frontend audio capture function `capturePcmClip` supports two modes:
+
+- **`"speech"` (default):** Fixed-duration capture with speech-oriented DSP (echo cancellation, noise suppression, auto gain control). This is the existing behaviour and remains the default when no arguments are passed.
+
+- **`"music"`:** Adaptive energy-gated capture optimised for musical input. DSP flags are disabled to preserve tonal fidelity. Recording starts when a phrase onset is detected (energy rises above `onsetThresholdDb` for a few consecutive frames) and stops after `trailingSilenceMs` of silence or when `maxMs` is reached. A 200 ms pre-roll is preserved so note attacks aren't clipped. If no onset is detected within `durationMs`, the function falls back to fixed-duration behaviour.
+
+```js
+import { capturePcmClip } from "../lib/audioCapture";
+
+// Default speech mode (backward compatible)
+const clip = await capturePcmClip();
+
+// Music mode with adaptive capture
+const clip = await capturePcmClip({
+  mode: "music",
+  trailingSilenceMs: 400,
+  onsetThresholdDb: -45,
+  maxMs: 10000,
+});
+```
+
+On the backend, `transcribe_pcm16` now uses frame-level pitch contour analysis (10 ms hop) for improved note segmentation. Contiguous frames with stable pitch and sufficient confidence are grouped into note events. The legacy energy-gate segmentation is used as a fallback when the contour yields no notes.
 
 ### Code Style
 ```bash

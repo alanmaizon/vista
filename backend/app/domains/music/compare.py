@@ -57,9 +57,18 @@ def _flatten_expected_notes(score: MusicScore) -> list[dict]:
 def _compare_expected_window(
     expected_notes: list[dict],
     played_window: list,
+    played_tempo_bpm: float | None = None,
 ) -> tuple[float, list[str], list[ComparedEvent]]:
     expected_total_beats = sum(float(note.get("beats", 0.0)) for note in expected_notes) or 1.0
+
+    # Prefer beat-based normalization when played tempo is known
+    use_beats = played_tempo_bpm is not None and all(
+        getattr(n, "beats", None) is not None for n in played_window
+    )
+    if use_beats:
+        played_total_beats = sum(n.beats for n in played_window) or 1.0
     played_total_ms = sum(note.duration_ms for note in played_window) or 1
+
     expected_onset_span_beats = sum(float(note.get("beats", 0.0)) for note in expected_notes[:-1]) or 1.0
     played_window_start_ms = played_window[0].start_ms if played_window else 0
     played_onset_span_ms = (
@@ -92,7 +101,10 @@ def _compare_expected_window(
         rhythm_match = False
         if played:
             expected_duration_ratio = expected_beats / expected_total_beats
-            played_duration_ratio = played.duration_ms / played_total_ms
+            if use_beats:
+                played_duration_ratio = played.beats / played_total_beats
+            else:
+                played_duration_ratio = played.duration_ms / played_total_ms
             duration_delta = abs(expected_duration_ratio - played_duration_ratio)
             duration_match = duration_delta <= 0.18
 
@@ -176,7 +188,10 @@ def _compare_expected_window(
             note_units += 0.2
         elif played is not None:
             expected_duration_ratio = expected_beats / expected_total_beats
-            played_duration_ratio = played.duration_ms / played_total_ms
+            if use_beats:
+                played_duration_ratio = played.beats / played_total_beats
+            else:
+                played_duration_ratio = played.duration_ms / played_total_ms
             length_direction = "longer" if played_duration_ratio > expected_duration_ratio else "shorter"
             mismatches.append(
                 f"Length {index + 1}: expected about {expected_duration_code}, heard a {length_direction} hold."
@@ -210,6 +225,7 @@ def compare_performance_against_score(
     score_units = 0.0
     total_units = len(expected_notes) or 1
     alignment_start = 0
+    played_tempo = phrase.tempo_bpm
 
     if len(played_notes) > len(expected_notes) and expected_notes:
         best_alignment: tuple[float, int, list[str], list[ComparedEvent]] | None = None
@@ -219,6 +235,7 @@ def compare_performance_against_score(
             candidate_score, candidate_mismatches, candidate_comparisons = _compare_expected_window(
                 expected_notes,
                 window,
+                played_tempo_bpm=played_tempo,
             )
             ranking = (
                 candidate_score,
@@ -270,7 +287,17 @@ def compare_performance_against_score(
         score_units, mismatches, comparisons = _compare_expected_window(
             expected_notes,
             played_notes,
+            played_tempo_bpm=played_tempo,
         )
+
+    # Warn if played tempo differs significantly from score tempo
+    score_tempo = getattr(score, "tempo_bpm", None)
+    if played_tempo is not None and score_tempo is not None:
+        tempo_ratio = abs(played_tempo - score_tempo) / score_tempo
+        if tempo_ratio > 0.20:
+            warnings.append(
+                "Different tempo detected; rhythm alignment may be less precise."
+            )
 
     accuracy = round(max(0.0, min(1.0, score_units / total_units)), 3)
     needs_replay = phrase.confidence < REPLAY_CONFIDENCE_THRESHOLD or not played_notes

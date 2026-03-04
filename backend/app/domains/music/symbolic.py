@@ -92,6 +92,7 @@ class NoteEvent:
     start_ms: int
     duration_ms: int
     confidence: float
+    beats: float | None = None
 
     @property
     def pitch_class(self) -> int:
@@ -110,6 +111,7 @@ class SymbolicPhrase:
     harmony_hint: str | None = None
     summary: str = ""
     warnings: tuple[str, ...] = ()
+    tempo_bpm: float | None = None
 
 
 @dataclass(frozen=True)

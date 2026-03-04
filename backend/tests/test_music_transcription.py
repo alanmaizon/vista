@@ -83,6 +83,119 @@ def test_transcribe_pcm16_stepped_sine_detects_three_notes() -> None:
     assert result.confidence > 0.4
 
 
+def test_tempo_detection_from_even_phrase() -> None:
+    """Three evenly-spaced notes at ~500ms IOI should yield ~120 BPM."""
+    clip = synth_phrase(
+        [261.63, 329.63, 392.00],
+        note_duration_ms=400,
+        gap_ms=100,
+    )
+    result = transcribe_pcm16(clip, sample_rate=16000, max_notes=8)
+
+    assert len(result.notes) >= 2
+    assert result.tempo_bpm is not None
+    # At 400ms note + 100ms gap = 500ms IOI → 120 BPM (within tolerance)
+    assert 80 < result.tempo_bpm < 200
+
+
+def test_single_note_has_no_tempo() -> None:
+    """A single note cannot produce a meaningful tempo estimate."""
+    result = transcribe_pcm16(synth_tone(440.0), sample_rate=16000, expected="NOTE")
+
+    assert result.tempo_bpm is None
+    assert result.notes[0].beats is None
+
+
+def test_notes_have_beats_when_tempo_detected() -> None:
+    """When tempo is detected, each note should carry a beats value."""
+    clip = synth_phrase(
+        [261.63, 329.63, 392.00],
+        note_duration_ms=400,
+        gap_ms=100,
+    )
+    result = transcribe_pcm16(clip, sample_rate=16000, max_notes=8)
+
+    assert result.tempo_bpm is not None
+    for note in result.notes:
+        assert note.beats is not None
+        assert note.beats > 0
+
+
+def test_transcription_to_dict_includes_tempo() -> None:
+    """transcription_to_dict should serialize tempo_bpm and beats."""
+    from app.domains.music.transcription import transcription_to_dict
+
+    clip = synth_phrase(
+        [261.63, 329.63, 392.00],
+        note_duration_ms=400,
+        gap_ms=100,
+    )
+    result = transcribe_pcm16(clip, sample_rate=16000, max_notes=8)
+    d = transcription_to_dict(result)
+
+    assert "tempo_bpm" in d
+    assert d["tempo_bpm"] == result.tempo_bpm
+    for note_dict in d["notes"]:
+        assert "beats" in note_dict
+
+
+def test_compare_tempo_aware_rhythm_uses_beats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When played phrase has tempo, compare should use beats for duration matching."""
+    score = build_stored_score()
+
+    def fake_transcribe(*_args, **_kwargs) -> SymbolicPhrase:
+        return SymbolicPhrase(
+            kind="melody_fragment",
+            notes=(
+                NoteEvent(
+                    midi_note=60,
+                    note_name="C4",
+                    frequency_hz=261.63,
+                    start_ms=0,
+                    duration_ms=500,
+                    confidence=0.98,
+                    beats=1.0,
+                ),
+                NoteEvent(
+                    midi_note=62,
+                    note_name="D4",
+                    frequency_hz=293.66,
+                    start_ms=500,
+                    duration_ms=500,
+                    confidence=0.97,
+                    beats=1.0,
+                ),
+                NoteEvent(
+                    midi_note=64,
+                    note_name="E4",
+                    frequency_hz=329.63,
+                    start_ms=1000,
+                    duration_ms=1000,
+                    confidence=0.97,
+                    beats=2.0,
+                ),
+            ),
+            duration_ms=2000,
+            confidence=0.97,
+            summary="Tempo-aware test phrase.",
+            warnings=(),
+            tempo_bpm=120.0,
+        )
+
+    monkeypatch.setattr(music_compare_module, "transcribe_pcm16", fake_transcribe)
+
+    result = compare_performance_against_score(
+        score,
+        audio_bytes=b"\x00\x00",
+        sample_rate=16000,
+    )
+
+    assert result.match is True
+    assert result.accuracy >= 0.95
+
+
 def test_estimate_pitch_fastyin_detects_a4() -> None:
     audio_bytes = synth_tone(440.0, duration_ms=700)
     samples = [sample / 32768.0 for (sample,) in struct.iter_unpack("<h", audio_bytes)]

@@ -47,7 +47,10 @@ app.include_router(music_router)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 ROOT_LOGO = Path(__file__).resolve().parents[2] / "logo.svg"
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend-dist"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+if FRONTEND_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
 
 
 @app.on_event("startup")
@@ -70,6 +73,9 @@ async def startup_event() -> None:
 @app.get("/")
 async def index() -> FileResponse:
     """Serve the Eurydice browser client."""
+    react_index = FRONTEND_DIST / "index.html"
+    if react_index.is_file():
+        return FileResponse(react_index)
     return FileResponse(STATIC_DIR / "music.html")
 
 

@@ -1,7 +1,7 @@
 # Eurydice
 
 <p align="center">
-  <img src="logo.svg" alt="Eurydice logo" width="120" height="120">
+  <img src="frontend/public/logo.svg" alt="Eurydice logo" width="120" height="120">
 </p>
 
 **A real-time multimodal music tutor built for the Gemini Live Agent Challenge.**
@@ -196,4 +196,4 @@ This project is built for the Gemini Live Agent Challenge.
 
 ## Contributing
 
-This is a hackathon project with a deadline of **March 16, 2026**. For code quality standards and improvement suggestions, see `docs/AUDIT_REPORT.md`.
+This is a hackathon project with a deadline of **March 16, 2026**. For code quality standards and improvement suggestions, see [Audit Report](docs/AUDIT_REPORT.md).

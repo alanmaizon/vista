@@ -1,16 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Camera,
-  CameraOff,
-  LoaderCircle,
-  Mic,
-  MicOff,
-  Music4,
-  Radio,
-  ScanLine,
-  Wifi,
-  WifiOff,
-} from "lucide-react";
+import { Music4 } from "lucide-react";
+import AuthPanel from "./components/AuthPanel";
+import SkillSelector from "./components/SkillSelector";
+import ScoreWorkspace from "./components/ScoreWorkspace";
+import { LessonPanel, SessionLog } from "./components/StatusPanels";
 import useLiveConnection from "./hooks/useLiveConnection";
 import { apiRequest } from "./lib/api";
 import { capturePcmClip } from "./lib/audioCapture";
@@ -81,19 +74,6 @@ function buildPrimaryActionLabel({ skill, activeScore, lessonState, scoreLine })
     return "Restart lesson";
   }
   return "Start lesson";
-}
-
-function noteClass({ active, mismatch }) {
-  if (mismatch === "pitch") {
-    return "border-red-300 bg-red-50 text-red-900";
-  }
-  if (mismatch === "rhythm") {
-    return "border-amber-300 bg-amber-50 text-amber-900";
-  }
-  if (active) {
-    return "border-sky-300 bg-sky-50 text-sky-900";
-  }
-  return "border-slate-200 bg-white text-slate-700";
 }
 
 export default function App() {
@@ -692,239 +672,59 @@ export default function App() {
 
         <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
           <section className="space-y-6">
-            <div className="glass rounded-3xl p-5">
-              <div className="grid gap-4 lg:grid-cols-3">
-                {SKILLS.map((item) => {
-                  const active = item.id === skill;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setSkill(item.id)}
-                      className={`rounded-2xl border px-4 py-4 text-left transition ${
-                        active
-                          ? "border-sky-300/70 bg-sky-400/10 shadow-[0_0_0_1px_rgba(125,211,252,0.2)]"
-                          : "border-white/10 bg-white/5 hover:bg-white/10"
-                      }`}
-                    >
-                      <div className="text-sm font-semibold text-white">{item.title}</div>
-                      <div className="mt-1 text-xs text-slate-300">{item.description}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <SkillSelector skills={SKILLS} skill={skill} onChange={setSkill} />
 
-            <div className="glass rounded-3xl p-5">
-              <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-                <div className="space-y-3">
-                  <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-                    Firebase config
-                  </label>
-                  <textarea
-                    value={firebaseConfigText}
-                    onChange={(event) => setFirebaseConfigText(event.target.value)}
-                    rows={5}
-                    className="w-full rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-3 text-xs text-slate-200 outline-none focus:border-sky-300/60"
-                  />
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <input
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      placeholder="Email (optional)"
-                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-300/60"
-                    />
-                    <input
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      placeholder="Password (optional)"
-                      type="password"
-                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-300/60"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleSignIn}
-                    className="rounded-2xl bg-sky-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
-                  >
-                    Sign In
-                  </button>
-                </div>
+            <AuthPanel
+              firebaseConfigText={firebaseConfigText}
+              email={email}
+              password={password}
+              authStatus={authStatus}
+              micEnabled={micEnabled}
+              cameraEnabled={cameraEnabled}
+              isConnected={isConnected}
+              status={status}
+              runtimeSummary={runtimeSummary}
+              sessionId={sessionId}
+              skill={skill}
+              isBusy={isBusy}
+              primaryActionLabel={primaryActionLabel}
+              onFirebaseConfigChange={setFirebaseConfigText}
+              onEmailChange={setEmail}
+              onPasswordChange={setPassword}
+              onSignIn={handleSignIn}
+              onToggleMic={() => setMicEnabled((value) => !value)}
+              onToggleCamera={() => setCameraEnabled((value) => !value)}
+              onPrimaryAction={() => {
+                void handlePrimaryAction();
+              }}
+            />
 
-                <div className="space-y-4 rounded-3xl border border-white/10 bg-slate-950/40 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Session</div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => setMicEnabled((value) => !value)}
-                      className={`flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition ${
-                        micEnabled ? "bg-emerald-400/15 text-emerald-200" : "bg-white/5 text-slate-400"
-                      }`}
-                    >
-                      {micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-                      Mic {micEnabled ? "On" : "Off"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCameraEnabled((value) => !value)}
-                      className={`flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition ${
-                        cameraEnabled ? "bg-emerald-400/15 text-emerald-200" : "bg-white/5 text-slate-400"
-                      }`}
-                    >
-                      {cameraEnabled ? <Camera className="h-4 w-4" /> : <CameraOff className="h-4 w-4" />}
-                      Camera {cameraEnabled ? "On" : "Off"}
-                    </button>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-300">
-                    <div className="flex items-center gap-2 text-white">
-                      {isConnected ? <Wifi className="h-4 w-4 text-emerald-300" /> : <WifiOff className="h-4 w-4 text-slate-400" />}
-                      {status}
-                    </div>
-                    <div className="mt-2 text-xs text-slate-400">{runtimeSummary}</div>
-                    {sessionId ? <div className="mt-2 text-[11px] text-slate-500">Session: {sessionId}</div> : null}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handlePrimaryAction();
-                    }}
-                    disabled={isBusy}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-70"
-                  >
-                    {isBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : skill === "READ_SCORE" ? <ScanLine className="h-4 w-4" /> : <Radio className="h-4 w-4" />}
-                    {primaryActionLabel}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="glass rounded-3xl p-5">
-              <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-                Score line
-              </label>
-              <textarea
-                value={scoreLine}
-                onChange={(event) => {
-                  setScoreLine(event.target.value);
-                  if (activeScore) {
-                    resetLessonState();
-                  }
-                }}
-                rows={3}
-                className="mt-3 w-full rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-3 text-sm text-slate-100 outline-none focus:border-sky-300/60"
-                placeholder="C4/q D4/q E4/h | G4/q A4/q B4/h"
-              />
-              <div className="mt-3 text-xs text-slate-400">
-                Guided Lesson uses this draft unless you capture a bar directly from the live camera reader.
-              </div>
-            </div>
-
-            <div className="glass rounded-3xl p-5">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Live feed</div>
-                {liveMode === "READ_SCORE" ? (
-                  <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-200">
-                    Reading from camera
-                  </span>
-                ) : null}
-              </div>
-              <div className="mt-4 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/60">
-                <video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full object-cover" />
-              </div>
-              <div className="mt-3 text-xs text-slate-400">
-                Camera capture is only used during the live score reader. It sends one JPEG frame per second while connected.
-              </div>
-            </div>
+            <ScoreWorkspace
+              activeScore={activeScore}
+              activeNoteRange={activeNoteRange}
+              comparisonStateByIndex={comparisonStateByIndex}
+              scoreLine={scoreLine}
+              onScoreLineChange={(value) => {
+                setScoreLine(value);
+                if (activeScore) {
+                  resetLessonState();
+                }
+              }}
+              videoRef={videoRef}
+              liveMode={liveMode}
+              lessonState={lessonState}
+            />
           </section>
 
           <section className="space-y-6">
-            <div className="glass rounded-3xl p-5">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Rendered score</div>
-              <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-5 text-slate-900">
-                {activeScore?.svg ? (
-                  <div dangerouslySetInnerHTML={{ __html: activeScore.svg }} />
-                ) : activeScore?.musicxml ? (
-                  <pre className="overflow-x-auto whitespace-pre-wrap text-xs text-slate-700">{activeScore.musicxml}</pre>
-                ) : (
-                  <div className="text-sm text-slate-500">Prepare a lesson to render notation here.</div>
-                )}
-              </div>
-
-              {activeScore?.expected_notes?.length ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {activeScore.expected_notes.map((note, index) => {
-                    const active =
-                      activeNoteRange && index >= activeNoteRange.start && index < activeNoteRange.end;
-                    const mismatch = comparisonStateByIndex.get(index);
-                    return (
-                      <span
-                        key={`${note.note_name}-${index}`}
-                        className={`rounded-full border px-3 py-1 text-xs font-medium ${noteClass({ active, mismatch })}`}
-                      >
-                        {note.note_name}
-                      </span>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="glass rounded-3xl p-5">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Lesson state</div>
-              <div className="mt-3 space-y-2 text-sm text-slate-200">
-                <div>Mode: {skill}</div>
-                <div>Lesson stage: {lessonState.stage}</div>
-                <div>
-                  Measure: {lessonState.measureIndex ?? "—"}
-                  {lessonState.totalMeasures ? ` / ${lessonState.totalMeasures}` : ""}
-                </div>
-                {lessonState.prompt ? <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-slate-100">{lessonState.prompt}</div> : null}
-              </div>
-
-              {analysis ? (
-                <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
-                  <div className="font-medium text-white">Phrase analysis</div>
-                  <div className="mt-1">{analysis.summary}</div>
-                  {analysis.notes?.length ? (
-                    <div className="mt-2 text-xs text-slate-300">
-                      Notes: {analysis.notes.map((note) => note.note_name || note.note || "?").join(", ")}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {comparison ? (
-                <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
-                  <div className="font-medium text-white">Comparison</div>
-                  <div className="mt-1">{comparison.summary}</div>
-                  <div className="mt-2 text-xs text-slate-300">Accuracy: {Math.round((comparison.accuracy || 0) * 100)}%</div>
-                </div>
-              ) : null}
-
-              {errorMessage ? (
-                <div className="mt-4 rounded-2xl border border-red-300/30 bg-red-400/10 px-4 py-3 text-sm text-red-100">
-                  {errorMessage}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="glass rounded-3xl p-5">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Session log</div>
-              <div className="mt-4 max-h-[26rem] space-y-3 overflow-y-auto">
-                {captions.length ? (
-                  captions.map((caption) => (
-                    <div key={caption.id} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{caption.role}</div>
-                      <div className="mt-1 text-sm text-slate-100">{caption.text}</div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-sm text-slate-400">
-                    Sign in and start with “Prepare lesson” or “Hear phrase”. Live captions and lesson guidance will appear here.
-                  </div>
-                )}
-              </div>
-            </div>
+            <LessonPanel
+              skill={skill}
+              lessonState={lessonState}
+              analysis={analysis}
+              comparison={comparison}
+              errorMessage={errorMessage}
+            />
+            <SessionLog captions={captions} />
           </section>
         </div>
       </main>

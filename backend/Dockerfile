@@ -1,3 +1,11 @@
+FROM node:20-slim AS frontend
+WORKDIR /frontend
+COPY frontend/react/package.json frontend/react/package-lock.json ./
+RUN npm ci
+COPY frontend/react ./
+COPY logo.svg public/logo.svg
+RUN npm run build
+
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -10,10 +18,11 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY requirements.txt requirements-music.txt ./
+COPY backend/requirements.txt backend/requirements-music.txt ./
 RUN pip install --no-cache-dir -r requirements-music.txt
 
-COPY app ./app
+COPY backend/app ./app
+COPY --from=frontend /frontend/dist ./frontend-dist
 
 EXPOSE 8080
 

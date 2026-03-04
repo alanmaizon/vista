@@ -59,6 +59,8 @@ FRONTEND_DIST = (
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if FRONTEND_DIST is not None and (FRONTEND_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
+if FRONTEND_DIST is not None and (FRONTEND_DIST / "features").is_dir():
+    app.mount("/features", StaticFiles(directory=FRONTEND_DIST / "features"), name="frontend-features")
 
 
 def _find_logo_file() -> Path | None:

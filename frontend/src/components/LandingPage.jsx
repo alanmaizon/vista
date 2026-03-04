@@ -108,11 +108,6 @@ function FeatureCard({ feature, index }) {
           >
             <Icon className="h-8 w-8" />
           </div>
-          <p
-            className={`text-xs font-semibold uppercase tracking-[0.22em] ${isLight ? "text-slate-500" : "text-slate-400"}`}
-          >
-            Feature {index + 1}
-          </p>
           <h3
             className={`mt-3 text-3xl font-semibold md:text-4xl ${isLight ? "text-slate-900" : "text-white"}`}
           >
@@ -121,25 +116,18 @@ function FeatureCard({ feature, index }) {
           <p className="mt-4 text-base leading-relaxed md:text-lg">{feature.description}</p>
         </div>
         <div
-          className={`rounded-3xl border p-8 ${
+          className={`aspect-square w-full overflow-hidden rounded-3xl border ${
             isLight
               ? "border-slate-300/70 bg-white/80 text-slate-700"
               : "border-white/15 bg-slate-950/35 text-slate-300"
           }`}
         >
-          <div className="text-xs font-semibold uppercase tracking-[0.2em]">Visual Preview</div>
-          <div
-            className={`mt-6 flex h-52 items-center justify-center rounded-2xl border border-dashed ${
-              isLight ? "border-slate-400/60 bg-slate-100/70" : "border-slate-600/70 bg-slate-900/40"
-            }`}
-          >
-            <img
-              src={feature.image}
-              alt={`${feature.title} preview`}
-              loading="lazy"
-              className="h-full w-full rounded-2xl object-cover"
-            />
-          </div>
+          <img
+            src={feature.image}
+            alt={`${feature.title} preview`}
+            loading="lazy"
+            className="h-full w-full object-cover"
+          />
         </div>
       </div>
     </section>

@@ -37,3 +37,61 @@
     color: #f8fafc;
   }
 }
+
+@keyframes eurydice-gradient-shift {
+  0% {
+    background-position: 0% 30%;
+  }
+  50% {
+    background-position: 100% 70%;
+  }
+  100% {
+    background-position: 0% 30%;
+  }
+}
+
+@layer components {
+  .landing-hero-gradient {
+    background:
+      radial-gradient(circle at 18% 18%, rgb(56 189 248 / 0.2), transparent 40%),
+      radial-gradient(circle at 82% 76%, rgb(99 102 241 / 0.22), transparent 38%),
+      linear-gradient(132deg, #030712 0%, #0b1430 45%, #111827 100%);
+    background-size: 160% 160%;
+    animation: eurydice-gradient-shift 18s ease-in-out infinite;
+  }
+
+  .parallax-section {
+    background-attachment: fixed;
+  }
+
+  .parallax-bg {
+    position: absolute;
+    inset: -12%;
+    z-index: -1;
+    transform: translate3d(0, 0, 0);
+    background:
+      radial-gradient(circle at 20% 22%, rgb(56 189 248 / 0.14), transparent 38%),
+      radial-gradient(circle at 75% 74%, rgb(99 102 241 / 0.12), transparent 35%);
+    opacity: 0.75;
+    animation: eurydice-gradient-shift 24s ease-in-out infinite;
+    will-change: transform, opacity;
+  }
+
+  .parallax-section:nth-of-type(odd) .parallax-bg {
+    opacity: 0.68;
+    animation-duration: 22s;
+  }
+
+  .parallax-section:nth-of-type(even) .parallax-bg {
+    opacity: 0.52;
+    animation-duration: 30s;
+  }
+}
+
+@media (width <= 768px) {
+  @layer components {
+    .parallax-section {
+      background-attachment: scroll;
+    }
+  }
+}

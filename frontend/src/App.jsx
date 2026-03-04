@@ -1,7 +1,10 @@
+import { useState } from "react";
 import AppLayout from "./components/AppLayout";
+import LandingPage from "./components/LandingPage";
 import useEurydiceApp, { SKILLS } from "./hooks/useEurydiceApp";
 
 export default function App() {
+  const [signingIn, setSigningIn] = useState(false);
   const {
     firebaseConfigText,
     setFirebaseConfigText,
@@ -34,10 +37,40 @@ export default function App() {
     activeNoteRange,
     comparisonStateByIndex,
     runtimeSummary,
+    isAuthenticated,
     handleSignIn,
     handlePrimaryAction,
     resetLessonState,
   } = useEurydiceApp();
+
+  const handleLandingSignIn = async () => {
+    if (signingIn) {
+      return;
+    }
+    setSigningIn(true);
+    try {
+      await handleSignIn();
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <LandingPage
+        authStatus={authStatus}
+        errorMessage={errorMessage}
+        signingIn={signingIn}
+        firebaseConfigText={firebaseConfigText}
+        email={email}
+        password={password}
+        onFirebaseConfigChange={setFirebaseConfigText}
+        onEmailChange={setEmail}
+        onPasswordChange={setPassword}
+        onSignIn={handleLandingSignIn}
+      />
+    );
+  }
 
   return (
     <AppLayout

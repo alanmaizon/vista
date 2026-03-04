@@ -736,6 +736,7 @@ export default function useEurydiceApp() {
     activeNoteRange,
     comparisonStateByIndex,
     runtimeSummary,
+    isAuthenticated: Boolean(user),
     detectedTempo,
     tempoOverride,
     setTempoOverride,

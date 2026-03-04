@@ -100,7 +100,6 @@ def test_estimate_pitch_prefers_crepe_when_it_is_more_confident(
     assert abs(frequency_hz - 442.0) < 0.1
     assert abs(confidence - 0.81) < 0.01
 
-
 def test_import_simple_score_normalizes_note_line() -> None:
     result = import_simple_score("C4/q D4/q E4/h | G4/q A4/q B4/h")
 

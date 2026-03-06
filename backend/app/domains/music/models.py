@@ -196,6 +196,7 @@ class MusicLiveToolCall(Base):
     source: str = Column(String(16), nullable=False, default="client", server_default="client", index=True)
     status: str = Column(String(16), nullable=False, default="SUCCESS", server_default="SUCCESS", index=True)
     latency_ms: Optional[int] = Column(Integer, nullable=True)
+    error_kind: Optional[str] = Column(String(24), nullable=True, index=True)
     error_message: Optional[str] = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

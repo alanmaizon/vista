@@ -14,6 +14,31 @@ function normalizeMetricValue(value) {
   return Math.max(0, Math.min(1, numeric));
 }
 
+function formatToolCallTime(value) {
+  if (!value) {
+    return "just now";
+  }
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return "recently";
+  }
+  const deltaMs = Math.max(0, Date.now() - timestamp);
+  const deltaSeconds = Math.round(deltaMs / 1000);
+  if (deltaSeconds < 60) {
+    return `${deltaSeconds}s ago`;
+  }
+  const deltaMinutes = Math.round(deltaSeconds / 60);
+  if (deltaMinutes < 60) {
+    return `${deltaMinutes}m ago`;
+  }
+  const deltaHours = Math.round(deltaMinutes / 60);
+  if (deltaHours < 24) {
+    return `${deltaHours}h ago`;
+  }
+  const deltaDays = Math.round(deltaHours / 24);
+  return `${deltaDays}d ago`;
+}
+
 function FeedbackMeters({ title, feedback }) {
   if (!feedback || typeof feedback !== "object") {
     return null;
@@ -180,6 +205,49 @@ export function LessonPanel({
             No live tool telemetry yet. Run a lesson action to populate this panel.
           </div>
         )}
+        {liveToolMetrics?.failure_kinds && Object.keys(liveToolMetrics.failure_kinds).length ? (
+          <div className="mt-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-300">
+              Failure categories
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {Object.entries(liveToolMetrics.failure_kinds).map(([kind, count]) => (
+                <span
+                  key={kind}
+                  className="rounded-full border border-white/10 bg-slate-950/50 px-2 py-1 text-[11px] text-slate-200"
+                >
+                  {kind}: {count}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {Array.isArray(liveToolMetrics?.recent_calls) && liveToolMetrics.recent_calls.length ? (
+          <div className="mt-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-300">
+              Recent calls
+            </div>
+            <div className="mt-2 max-h-40 space-y-1 overflow-y-auto pr-1">
+              {liveToolMetrics.recent_calls.slice(0, 8).map((call, idx) => (
+                <div
+                  key={`${call.tool_name}-${call.created_at}-${idx}`}
+                  className="rounded-lg border border-white/10 bg-slate-950/45 px-2 py-1 text-[11px] text-slate-300"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate">
+                      {call.tool_name} ({call.source}) {call.status}
+                      {call.error_kind ? ` / ${call.error_kind}` : ""}
+                    </span>
+                    <span className="text-slate-400">{formatToolCallTime(call.created_at)}</span>
+                  </div>
+                  {call.status !== "SUCCESS" && call.error_message ? (
+                    <div className="mt-0.5 truncate text-slate-400">{call.error_message}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {errorMessage ? (

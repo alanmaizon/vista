@@ -79,7 +79,9 @@ export default function useEurydiceApp() {
     total_successes: 0,
     total_failures: 0,
     overall_success_rate: 0,
+    failure_kinds: {},
     metrics: [],
+    recent_calls: [],
   });
   const [sessionId, setSessionId] = useState(null);
   const [liveMode, setLiveMode] = useState(null);
@@ -271,21 +273,6 @@ export default function useEurydiceApp() {
   }, [user]);
 
   useEffect(() => {
-    if (!user) {
-      setLiveToolMetrics({
-        total_calls: 0,
-        total_successes: 0,
-        total_failures: 0,
-        overall_success_rate: 0,
-        metrics: [],
-      });
-      return undefined;
-    }
-    void loadLiveToolMetrics();
-    return undefined;
-  }, [loadLiveToolMetrics, user]);
-
-  useEffect(() => {
     if (!isConnected || liveMode !== "READ_SCORE" || !cameraEnabled) {
       stopCameraCapture();
       return undefined;
@@ -388,12 +375,34 @@ export default function useEurydiceApp() {
         total_successes: Number(payload?.total_successes || 0),
         total_failures: Number(payload?.total_failures || 0),
         overall_success_rate: Number(payload?.overall_success_rate || 0),
+        failure_kinds:
+          payload?.failure_kinds && typeof payload.failure_kinds === "object"
+            ? payload.failure_kinds
+            : {},
         metrics: Array.isArray(payload?.metrics) ? payload.metrics : [],
+        recent_calls: Array.isArray(payload?.recent_calls) ? payload.recent_calls : [],
       });
     } catch {
       // Keep the latest snapshot visible if telemetry fetch fails.
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setLiveToolMetrics({
+        total_calls: 0,
+        total_successes: 0,
+        total_failures: 0,
+        overall_success_rate: 0,
+        failure_kinds: {},
+        metrics: [],
+        recent_calls: [],
+      });
+      return undefined;
+    }
+    void loadLiveToolMetrics();
+    return undefined;
+  }, [loadLiveToolMetrics, user]);
 
   const ensureGuidedLessonSession = useCallback(async () => {
     if (!user) {

@@ -265,6 +265,34 @@ def _tool_error_to_model_text(tool_name: str, message: str) -> str:
     return f'TOOL_ERROR: {{"name":"{tool_name}","message":"{escaped}"}}'
 
 
+def _classify_tool_error(message: str, *, status_code: int | None = None, unexpected: bool = False) -> str:
+    if unexpected:
+        return "INTERNAL"
+    if status_code in {401, 403}:
+        return "AUTH"
+    if status_code == 404:
+        return "NOT_FOUND"
+    if status_code in {408}:
+        return "TIMEOUT"
+    if status_code == 429:
+        return "RATE_LIMIT"
+    if status_code is not None and status_code >= 500:
+        return "UPSTREAM"
+    if status_code in {400, 422}:
+        return "VALIDATION"
+
+    normalized = (message or "").lower()
+    if "timed out" in normalized or "timeout" in normalized:
+        return "TIMEOUT"
+    if "unauthor" in normalized or "forbidden" in normalized or "access" in normalized:
+        return "AUTH"
+    if "not found" in normalized:
+        return "NOT_FOUND"
+    if "invalid" in normalized or "required" in normalized or "extra inputs" in normalized:
+        return "VALIDATION"
+    return "TOOL_ERROR"
+
+
 async def _execute_live_tool_call(
     *,
     user_id: str,
@@ -288,6 +316,7 @@ async def _record_live_tool_call(
     source: str,
     status: str,
     latency_ms: int | None,
+    error_kind: str | None = None,
     error_message: str | None = None,
 ) -> None:
     try:
@@ -300,6 +329,7 @@ async def _record_live_tool_call(
                     source=(source or "client").strip().lower() or "client",
                     status=status,
                     latency_ms=latency_ms,
+                    error_kind=error_kind,
                     error_message=error_message,
                 )
             )
@@ -347,12 +377,14 @@ async def _handle_live_tool_call(
             source=source,
             status="SUCCESS",
             latency_ms=int((monotonic() - started_at) * 1000),
+            error_kind=None,
         )
     except LiveMusicToolError as exc:
         tool_envelope["error"] = str(exc)
         await ws.send_json(tool_envelope)
         if send_to_model:
             await bridge.send_text(_tool_error_to_model_text(tool_name, str(exc)), role="user")
+        error_kind = _classify_tool_error(str(exc), status_code=exc.status_code)
         await _record_live_tool_call(
             user_id=user_id,
             session_id=session_id,
@@ -360,6 +392,7 @@ async def _handle_live_tool_call(
             source=source,
             status="ERROR",
             latency_ms=int((monotonic() - started_at) * 1000),
+            error_kind=error_kind,
             error_message=str(exc),
         )
     except Exception as exc:
@@ -378,6 +411,7 @@ async def _handle_live_tool_call(
             source=source,
             status="ERROR",
             latency_ms=int((monotonic() - started_at) * 1000),
+            error_kind=_classify_tool_error("Unexpected tool execution failure.", unexpected=True),
             error_message="Unexpected tool execution failure.",
         )
 

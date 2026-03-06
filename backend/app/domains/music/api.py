@@ -271,6 +271,19 @@ class MusicLiveToolMetric(BaseModel):
     success_rate: float
     avg_latency_ms: float
     last_called_at: str | None
+    failure_kinds: dict[str, int]
+
+
+class MusicLiveToolCallSummary(BaseModel):
+    """Recent deterministic live-tool call row."""
+
+    tool_name: str
+    source: str
+    status: str
+    error_kind: str | None
+    latency_ms: int | None
+    created_at: str | None
+    error_message: str | None
 
 
 class MusicLiveToolMetricsResponse(BaseModel):
@@ -280,7 +293,9 @@ class MusicLiveToolMetricsResponse(BaseModel):
     total_successes: int
     total_failures: int
     overall_success_rate: float
+    failure_kinds: dict[str, int]
     metrics: list[MusicLiveToolMetric]
+    recent_calls: list[MusicLiveToolCallSummary]
 
 
 class MusicProgressSnapshotResponse(BaseModel):
@@ -1128,10 +1143,13 @@ async def live_tool_metrics(
             total_successes=0,
             total_failures=0,
             overall_success_rate=0.0,
+            failure_kinds={},
             metrics=[],
+            recent_calls=[],
         )
 
     grouped: dict[tuple[str, str], dict[str, object]] = {}
+    failure_kinds: dict[str, int] = {}
     for row in rows:
         key = ((row.tool_name or "unknown").lower(), (row.source or "client").lower())
         bucket = grouped.setdefault(
@@ -1145,6 +1163,7 @@ async def live_tool_metrics(
                 "latency_sum": 0,
                 "latency_count": 0,
                 "last_called_at": None,
+                "failure_kinds": {},
             },
         )
         bucket["total_calls"] = int(bucket["total_calls"]) + 1
@@ -1152,6 +1171,12 @@ async def live_tool_metrics(
             bucket["successes"] = int(bucket["successes"]) + 1
         else:
             bucket["failures"] = int(bucket["failures"]) + 1
+            bucket_failure_kinds = bucket["failure_kinds"]
+            if isinstance(bucket_failure_kinds, dict):
+                kind = (row.error_kind or "UNKNOWN").upper()
+                bucket_failure_kinds[kind] = int(bucket_failure_kinds.get(kind, 0)) + 1
+            overall_kind = (row.error_kind or "UNKNOWN").upper()
+            failure_kinds[overall_kind] = int(failure_kinds.get(overall_kind, 0)) + 1
         if row.latency_ms is not None:
             bucket["latency_sum"] = int(bucket["latency_sum"]) + int(row.latency_ms)
             bucket["latency_count"] = int(bucket["latency_count"]) + 1
@@ -1174,10 +1199,24 @@ async def live_tool_metrics(
                 1,
             ),
             last_called_at=bucket["last_called_at"],
+            failure_kinds=dict(bucket.get("failure_kinds") or {}),
         )
         for bucket in grouped.values()
     ]
     metrics.sort(key=lambda item: (-item.total_calls, item.tool_name, item.source))
+
+    recent_calls = [
+        MusicLiveToolCallSummary(
+            tool_name=(row.tool_name or "unknown").lower(),
+            source=(row.source or "client").lower(),
+            status=(row.status or "UNKNOWN").upper(),
+            error_kind=(row.error_kind or None),
+            latency_ms=row.latency_ms,
+            created_at=_iso_or_none(row.created_at),
+            error_message=row.error_message,
+        )
+        for row in rows[:12]
+    ]
 
     total_calls = len(rows)
     total_successes = sum(1 for row in rows if (row.status or "").upper() == "SUCCESS")
@@ -1188,7 +1227,9 @@ async def live_tool_metrics(
         total_successes=total_successes,
         total_failures=total_failures,
         overall_success_rate=round(total_successes / max(1, total_calls), 3),
+        failure_kinds=failure_kinds,
         metrics=metrics,
+        recent_calls=recent_calls,
     )
 
 

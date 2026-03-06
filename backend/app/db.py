@@ -72,6 +72,9 @@ async def init_db() -> None:
         await conn.execute(
             text(f"ALTER TABLE sessions ALTER COLUMN domain SET DEFAULT {default_domain_literal}")
         )
+        await conn.execute(
+            text("ALTER TABLE music_live_tool_calls ADD COLUMN IF NOT EXISTS error_kind VARCHAR(24)")
+        )
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

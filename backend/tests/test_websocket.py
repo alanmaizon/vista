@@ -298,3 +298,11 @@ def test_ws_live_executes_model_tool_call_and_returns_tool_result(
     assert tool_payload["ok"] is True
     assert "TOOL_RESULT:" in bridge.sent_text[0][0]
     assert bridge.sent_text[0][1] == "user"
+
+
+def test_classify_tool_error_maps_common_cases() -> None:
+    assert main_module._classify_tool_error("Missing required field", status_code=400) == "VALIDATION"
+    assert main_module._classify_tool_error("forbidden", status_code=403) == "AUTH"
+    assert main_module._classify_tool_error("Not found", status_code=404) == "NOT_FOUND"
+    assert main_module._classify_tool_error("timed out waiting for tool response") == "TIMEOUT"
+    assert main_module._classify_tool_error("Unexpected", unexpected=True) == "INTERNAL"

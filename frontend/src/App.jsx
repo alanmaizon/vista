@@ -35,16 +35,26 @@ export default function App() {
     isReadingScore,
     isBusy,
     isConnected,
+    isPlaying,
+    playbackAudioElement,
+    setPlaybackAudioElement,
+    orbLowPower,
+    setOrbLowPower,
     videoRef,
     primaryActionLabel,
     activeNoteRange,
     comparisonStateByIndex,
     runtimeSummary,
     isAuthenticated,
+    detectedTempo,
+    tempoOverride,
+    setTempoOverride,
     handleSignIn,
     handlePrimaryAction,
     handleCapturePhraseAction,
     handleToggleScoreReader,
+    handlePlayAnalysis,
+    handlePlayScore,
     resetLessonState,
   } = useEurydiceApp();
 
@@ -104,11 +114,14 @@ export default function App() {
     <AppLayout
       authStatus={authStatus}
       orbProps={{
-        audioSource: "microphone",
-        active: micEnabled && isConnected,
-        intensity: 0.88,
-        theme: "aurora",
+        audioSource: isPlaying && playbackAudioElement ? "element" : "microphone",
+        audioElement: playbackAudioElement,
+        active: isPlaying ? Boolean(playbackAudioElement) : micEnabled && isConnected,
+        intensity: orbLowPower ? 0.72 : 0.88,
+        theme: isPlaying ? "plasma" : "aurora",
+        performanceMode: orbLowPower ? "lite" : "adaptive",
       }}
+      playbackAudioElementRef={setPlaybackAudioElement}
       authPanelProps={{
         email,
         password,
@@ -122,6 +135,7 @@ export default function App() {
         sessionId,
         isReadingScore,
         isBusy,
+        orbLowPower,
         primaryActionLabel,
         onEmailChange: setEmail,
         onPasswordChange: setPassword,
@@ -135,6 +149,7 @@ export default function App() {
         onCapturePhrase: () => {
           void handleCapturePhraseAction();
         },
+        onToggleOrbLowPower: () => setOrbLowPower((value) => !value),
         onToggleScoreReader: () => {
           void handleToggleScoreReader();
         },
@@ -150,9 +165,20 @@ export default function App() {
             resetLessonState();
           }
         },
+        isPlaying,
+        detectedTempo,
+        tempoOverride,
+        onTempoOverrideChange: setTempoOverride,
+        onPlayScore: () => {
+          void handlePlayScore();
+        },
+        onPlayAnalysis: () => {
+          void handlePlayAnalysis();
+        },
         videoRef,
         isReadingScore,
         lessonState,
+        hasAnalysisPlayback: Boolean(analysis?.notes?.length),
       }}
       lessonPanelProps={{
         lessonState,

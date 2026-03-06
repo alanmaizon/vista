@@ -23,6 +23,7 @@ export default function AuthPanel({
   isReadingScore,
   instrumentProfile,
   isBusy,
+  orbLowPower,
   primaryActionLabel,
   onEmailChange,
   onPasswordChange,
@@ -32,6 +33,7 @@ export default function AuthPanel({
   onInstrumentProfileChange,
   onPrimaryAction,
   onCapturePhrase,
+  onToggleOrbLowPower,
   onToggleScoreReader,
 }) {
   return (
@@ -99,6 +101,29 @@ export default function AuthPanel({
               {cameraEnabled ? <Camera className="h-4 w-4" /> : <CameraOff className="h-4 w-4" />}
               Camera {cameraEnabled ? "On" : "Off"}
             </button>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
+                  Orb performance
+                </div>
+                <div className="mt-1 text-xs text-slate-400">
+                  Low-power mode lowers render density and cadence for the shader orb.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onToggleOrbLowPower}
+                className={`rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] transition ${
+                  orbLowPower
+                    ? "bg-amber-300/20 text-amber-100"
+                    : "bg-emerald-400/15 text-emerald-100"
+                }`}
+              >
+                {orbLowPower ? "Low-power on" : "Adaptive"}
+              </button>
+            </div>
           </div>
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">

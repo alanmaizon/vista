@@ -9,6 +9,7 @@ const orbFragmentSource = orbFragmentTemplate.replace("__NOISE_GLSL__", noiseSou
 
 type OrbTheme = "nebula" | "aurora" | "plasma";
 type OrbSize = "hero" | "workspace" | "panel";
+type OrbPerformanceMode = "adaptive" | "lite" | "full";
 
 export interface AudioReactiveOrbProps {
   audioSource?: AudioSourceMode;
@@ -17,6 +18,7 @@ export interface AudioReactiveOrbProps {
   intensity?: number;
   theme?: OrbTheme;
   size?: OrbSize;
+  performanceMode?: OrbPerformanceMode;
   className?: string;
 }
 
@@ -65,6 +67,7 @@ export default function AudioReactiveOrb({
   intensity = 1,
   theme = "nebula",
   size = "hero",
+  performanceMode = "adaptive",
   className,
 }: AudioReactiveOrbProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -83,8 +86,11 @@ export default function AudioReactiveOrb({
     }
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const lowPowerDevice = reduceMotion || (navigator.hardwareConcurrency ?? 8) <= 4;
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, lowPowerDevice ? 1 : 1.75);
+    const autoLowPower = reduceMotion || (navigator.hardwareConcurrency ?? 8) <= 4;
+    const lowPowerDevice = performanceMode === "lite" || (performanceMode === "adaptive" && autoLowPower);
+    const pixelRatioCap = performanceMode === "full" ? 2 : lowPowerDevice ? 0.85 : 1.75;
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, pixelRatioCap);
+    const targetFrameMs = performanceMode === "full" ? 1000 / 60 : lowPowerDevice ? 1000 / 30 : 1000 / 60;
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -163,9 +169,15 @@ export default function AudioReactiveOrb({
 
     const clock = new THREE.Clock();
     let frameId = 0;
+    let lastRenderAt = 0;
 
     const renderFrame = () => {
       frameId = window.requestAnimationFrame(renderFrame);
+      const now = performance.now();
+      if (now - lastRenderAt < targetFrameMs) {
+        return;
+      }
+      lastRenderAt = now;
       const elapsed = clock.getElapsedTime();
       const uniformsCurrent = uniformsRef.current;
       if (!uniformsCurrent) {
@@ -203,7 +215,7 @@ export default function AudioReactiveOrb({
       cameraRef.current = null;
       analyzerRef.current = null;
     };
-  }, []);
+  }, [performanceMode]);
 
   useEffect(() => {
     const uniforms = uniformsRef.current;

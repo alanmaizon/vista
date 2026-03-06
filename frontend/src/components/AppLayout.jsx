@@ -7,6 +7,7 @@ import { LessonPanel, SessionLog } from "./StatusPanels";
 export default function AppLayout({
   authStatus,
   orbProps,
+  playbackAudioElementRef,
   authPanelProps,
   scoreWorkspaceProps,
   lessonPanelProps,
@@ -20,10 +21,12 @@ export default function AppLayout({
           <div className="workspace-orb-shell absolute right-[-3.5rem] top-1/2 -translate-y-1/2">
             <AudioReactiveOrb
               audioSource={orbProps.audioSource}
+              audioElement={orbProps.audioElement}
               active={orbProps.active}
               intensity={orbProps.intensity}
               size="workspace"
               theme={orbProps.theme}
+              performanceMode={orbProps.performanceMode}
             />
           </div>
           <div className="relative z-10 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -58,6 +61,7 @@ export default function AppLayout({
             <SessionLog {...sessionLogProps} />
           </section>
         </div>
+        <audio ref={playbackAudioElementRef} preload="auto" className="hidden" aria-hidden="true" />
       </main>
     </div>
   );

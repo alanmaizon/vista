@@ -89,6 +89,8 @@ export default function useEurydiceApp() {
   const [isBusy, setIsBusy] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [tempoOverride, setTempoOverride] = useState("");
+  const [playbackAudioElement, setPlaybackAudioElement] = useState(null);
+  const [orbLowPower, setOrbLowPower] = useState(false);
 
   const videoRef = useRef(null);
   const cameraStreamRef = useRef(null);
@@ -738,12 +740,16 @@ export default function useEurydiceApp() {
           tempoOverride && Number(tempoOverride) > 0
             ? Number(tempoOverride)
             : defaultTempo || 120;
-        await playPhrase({ notes, tempo_bpm: tempo });
+        await playPhrase({
+          notes,
+          tempo_bpm: tempo,
+          audioElement: playbackAudioElement,
+        });
       } finally {
         setIsPlaying(false);
       }
     },
-    [isPlaying, tempoOverride],
+    [isPlaying, playbackAudioElement, tempoOverride],
   );
 
   const handlePlayAnalysis = useCallback(() => {
@@ -894,6 +900,10 @@ export default function useEurydiceApp() {
     isBusy,
     isPlaying,
     isConnected,
+    playbackAudioElement,
+    setPlaybackAudioElement,
+    orbLowPower,
+    setOrbLowPower,
     videoRef,
     primaryActionLabel,
     activeNoteRange,

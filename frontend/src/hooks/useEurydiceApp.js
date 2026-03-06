@@ -101,6 +101,7 @@ export default function useEurydiceApp() {
     energyDb: -90,
     speechConfidence: 0,
     musicConfidence: 0,
+    speechActive: false,
     pitchHz: null,
     pitchConfidence: 0,
   });

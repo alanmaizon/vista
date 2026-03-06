@@ -8,9 +8,27 @@ import {
 const TARGET_SAMPLE_RATE = 16000;
 const ANALYSIS_FRAME_SIZE = 2048;
 const MUSIC_SILENCE_MS = 340;
+const CONFIDENCE_SMOOTHING = 0.28;
+const MODE_SWITCH_CONFIRM_FRAMES = 2;
+const MUSIC_PITCH_GATE = 0.5;
+const SPEECH_ACTIVITY_ENTER = 0.62;
+const SPEECH_ACTIVITY_HOLD = 0.38;
+const STABLE_NOTE_MIN_FRAMES = 4;
+const STABLE_NOTE_MAX_CENTS_SPAN = 35;
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
+}
+
+function smoothValue(previous, next, alpha = CONFIDENCE_SMOOTHING) {
+  return previous + (next - previous) * alpha;
+}
+
+function centsBetween(aHz, bHz) {
+  if (!aHz || !bHz) {
+    return Infinity;
+  }
+  return Math.abs(1200 * Math.log2(aHz / bHz));
 }
 
 function concatUint8Arrays(chunks) {
@@ -114,7 +132,7 @@ function estimateRhythmPattern(onsetTimes) {
   return { tempo, pattern };
 }
 
-function classifyAudioFrame({
+export function classifyAudioFrame({
   energyDb,
   zeroCrossingRate,
   spectralCentroid,
@@ -149,6 +167,93 @@ function classifyAudioFrame({
   return { mode: "SILENCE", speechConfidence, musicConfidence };
 }
 
+export function resolveAudioMode({
+  currentMode,
+  energyDb,
+  speechConfidence,
+  musicConfidence,
+  pitchConfidence,
+}) {
+  if (energyDb < -58) {
+    return "SILENCE";
+  }
+
+  const musicDominant =
+    musicConfidence >= 0.66 &&
+    musicConfidence > speechConfidence + 0.12 &&
+    pitchConfidence >= MUSIC_PITCH_GATE;
+  const speechDominant =
+    speechConfidence >= 0.58 &&
+    (speechConfidence > musicConfidence - 0.04 || pitchConfidence < 0.42);
+
+  if (currentMode === "MUSIC") {
+    if (energyDb < -54) {
+      return "SILENCE";
+    }
+    if (musicConfidence >= 0.46 || pitchConfidence >= 0.62) {
+      return "MUSIC";
+    }
+    if (speechConfidence >= 0.72 && speechConfidence > musicConfidence + 0.16) {
+      return "SPEECH";
+    }
+    return "MUSIC";
+  }
+
+  if (currentMode === "SPEECH") {
+    if (energyDb < -54) {
+      return "SILENCE";
+    }
+    if (speechConfidence >= 0.42 && speechConfidence >= musicConfidence - 0.08) {
+      return "SPEECH";
+    }
+    if (musicDominant) {
+      return "MUSIC";
+    }
+    return "SPEECH";
+  }
+
+  if (musicDominant) {
+    return "MUSIC";
+  }
+  if (speechDominant) {
+    return "SPEECH";
+  }
+  return "SILENCE";
+}
+
+export function resolveSpeechActivity({
+  active,
+  energyDb,
+  speechConfidence,
+  zeroCrossingRate,
+  pitchConfidence,
+}) {
+  if (energyDb < -55) {
+    return false;
+  }
+
+  if (!active) {
+    return (
+      speechConfidence >= SPEECH_ACTIVITY_ENTER &&
+      zeroCrossingRate >= 0.035 &&
+      !(pitchConfidence > 0.84 && zeroCrossingRate < 0.03)
+    );
+  }
+
+  return speechConfidence >= SPEECH_ACTIVITY_HOLD && energyDb >= -54;
+}
+
+export function shouldEmitStableNote(noteHold) {
+  if (!noteHold) {
+    return false;
+  }
+  return (
+    noteHold.frames >= STABLE_NOTE_MIN_FRAMES &&
+    noteHold.confidence >= 0.68 &&
+    centsBetween(noteHold.minHz, noteHold.maxHz) <= STABLE_NOTE_MAX_CENTS_SPAN
+  );
+}
+
 export function createLiveAudioRouter({
   eventBus = null,
   onSpeechChunk = null,
@@ -170,6 +275,9 @@ export function createLiveAudioRouter({
   let pendingMode = "SILENCE";
   let pendingModeFrames = 0;
   let lastMetricsEmitAt = 0;
+  let smoothedSpeechConfidence = 0;
+  let smoothedMusicConfidence = 0;
+  let speechActive = false;
   let noteHold = null;
   let phraseState = {
     chunks: [],
@@ -284,6 +392,9 @@ export function createLiveAudioRouter({
         frames: 1,
         maxVelocity: velocity,
         confidence: pitch.clarity,
+        minHz: pitch.hz,
+        maxHz: pitch.hz,
+        emitted: false,
       };
       return;
     }
@@ -292,9 +403,12 @@ export function createLiveAudioRouter({
     noteHold.pitchHz = pitch.hz;
     noteHold.maxVelocity = Math.max(noteHold.maxVelocity, velocity);
     noteHold.confidence = Math.max(noteHold.confidence, pitch.clarity);
+    noteHold.minHz = Math.min(noteHold.minHz, pitch.hz);
+    noteHold.maxHz = Math.max(noteHold.maxHz, pitch.hz);
 
-    if (noteHold.frames === 3 && now - phraseState.lastNoteEmitAt > 220) {
+    if (!noteHold.emitted && shouldEmitStableNote(noteHold) && now - phraseState.lastNoteEmitAt > 220) {
       phraseState.lastNoteEmitAt = now;
+      noteHold.emitted = true;
       if (phraseState.noteNames.at(-1) !== noteHold.noteName) {
         phraseState.noteNames.push(noteHold.noteName);
       }
@@ -317,15 +431,37 @@ export function createLiveAudioRouter({
       spectralCentroid,
       pitch,
     });
+    smoothedSpeechConfidence = smoothValue(
+      smoothedSpeechConfidence,
+      classification.speechConfidence,
+    );
+    smoothedMusicConfidence = smoothValue(
+      smoothedMusicConfidence,
+      classification.musicConfidence,
+    );
+    const resolvedMode = resolveAudioMode({
+      currentMode,
+      energyDb,
+      speechConfidence: smoothedSpeechConfidence,
+      musicConfidence: smoothedMusicConfidence,
+      pitchConfidence: pitch.clarity,
+    });
+    speechActive = resolveSpeechActivity({
+      active: speechActive,
+      energyDb,
+      speechConfidence: smoothedSpeechConfidence,
+      zeroCrossingRate,
+      pitchConfidence: pitch.clarity,
+    });
 
-    if (classification.mode === pendingMode) {
+    if (resolvedMode === pendingMode) {
       pendingModeFrames += 1;
     } else {
-      pendingMode = classification.mode;
+      pendingMode = resolvedMode;
       pendingModeFrames = 1;
     }
 
-    if (pendingModeFrames >= 2 && pendingMode !== currentMode) {
+    if (pendingModeFrames >= MODE_SWITCH_CONFIRM_FRAMES && pendingMode !== currentMode) {
       currentMode = pendingMode;
       onModeChange?.(currentMode);
       emit("audio.mode", { mode: currentMode, occurredAt: Date.now() });
@@ -336,14 +472,15 @@ export function createLiveAudioRouter({
       onLevels?.({
         mode: currentMode,
         energyDb,
-        speechConfidence: classification.speechConfidence,
-        musicConfidence: classification.musicConfidence,
+        speechConfidence: smoothedSpeechConfidence,
+        musicConfidence: smoothedMusicConfidence,
+        speechActive,
         pitchHz: pitch.hz,
         pitchConfidence: pitch.clarity,
       });
     }
 
-    if (currentMode === "SPEECH") {
+    if (currentMode === "SPEECH" && speechActive) {
       onSpeechChunk?.(pcmBytes);
     } else if (currentMode === "MUSIC") {
       trackMusicFrame({
@@ -488,6 +625,9 @@ export function createLiveAudioRouter({
     pendingMode = "SILENCE";
     pendingModeFrames = 0;
     lastMetricsEmitAt = 0;
+    smoothedSpeechConfidence = 0;
+    smoothedMusicConfidence = 0;
+    speechActive = false;
     resetPhrase();
   }
 

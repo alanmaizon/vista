@@ -1,3 +1,49 @@
+const FEEDBACK_METRICS = [
+  { key: "pitchAccuracy", label: "Pitch accuracy" },
+  { key: "rhythmAccuracy", label: "Rhythm accuracy" },
+  { key: "tempoStability", label: "Tempo stability" },
+  { key: "dynamicRange", label: "Dynamic range" },
+  { key: "articulationVariance", label: "Articulation variance" },
+];
+
+function normalizeMetricValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, numeric));
+}
+
+function FeedbackMeters({ title, feedback }) {
+  if (!feedback || typeof feedback !== "object") {
+    return null;
+  }
+  return (
+    <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/45 px-3 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-300">{title}</div>
+      <div className="mt-3 space-y-2">
+        {FEEDBACK_METRICS.map((metric) => {
+          const value = normalizeMetricValue(feedback[metric.key]);
+          return (
+            <div key={metric.key}>
+              <div className="mb-1 flex items-center justify-between text-[11px] text-slate-300">
+                <span>{metric.label}</span>
+                <span>{Math.round(value * 100)}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-slate-800/70">
+                <div
+                  className="h-1.5 rounded-full bg-sky-300 transition-all duration-300"
+                  style={{ width: `${Math.round(value * 100)}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function LessonPanel({ skill, lessonState, analysis, comparison, errorMessage }) {
   return (
     <div className="glass rounded-3xl p-5">
@@ -25,6 +71,7 @@ export function LessonPanel({ skill, lessonState, analysis, comparison, errorMes
               Notes: {analysis.notes.map((note) => note.note_name || note.note || "?").join(", ")}
             </div>
           ) : null}
+          <FeedbackMeters title="Phrase feedback" feedback={analysis.performance_feedback} />
         </div>
       ) : null}
 
@@ -35,6 +82,7 @@ export function LessonPanel({ skill, lessonState, analysis, comparison, errorMes
           <div className="mt-2 text-xs text-slate-300">
             Accuracy: {Math.round((comparison.accuracy || 0) * 100)}%
           </div>
+          <FeedbackMeters title="Calibrated feedback" feedback={comparison.performance_feedback} />
         </div>
       ) : null}
 

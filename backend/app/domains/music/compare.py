@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from .feedback import PerformanceFeedback, feedback_from_comparison
+from .feedback import (
+    ComparisonCalibration,
+    PerformanceFeedback,
+    comparison_calibration_for_profile,
+    feedback_from_comparison,
+)
 from .symbolic import note_name_to_midi
 from .transcription import transcribe_pcm16, transcription_to_dict
 from .models import MusicScore
@@ -59,6 +64,8 @@ def _flatten_expected_notes(score: MusicScore) -> list[dict]:
 def _compare_expected_window(
     expected_notes: list[dict],
     played_window: list,
+    *,
+    calibration: ComparisonCalibration,
     played_tempo_bpm: float | None = None,
 ) -> tuple[float, list[str], list[ComparedEvent]]:
     expected_total_beats = sum(float(note.get("beats", 0.0)) for note in expected_notes) or 1.0
@@ -108,7 +115,7 @@ def _compare_expected_window(
             else:
                 played_duration_ratio = played.duration_ms / played_total_ms
             duration_delta = abs(expected_duration_ratio - played_duration_ratio)
-            duration_match = duration_delta <= 0.18
+            duration_match = duration_delta <= calibration.duration_tolerance
 
             expected_onset_ratio = (
                 expected_start_beat / expected_onset_span_beats
@@ -121,7 +128,7 @@ def _compare_expected_window(
                 else 0.0
             )
             onset_delta = abs(expected_onset_ratio - played_onset_ratio)
-            onset_match = onset_delta <= 0.12
+            onset_match = onset_delta <= calibration.onset_tolerance
             rhythm_match = onset_match and duration_match
 
         comparisons.append(
@@ -145,9 +152,9 @@ def _compare_expected_window(
 
         note_units = 0.0
         if pitch_match:
-            note_units += 0.6
+            note_units += calibration.pitch_match_points
         elif pitch_class_match:
-            note_units += 0.35
+            note_units += calibration.pitch_class_points
             if played is not None:
                 octave_steps = abs(octave_displacement or 0)
                 octave_count = "one octave" if octave_steps == 1 else f"{octave_steps} octaves"
@@ -167,7 +174,7 @@ def _compare_expected_window(
                 )
 
         if onset_match:
-            note_units += 0.2
+            note_units += calibration.onset_points
         elif played is not None:
             direction = "late" if played.start_ms > played_window_start_ms else "early"
             if len(played_window) > 1:
@@ -187,7 +194,7 @@ def _compare_expected_window(
             )
 
         if duration_match:
-            note_units += 0.2
+            note_units += calibration.duration_points
         elif played is not None:
             expected_duration_ratio = expected_beats / expected_total_beats
             if use_beats:
@@ -211,14 +218,17 @@ def compare_performance_against_score(
     audio_bytes: bytes,
     sample_rate: int,
     max_notes: int = 12,
+    instrument_profile: str | None = None,
 ) -> PerformanceComparison:
     """Compare a monophonic played phrase against a stored symbolic score."""
+    calibration = comparison_calibration_for_profile(instrument_profile)
     expected_notes = _flatten_expected_notes(score)
     phrase = transcribe_pcm16(
         audio_bytes,
         sample_rate=sample_rate,
         expected="PHRASE",
         max_notes=max_notes,
+        instrument_profile=instrument_profile,
     )
     played_notes = list(phrase.notes)
     warnings = list(phrase.warnings)
@@ -237,6 +247,7 @@ def compare_performance_against_score(
             candidate_score, candidate_mismatches, candidate_comparisons = _compare_expected_window(
                 expected_notes,
                 window,
+                calibration=calibration,
                 played_tempo_bpm=played_tempo,
             )
             ranking = (
@@ -289,6 +300,7 @@ def compare_performance_against_score(
         score_units, mismatches, comparisons = _compare_expected_window(
             expected_notes,
             played_notes,
+            calibration=calibration,
             played_tempo_bpm=played_tempo,
         )
 
@@ -351,6 +363,7 @@ def compare_performance_against_score(
             dynamic_range=float(phrase_feedback.get("dynamicRange", 0.0)),
             articulation_variance=float(phrase_feedback.get("articulationVariance", 0.0)),
         ),
+        instrument_profile=instrument_profile,
     ).to_dict()
 
     return PerformanceComparison(

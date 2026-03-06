@@ -21,6 +21,8 @@ export default function App() {
     setMicEnabled,
     cameraEnabled,
     setCameraEnabled,
+    instrumentProfile,
+    setInstrumentProfile,
     scoreLine,
     setScoreLine,
     activeScore,
@@ -106,6 +108,7 @@ export default function App() {
         authStatus,
         micEnabled,
         cameraEnabled,
+        instrumentProfile,
         isConnected,
         status,
         runtimeSummary,
@@ -118,6 +121,7 @@ export default function App() {
         onSignIn: handleSignIn,
         onToggleMic: () => setMicEnabled((value) => !value),
         onToggleCamera: () => setCameraEnabled((value) => !value),
+        onInstrumentProfileChange: setInstrumentProfile,
         onPrimaryAction: () => {
           void handlePrimaryAction();
         },

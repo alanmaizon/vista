@@ -359,6 +359,7 @@ def transcribe_pcm16(
     sample_rate: int = 16000,
     expected: str = "AUTO",
     max_notes: int = 8,
+    instrument_profile: str | None = None,
 ) -> SymbolicPhrase:
     """Transcribe a short monophonic PCM clip into a symbolic phrase."""
     if max_notes < 1 or max_notes > MAX_NOTES:
@@ -413,7 +414,12 @@ def transcribe_pcm16(
         )
 
     if not events:
-        feedback = feedback_from_phrase(samples=samples, notes=(), confidence=0.0)
+        feedback = feedback_from_phrase(
+            samples=samples,
+            notes=(),
+            confidence=0.0,
+            instrument_profile=instrument_profile,
+        )
         return SymbolicPhrase(
             kind="unknown",
             notes=(),
@@ -435,7 +441,12 @@ def transcribe_pcm16(
         kind = "arpeggio_candidate"
 
     avg_confidence = round(sum(event.confidence for event in events) / len(events), 3)
-    feedback = feedback_from_phrase(samples=samples, notes=events, confidence=avg_confidence)
+    feedback = feedback_from_phrase(
+        samples=samples,
+        notes=events,
+        confidence=avg_confidence,
+        instrument_profile=instrument_profile,
+    )
     interval_hint = _interval_hint(events)
     harmony_hint = _harmony_hint(events)
 

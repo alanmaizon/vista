@@ -77,6 +77,7 @@ export default function useEurydiceApp() {
   const [captions, setCaptions] = useState([]);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [instrumentProfile, setInstrumentProfile] = useState("AUTO");
   const [scoreLine, setScoreLine] = useState("C4/q D4/q D4/q");
   const [activeScore, setActiveScore] = useState(null);
   const [lessonState, setLessonState] = useState(initialLessonState);
@@ -366,6 +367,7 @@ export default function useEurydiceApp() {
           source_text: currentScoreLine,
           time_signature: "4/4",
           lesson_stage: "idle",
+          instrument_profile: instrumentProfile,
         };
       } else if (awaitingCompare) {
         if (!micEnabled) {
@@ -381,6 +383,7 @@ export default function useEurydiceApp() {
           audio_b64: clip.audioB64,
           mime: clip.mime,
           max_notes: 12,
+          instrument_profile: instrumentProfile,
         };
       } else {
         setStatus("Loading lesson step...");
@@ -388,6 +391,7 @@ export default function useEurydiceApp() {
           score_id: activeScore.score_id,
           current_measure_index: lessonState.measureIndex,
           lesson_stage: lessonState.stage === "complete" ? "complete" : lessonState.stage || "idle",
+          instrument_profile: instrumentProfile,
         };
       }
 
@@ -414,6 +418,7 @@ export default function useEurydiceApp() {
       lessonState.measureIndex,
       lessonState.stage,
       micEnabled,
+      instrumentProfile,
       scoreLine,
       user,
     ],
@@ -437,6 +442,7 @@ export default function useEurydiceApp() {
         mime: clip.mime,
         expected: "AUTO",
         max_notes: 8,
+        instrument_profile: instrumentProfile,
       },
     });
     setAnalysis(payload);
@@ -445,7 +451,7 @@ export default function useEurydiceApp() {
     for (const warning of payload.warnings ?? []) {
       appendCaption("Warning", warning);
     }
-  }, [appendCaption, micEnabled, user]);
+  }, [appendCaption, instrumentProfile, micEnabled, user]);
 
   const startReadScoreSession = useCallback(async () => {
     setErrorMessage("");
@@ -688,6 +694,8 @@ export default function useEurydiceApp() {
     setMicEnabled,
     cameraEnabled,
     setCameraEnabled,
+    instrumentProfile,
+    setInstrumentProfile,
     scoreLine,
     setScoreLine,
     activeScore,

@@ -26,6 +26,7 @@ from .render import render_music_score, verovio_runtime_status
 
 
 router = APIRouter(prefix="/api/music", tags=["music"])
+InstrumentProfileLiteral = Literal["AUTO", "VOICE", "PIANO", "GUITAR", "STRINGS", "WINDS", "PERCUSSION"]
 
 
 class MusicTranscriptionRequest(BaseModel):
@@ -38,6 +39,10 @@ class MusicTranscriptionRequest(BaseModel):
         description="What the user expects to have played. Used to shape warnings only.",
     )
     max_notes: int = Field(8, ge=1, le=12, description="Maximum note events to return.")
+    instrument_profile: InstrumentProfileLiteral = Field(
+        "AUTO",
+        description="Calibration profile for pitch/rhythm scoring strictness.",
+    )
 
     @field_validator("audio_b64")
     @classmethod
@@ -128,6 +133,10 @@ class MusicPerformanceCompareRequest(BaseModel):
         ge=1,
         description="Optional 1-based measure index to compare instead of the entire stored score.",
     )
+    instrument_profile: InstrumentProfileLiteral = Field(
+        "AUTO",
+        description="Calibration profile for expected-vs-played matching strictness.",
+    )
 
     @field_validator("audio_b64")
     @classmethod
@@ -208,6 +217,10 @@ class MusicLessonActionRequest(BaseModel):
     )
     mime: str = Field("audio/pcm;rate=16000", description="PCM mime type for audio_b64.")
     max_notes: int = Field(12, ge=1, le=12, description="Maximum note events to evaluate when comparing.")
+    instrument_profile: InstrumentProfileLiteral = Field(
+        "AUTO",
+        description="Calibration profile for lesson compare scoring.",
+    )
 
 
 class MusicLessonActionResponse(BaseModel):
@@ -362,6 +375,7 @@ async def transcribe_music(
         sample_rate=sample_rate,
         expected=payload.expected,
         max_notes=payload.max_notes,
+        instrument_profile=payload.instrument_profile,
     )
     return MusicTranscriptionResponse(**transcription_to_dict(result))
 
@@ -517,6 +531,7 @@ async def compare_performance_with_score(
         audio_bytes=audio_bytes,
         sample_rate=sample_rate,
         max_notes=payload.max_notes,
+        instrument_profile=payload.instrument_profile,
     )
     return MusicPerformanceCompareResponse(
         score_id=score.id,
@@ -568,6 +583,7 @@ async def run_guided_lesson_action(
             audio_bytes=audio_bytes,
             sample_rate=sample_rate,
             max_notes=payload.max_notes,
+            instrument_profile=payload.instrument_profile,
         )
         comparison = MusicPerformanceCompareResponse(
             score_id=score.id,

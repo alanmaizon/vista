@@ -21,6 +21,7 @@ export default function AuthPanel({
   runtimeSummary,
   sessionId,
   skill,
+  instrumentProfile,
   isBusy,
   primaryActionLabel,
   onEmailChange,
@@ -28,6 +29,7 @@ export default function AuthPanel({
   onSignIn,
   onToggleMic,
   onToggleCamera,
+  onInstrumentProfileChange,
   onPrimaryAction,
 }) {
   return (
@@ -95,6 +97,27 @@ export default function AuthPanel({
               {cameraEnabled ? <Camera className="h-4 w-4" /> : <CameraOff className="h-4 w-4" />}
               Camera {cameraEnabled ? "On" : "Off"}
             </button>
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Input profile
+            </label>
+            <select
+              value={instrumentProfile}
+              onChange={(event) => onInstrumentProfileChange(event.target.value)}
+              className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-300/60"
+            >
+              <option value="AUTO">Auto (generic)</option>
+              <option value="PIANO">Piano / keys</option>
+              <option value="GUITAR">Guitar</option>
+              <option value="STRINGS">Strings</option>
+              <option value="WINDS">Winds</option>
+              <option value="VOICE">Voice</option>
+              <option value="PERCUSSION">Percussion</option>
+            </select>
+            <p className="mt-2 text-xs text-slate-400">
+              Calibrates timing and articulation strictness for phrase feedback.
+            </p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-300">
             <div className="flex items-center gap-2 text-white">

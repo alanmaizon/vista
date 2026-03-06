@@ -23,6 +23,7 @@ from app.domains.music import api as music_api_module
 from app.domains.music import compare as music_compare_module
 from app.domains.music import transcription as music_transcription_module
 from app.domains.music.compare import compare_performance_against_score
+from app.domains.music.feedback import comparison_calibration_for_profile
 from app.domains.music.models import MusicScore
 from app.domains.music.pitch import PitchEstimate, estimate_pitch_fastyin
 from app.domains.music.render import build_note_layout, render_music_score, score_to_musicxml
@@ -146,6 +147,43 @@ def test_transcription_to_dict_includes_tempo() -> None:
     assert 0.0 <= d["performance_feedback"]["pitchAccuracy"] <= 1.0
     for note_dict in d["notes"]:
         assert "beats" in note_dict
+
+
+def test_transcribe_feedback_changes_with_instrument_profile() -> None:
+    clip = synth_phrase(
+        [261.63, 329.63, 392.0],
+        note_duration_ms=360,
+        gap_ms=[420, 90],
+    )
+
+    voice_result = transcribe_pcm16(
+        clip,
+        sample_rate=16000,
+        max_notes=8,
+        instrument_profile="VOICE",
+    )
+    piano_result = transcribe_pcm16(
+        clip,
+        sample_rate=16000,
+        max_notes=8,
+        instrument_profile="PIANO",
+    )
+
+    assert voice_result.performance_feedback is not None
+    assert piano_result.performance_feedback is not None
+    # Voice profile is intentionally more timing-tolerant than piano for this phase.
+    assert (
+        voice_result.performance_feedback["tempoStability"]
+        >= piano_result.performance_feedback["tempoStability"]
+    )
+
+
+def test_compare_calibration_profiles_adjust_tolerances() -> None:
+    voice = comparison_calibration_for_profile("VOICE")
+    piano = comparison_calibration_for_profile("PIANO")
+
+    assert voice.onset_tolerance > piano.onset_tolerance
+    assert voice.duration_tolerance > piano.duration_tolerance
 
 
 def test_compare_tempo_aware_rhythm_uses_beats(
@@ -549,6 +587,7 @@ def test_music_transcribe_endpoint_returns_symbolic_notes(client: TestClient) ->
         "audio_b64": base64.b64encode(synth_tone(440.0)).decode("ascii"),
         "mime": "audio/pcm;rate=16000",
         "expected": "NOTE",
+        "instrument_profile": "VOICE",
     }
 
     response = client.post(

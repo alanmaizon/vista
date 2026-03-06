@@ -59,6 +59,40 @@ function generateConversationId(prefix = "msg") {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function normalizeRouterEventNotes(event) {
+  if (event?.type === "NOTE_PLAYED" && event.pitch) {
+    return [event.pitch];
+  }
+  if (event?.type === "PHRASE_PLAYED" && Array.isArray(event.notes)) {
+    return event.notes.filter(Boolean);
+  }
+  return [];
+}
+
+function buildTraceMismatch(event, payload) {
+  if (!payload) {
+    return { mismatch: false, mismatchReason: null };
+  }
+  const routerNotes = normalizeRouterEventNotes(event);
+  const deterministicNotes = Array.isArray(payload.notes)
+    ? payload.notes.map((item) => item?.note_name).filter(Boolean)
+    : [];
+
+  if (event?.type === "PHRASE_PLAYED") {
+    if (!deterministicNotes.length) {
+      return { mismatch: true, mismatchReason: "deterministic_empty_phrase" };
+    }
+    if (!routerNotes.length) {
+      return { mismatch: true, mismatchReason: "router_empty_phrase" };
+    }
+    if (routerNotes.join("|") !== deterministicNotes.join("|")) {
+      return { mismatch: true, mismatchReason: "router_phrase_note_mismatch" };
+    }
+  }
+
+  return { mismatch: false, mismatchReason: null };
+}
+
 export default function useEurydiceApp() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -135,6 +169,14 @@ export default function useEurydiceApp() {
   const liveEventBusRef = useRef(createLiveEventBus());
   const conversationStreamRefs = useRef({ assistant: null, user: null });
   const assistantStreamingRef = useRef(false);
+  const liveAudioLevelsRef = useRef({
+    energyDb: -90,
+    speechConfidence: 0,
+    musicConfidence: 0,
+    speechActive: false,
+    pitchHz: null,
+    pitchConfidence: 0,
+  });
   const lastAssistantAudioAtRef = useRef(0);
   const pendingMusicInterruptRef = useRef(null);
   const musicInterruptTimerRef = useRef(null);
@@ -317,6 +359,10 @@ export default function useEurydiceApp() {
   useEffect(() => {
     liveModeRef.current = liveMode;
   }, [liveMode]);
+
+  useEffect(() => {
+    liveAudioLevelsRef.current = liveAudioLevels;
+  }, [liveAudioLevels]);
 
   const applyPreparedScorePayload = useCallback(
     (payload) => {
@@ -578,6 +624,52 @@ export default function useEurydiceApp() {
       // Keep the latest snapshot visible if telemetry fetch fails.
     }
   }, [user]);
+
+  const reportLiveAudioTrace = useCallback(
+    async ({ event, deterministicPayload = null, mismatch = false, mismatchReason = null }) => {
+      if (!user || !event?.type) {
+        return;
+      }
+      const levels = liveAudioLevelsRef.current;
+      try {
+        await apiRequest("/api/music/analytics/live-audio-trace", {
+          method: "POST",
+          body: {
+            session_id: sessionId,
+            event_type: event.type,
+            router_mode: liveAudioMode || "SILENCE",
+            speech_active: Boolean(levels.speechActive),
+            speech_confidence: levels.speechConfidence,
+            music_confidence: levels.musicConfidence,
+            pitch_hz: levels.pitchHz,
+            pitch_confidence: levels.pitchConfidence,
+            router_summary: {
+              pitch: event.pitch || null,
+              notes: Array.isArray(event.notes) ? event.notes : normalizeRouterEventNotes(event),
+              tempo: event.tempo || null,
+              pattern: Array.isArray(event.pattern) ? event.pattern : null,
+              confidence: event.confidence || null,
+            },
+            deterministic_summary: deterministicPayload
+              ? {
+                  kind: deterministicPayload.kind || null,
+                  notes: Array.isArray(deterministicPayload.notes)
+                    ? deterministicPayload.notes.map((item) => item?.note_name).filter(Boolean)
+                    : [],
+                  confidence: deterministicPayload.confidence || null,
+                  summary: deterministicPayload.summary || null,
+                }
+              : null,
+            mismatch,
+            mismatch_reason: mismatchReason,
+          },
+        });
+      } catch {
+        // Trace reporting must never block live tutoring.
+      }
+    },
+    [liveAudioMode, sessionId, user],
+  );
 
   useEffect(() => {
     if (!user) {
@@ -927,6 +1019,7 @@ export default function useEurydiceApp() {
 
       if (event.type === "NOTE_PLAYED") {
         appendConversationMessage("music", `Note detected: ${event.pitch}`, { kind: "music" });
+        void reportLiveAudioTrace({ event });
         queueMusicInterrupt({
           text: `A music interrupt just occurred: NOTE_PLAYED pitch=${event.pitch} confidence=${Math.round(
             Number(event.confidence || 0) * 100,
@@ -943,6 +1036,7 @@ export default function useEurydiceApp() {
           `Rhythm detected at ${event.tempo || "?"} BPM`,
           { kind: "music" },
         );
+        void reportLiveAudioTrace({ event });
         queueMusicInterrupt({
           text: `A rhythm interrupt just occurred: RHYTHM_PATTERN tempo=${event.tempo || "unknown"} BPM pattern=${Array.isArray(
             event.pattern,
@@ -962,6 +1056,7 @@ export default function useEurydiceApp() {
       });
 
       if (!user || musicAnalysisInFlightRef.current) {
+        void reportLiveAudioTrace({ event });
         queueMusicInterrupt({
           text: `A phrase interrupt just occurred: PHRASE_PLAYED notes=${event.notes.join(",")}. Acknowledge it briefly and continue the lesson.`,
           type: event.type,
@@ -988,6 +1083,15 @@ export default function useEurydiceApp() {
           kind: "analysis",
         });
         appendCaption("Analysis", payload.summary || "Phrase analysed.");
+        {
+          const traceDecision = buildTraceMismatch(event, payload);
+          void reportLiveAudioTrace({
+            event,
+            deterministicPayload: payload,
+            mismatch: traceDecision.mismatch,
+            mismatchReason: traceDecision.mismatchReason,
+          });
+        }
         queueMusicInterrupt({
           text: `A phrase interrupt just occurred. Deterministic analysis summary: ${
             payload.summary || "Phrase analysed."
@@ -1002,7 +1106,14 @@ export default function useEurydiceApp() {
         musicAnalysisInFlightRef.current = false;
       }
     },
-    [appendCaption, appendConversationMessage, instrumentProfile, queueMusicInterrupt, user],
+    [
+      appendCaption,
+      appendConversationMessage,
+      instrumentProfile,
+      queueMusicInterrupt,
+      reportLiveAudioTrace,
+      user,
+    ],
   );
 
   useEffect(() => {

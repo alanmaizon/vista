@@ -29,6 +29,7 @@ from app.domains.music.models import (
     MusicCollaborationSession,
     MusicEngagementProfile,
     MusicLibraryItem,
+    MusicLiveAudioTrace,
     MusicLessonAssignment,
     MusicLessonPack,
     MusicLessonPackEntry,
@@ -569,6 +570,7 @@ class FakeMusicDB:
         self.library_items = {}
         self.lesson_packs = {}
         self.lesson_pack_entries = {}
+        self.live_audio_traces = {}
         self._pending = []
 
     def add(self, instance) -> None:
@@ -598,6 +600,8 @@ class FakeMusicDB:
                 self.lesson_packs[pending.id] = pending
             elif isinstance(pending, MusicLessonPackEntry):
                 self.lesson_pack_entries[pending.id] = pending
+            elif isinstance(pending, MusicLiveAudioTrace):
+                self.live_audio_traces[pending.id] = pending
         self._pending = []
 
     async def refresh(self, instance) -> None:
@@ -646,6 +650,11 @@ class FakeMusicDB:
             if lookup_key is None:
                 return FakeScalarResult(scalars=self.lesson_pack_entries.values())
             return FakeScalarResult(self.lesson_pack_entries.get(lookup_key))
+        if entity is MusicLiveAudioTrace:
+            if lookup_key is None:
+                return FakeScalarResult(scalars=self.live_audio_traces.values())
+            filtered = [item for item in self.live_audio_traces.values() if item.user_id == lookup_key]
+            return FakeScalarResult(scalars=filtered)
         if lookup_key is None:
             return FakeScalarResult(scalars=self.scores.values())
         return FakeScalarResult(self.scores.get(lookup_key))
@@ -722,6 +731,47 @@ def test_music_runtime_status_endpoint_reports_verovio_state(
         "crepe_available": True,
         "crepe_detail": "crepe module detected",
     }
+
+
+def test_live_audio_trace_endpoints_persist_and_summarize(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    record_response = client.post(
+        "/api/music/analytics/live-audio-trace",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "event_type": "PHRASE_PLAYED",
+            "router_mode": "MUSIC",
+            "speech_active": False,
+            "speech_confidence": 0.12,
+            "music_confidence": 0.88,
+            "pitch_hz": 440.0,
+            "pitch_confidence": 0.91,
+            "router_summary": {"notes": ["A4", "C5"]},
+            "deterministic_summary": {"notes": ["A4", "C5", "E5"], "summary": "A minor arpeggio"},
+            "mismatch": True,
+            "mismatch_reason": "router_truncated_phrase",
+        },
+    )
+
+    assert record_response.status_code == 200
+    assert record_response.json()["ok"] is True
+    assert len(fake_music_db.live_audio_traces) == 1
+
+    metrics_response = client.get(
+        "/api/music/analytics/live-audio-trace",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert metrics_response.status_code == 200
+    body = metrics_response.json()
+    assert body["total_traces"] == 1
+    assert body["mismatch_count"] == 1
+    assert body["mismatch_rate"] == 1.0
+    assert body["by_event_type"] == {"PHRASE_PLAYED": 1}
+    assert body["recent_traces"][0]["router_summary"]["notes"] == ["A4", "C5"]
+    assert body["recent_traces"][0]["deterministic_summary"]["summary"] == "A minor arpeggio"
 
 
 def test_music_score_import_endpoint_returns_symbolic_score(

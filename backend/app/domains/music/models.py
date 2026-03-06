@@ -202,6 +202,31 @@ class MusicLiveToolCall(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class MusicLiveAudioTrace(Base):
+    """Short rolling trace row for frontend live router decisions."""
+
+    __tablename__ = "music_live_audio_traces"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: str = Column(String, nullable=False, index=True)
+    session_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), nullable=True, index=True)
+
+    event_type: str = Column(String(32), nullable=False, index=True)
+    router_mode: str = Column(String(16), nullable=False, default="SILENCE", server_default="SILENCE", index=True)
+    speech_active: bool = Column(Boolean, nullable=False, default=False, server_default="false", index=True)
+    speech_confidence: Optional[float] = Column(Float, nullable=True)
+    music_confidence: Optional[float] = Column(Float, nullable=True)
+    pitch_hz: Optional[float] = Column(Float, nullable=True)
+    pitch_confidence: Optional[float] = Column(Float, nullable=True)
+
+    router_summary: Optional[dict] = Column(JSONB, nullable=True)
+    deterministic_summary: Optional[dict] = Column(JSONB, nullable=True)
+    mismatch: bool = Column(Boolean, nullable=False, default=False, server_default="false", index=True)
+    mismatch_reason: Optional[str] = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class MusicLessonPack(Base):
     """Ordered set of library items that can be loaded into guided workflow."""
 

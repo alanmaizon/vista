@@ -29,6 +29,7 @@ from .models import (
     MusicCollaborationSession,
     MusicEngagementProfile,
     MusicLibraryItem,
+    MusicLiveAudioTrace,
     MusicLessonAssignment,
     MusicLessonPack,
     MusicLessonPackEntry,
@@ -296,6 +297,94 @@ class MusicLiveToolMetricsResponse(BaseModel):
     failure_kinds: dict[str, int]
     metrics: list[MusicLiveToolMetric]
     recent_calls: list[MusicLiveToolCallSummary]
+
+
+class MusicLiveAudioTraceRequest(BaseModel):
+    """Frontend debug trace payload for live audio routing decisions."""
+
+    session_id: UUID | None = None
+    event_type: Literal["NOTE_PLAYED", "PHRASE_PLAYED", "RHYTHM_PATTERN", "ROUTER_MISMATCH"] = "NOTE_PLAYED"
+    router_mode: Literal["SILENCE", "SPEECH", "MUSIC"] = "SILENCE"
+    speech_active: bool = False
+    speech_confidence: float | None = Field(None, ge=0, le=1)
+    music_confidence: float | None = Field(None, ge=0, le=1)
+    pitch_hz: float | None = Field(None, ge=0)
+    pitch_confidence: float | None = Field(None, ge=0, le=1)
+    router_summary: dict[str, object] | None = None
+    deterministic_summary: dict[str, object] | None = None
+    mismatch: bool = False
+    mismatch_reason: str | None = None
+
+
+class MusicLiveAudioTraceSummary(BaseModel):
+    """One recent live audio trace row."""
+
+    event_type: str
+    router_mode: str
+    speech_active: bool
+    speech_confidence: float | None
+    music_confidence: float | None
+    pitch_hz: float | None
+    pitch_confidence: float | None
+    router_summary: dict[str, object] | None
+    deterministic_summary: dict[str, object] | None
+    mismatch: bool
+    mismatch_reason: str | None
+    created_at: str | None
+
+
+class MusicLiveAudioTraceResponse(BaseModel):
+    """Recent rolling trace summary for live audio routing diagnostics."""
+
+    total_traces: int
+    mismatch_count: int
+    mismatch_rate: float
+    by_event_type: dict[str, int]
+    recent_traces: list[MusicLiveAudioTraceSummary]
+
+
+class MusicLiveAudioTraceRequest(BaseModel):
+    """Frontend debug trace payload for live audio routing decisions."""
+
+    session_id: UUID | None = None
+    event_type: Literal["NOTE_PLAYED", "PHRASE_PLAYED", "RHYTHM_PATTERN", "ROUTER_MISMATCH"] = "NOTE_PLAYED"
+    router_mode: Literal["SILENCE", "SPEECH", "MUSIC"] = "SILENCE"
+    speech_active: bool = False
+    speech_confidence: float | None = Field(None, ge=0, le=1)
+    music_confidence: float | None = Field(None, ge=0, le=1)
+    pitch_hz: float | None = Field(None, ge=0)
+    pitch_confidence: float | None = Field(None, ge=0, le=1)
+    router_summary: dict[str, object] | None = None
+    deterministic_summary: dict[str, object] | None = None
+    mismatch: bool = False
+    mismatch_reason: str | None = None
+
+
+class MusicLiveAudioTraceSummary(BaseModel):
+    """One recent live audio trace row."""
+
+    event_type: str
+    router_mode: str
+    speech_active: bool
+    speech_confidence: float | None
+    music_confidence: float | None
+    pitch_hz: float | None
+    pitch_confidence: float | None
+    router_summary: dict[str, object] | None
+    deterministic_summary: dict[str, object] | None
+    mismatch: bool
+    mismatch_reason: str | None
+    created_at: str | None
+
+
+class MusicLiveAudioTraceResponse(BaseModel):
+    """Recent rolling trace summary for live audio routing diagnostics."""
+
+    total_traces: int
+    mismatch_count: int
+    mismatch_rate: float
+    by_event_type: dict[str, int]
+    recent_traces: list[MusicLiveAudioTraceSummary]
 
 
 class MusicProgressSnapshotResponse(BaseModel):
@@ -1230,6 +1319,94 @@ async def live_tool_metrics(
         failure_kinds=failure_kinds,
         metrics=metrics,
         recent_calls=recent_calls,
+    )
+
+
+@router.post("/analytics/live-audio-trace", response_model=dict[str, object])
+async def record_live_audio_trace(
+    request: MusicLiveAudioTraceRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Persist one short live audio routing trace row for later tuning."""
+    trace = MusicLiveAudioTrace(
+        user_id=current_user["uid"],
+        session_id=request.session_id,
+        event_type=request.event_type,
+        router_mode=request.router_mode,
+        speech_active=bool(request.speech_active),
+        speech_confidence=request.speech_confidence,
+        music_confidence=request.music_confidence,
+        pitch_hz=request.pitch_hz,
+        pitch_confidence=request.pitch_confidence,
+        router_summary=request.router_summary,
+        deterministic_summary=request.deterministic_summary,
+        mismatch=bool(request.mismatch),
+        mismatch_reason=request.mismatch_reason,
+    )
+    db.add(trace)
+    await db.commit()
+    await db.refresh(trace)
+    return {
+        "ok": True,
+        "trace_id": str(trace.id),
+    }
+
+
+@router.get("/analytics/live-audio-trace", response_model=MusicLiveAudioTraceResponse)
+async def live_audio_trace_metrics(
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicLiveAudioTraceResponse:
+    """Return the recent rolling live audio router trace window for one user."""
+    result = await db.execute(
+        select(MusicLiveAudioTrace)
+        .where(MusicLiveAudioTrace.user_id == current_user["uid"])
+        .order_by(MusicLiveAudioTrace.created_at.desc())
+        .limit(200)
+    )
+    rows = list(result.scalars().all())
+    if not rows:
+        return MusicLiveAudioTraceResponse(
+            total_traces=0,
+            mismatch_count=0,
+            mismatch_rate=0.0,
+            by_event_type={},
+            recent_traces=[],
+        )
+
+    by_event_type: dict[str, int] = {}
+    mismatch_count = 0
+    for row in rows:
+        event_type = (row.event_type or "UNKNOWN").upper()
+        by_event_type[event_type] = int(by_event_type.get(event_type, 0)) + 1
+        if bool(row.mismatch):
+            mismatch_count += 1
+
+    return MusicLiveAudioTraceResponse(
+        total_traces=len(rows),
+        mismatch_count=mismatch_count,
+        mismatch_rate=round(mismatch_count / max(1, len(rows)), 3),
+        by_event_type=by_event_type,
+        recent_traces=[
+            MusicLiveAudioTraceSummary(
+                event_type=(row.event_type or "UNKNOWN").upper(),
+                router_mode=(row.router_mode or "SILENCE").upper(),
+                speech_active=bool(row.speech_active),
+                speech_confidence=row.speech_confidence,
+                music_confidence=row.music_confidence,
+                pitch_hz=row.pitch_hz,
+                pitch_confidence=row.pitch_confidence,
+                router_summary=dict(row.router_summary or {}) if row.router_summary else None,
+                deterministic_summary=(
+                    dict(row.deterministic_summary or {}) if row.deterministic_summary else None
+                ),
+                mismatch=bool(row.mismatch),
+                mismatch_reason=row.mismatch_reason,
+                created_at=_iso_or_none(row.created_at),
+            )
+            for row in rows[:20]
+        ],
     )
 
 

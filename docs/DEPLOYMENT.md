@@ -50,6 +50,10 @@
   - Defaults to `900`
 - `CLOUD_RUN_CONCURRENCY`
   - Defaults to `8` for a conservative websocket-friendly setting
+- `FRONTEND_FEATURES_URI`
+  - Optional private asset source for landing-page feature art
+  - Point it at a GCS folder such as `gs://eurydice-private-assets/features`
+  - Cloud Build syncs that folder into `frontend/public/features` before the Docker build
 - `ALLOW_UNAUTHENTICATED`
   - Defaults to `false`
   - If set to `true`, the deploy script passes `--allow-unauthenticated`
@@ -67,6 +71,8 @@
   - Vertex AI permissions sufficient to call the Live API (`aiplatform`)
   - Cloud SQL Client
   - Firebase Admin access if you rely on ADC instead of `FIREBASE_SERVICE_ACCOUNT_JSON`
+  - `roles/storage.objectViewer` on the private asset bucket if you use `FRONTEND_FEATURES_URI`
+- The repository ignores `frontend/public/features/*` so those assets stay out of git and are expected to arrive via local copy or Cloud Build sync.
 
 ## GitHub CI/CD
 
@@ -83,6 +89,7 @@
   - `DB_PASSWORD_SECRET_NAME`
   - `FIREBASE_SERVICE_ACCOUNT_JSON_SECRET_NAME`
   - `VISTA_FIREBASE_WEB_CONFIG_SECRET_NAME` (optional if you still set it as a literal env var)
+  - `FRONTEND_FEATURES_URI` (optional, for private landing-page feature art)
 - Optional repository variables:
   - `CLOUD_RUN_SERVICE_NAME`
   - `CLOUD_RUN_SERVICE_ACCOUNT`
@@ -94,6 +101,8 @@
   - `VISTA_PROJECT_ID`
   - `VISTA_USE_ADK`
   - `VISTA_SESSION_COOKIE_SECURE` (`true` recommended in Cloud Run)
+- If `FRONTEND_FEATURES_URI` is set, grant the Cloud Build service account read access to that bucket or prefix:
+  - `gcloud storage buckets add-iam-policy-binding gs://YOUR_BUCKET --member="serviceAccount:YOUR_BUILD_SERVICE_ACCOUNT" --role="roles/storage.objectViewer"`
 - The workflow calls the same `infra/deploy_cloudrun.sh` script, so local and CI deploys stay aligned.
 
 ## Local development

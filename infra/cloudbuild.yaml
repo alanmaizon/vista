@@ -1,4 +1,20 @@
+substitutions:
+  _FEATURES_URI: ""
+
 steps:
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -lc
+      - |
+        set -euo pipefail
+        if [ -z "${_FEATURES_URI}" ]; then
+          echo "No private frontend asset URI configured; skipping feature sync."
+          exit 0
+        fi
+        features_uri="${_FEATURES_URI%/}"
+        mkdir -p frontend/public/features
+        gcloud storage cp --recursive "${features_uri}"/* frontend/public/features/
   - name: gcr.io/cloud-builders/docker
     args:
       - build

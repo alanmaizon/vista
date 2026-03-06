@@ -31,6 +31,10 @@ dist/
 build/
 *.egg-info/
 
+# Private frontend assets fetched during CI/build
+frontend/public/features/*
+!frontend/public/features/.gitkeep
+
 # Landing (Next.js)
 landing/node_modules/
 landing/.next/

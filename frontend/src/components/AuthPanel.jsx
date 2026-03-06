@@ -20,7 +20,7 @@ export default function AuthPanel({
   status,
   runtimeSummary,
   sessionId,
-  skill,
+  isReadingScore,
   instrumentProfile,
   isBusy,
   primaryActionLabel,
@@ -31,6 +31,8 @@ export default function AuthPanel({
   onToggleCamera,
   onInstrumentProfileChange,
   onPrimaryAction,
+  onCapturePhrase,
+  onToggleScoreReader,
 }) {
   return (
     <div className="glass rounded-3xl p-5">
@@ -73,7 +75,7 @@ export default function AuthPanel({
               Session
             </div>
             <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-              {skill === "READ_SCORE" ? "Vision + notation" : "Audio-first"}
+              {isReadingScore ? "Camera reader active" : "Lesson loop"}
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -133,19 +135,33 @@ export default function AuthPanel({
               <div className="mt-2 text-[11px] text-slate-500">Session: {sessionId}</div>
             ) : null}
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={onCapturePhrase}
+              disabled={isBusy}
+              className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-100 transition hover:bg-white/10 disabled:cursor-wait disabled:opacity-70"
+            >
+              <Mic className="h-4 w-4" />
+              Capture phrase
+            </button>
+            <button
+              type="button"
+              onClick={onToggleScoreReader}
+              disabled={isBusy}
+              className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-100 transition hover:bg-white/10 disabled:cursor-wait disabled:opacity-70"
+            >
+              <ScanLine className="h-4 w-4" />
+              {isReadingScore ? "Stop reader" : "Read from camera"}
+            </button>
+          </div>
           <button
             type="button"
             onClick={onPrimaryAction}
             disabled={isBusy}
             className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-70"
           >
-            {isBusy ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : skill === "READ_SCORE" ? (
-              <ScanLine className="h-4 w-4" />
-            ) : (
-              <Radio className="h-4 w-4" />
-            )}
+            {isBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Radio className="h-4 w-4" />}
             {primaryActionLabel}
           </button>
         </div>

@@ -45,7 +45,6 @@ function FeedbackMeters({ title, feedback }) {
 }
 
 export function LessonPanel({
-  skill,
   lessonState,
   analysis,
   comparison,
@@ -58,7 +57,7 @@ export function LessonPanel({
     <div className="glass rounded-3xl p-5">
       <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Lesson state</div>
       <div className="mt-3 space-y-2 text-sm text-slate-200">
-        <div>Mode: {skill}</div>
+        <div>Mode: Guided lesson loop</div>
         <div>Lesson stage: {lessonState.stage}</div>
         <div>
           Measure: {lessonState.measureIndex ?? "—"}
@@ -173,7 +172,7 @@ export function SessionLog({ captions }) {
           ))
         ) : (
           <div className="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-sm text-slate-400">
-            Sign in and start with “Prepare lesson” or “Hear phrase”. Live captions and lesson guidance will appear here.
+            Sign in and start with “Prepare lesson”. Use “Capture phrase” or “Read from camera” as helper actions in the same loop.
           </div>
         )}
       </div>

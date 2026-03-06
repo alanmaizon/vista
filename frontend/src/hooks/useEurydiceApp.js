@@ -4,24 +4,6 @@ import { apiRequest } from "../lib/api";
 import { capturePcmClip } from "../lib/audioCapture";
 import { playPhrase } from "../lib/playback";
 
-export const SKILLS = [
-  {
-    id: "GUIDED_LESSON",
-    title: "Guided Lesson",
-    description: "Prepare a score, move bar by bar, then compare each take.",
-  },
-  {
-    id: "HEAR_PHRASE",
-    title: "Hear Phrase",
-    description: "Capture a short phrase and identify the notes or interval shape.",
-  },
-  {
-    id: "READ_SCORE",
-    title: "Read From Camera",
-    description: "Use a live camera view to capture a short readable bar into the lesson flow.",
-  },
-];
-
 function appendTimestamped(items, role, text) {
   return [...items, { role, text, id: `${Date.now()}-${items.length}` }];
 }
@@ -33,13 +15,7 @@ function scoreIsDirty(scoreLine, activeScore) {
   return scoreLine.trim() !== (activeScore.normalized ?? "").trim();
 }
 
-function buildPrimaryActionLabel({ skill, activeScore, lessonState, scoreLine }) {
-  if (skill === "HEAR_PHRASE") {
-    return "Hear phrase";
-  }
-  if (skill === "READ_SCORE") {
-    return "Read from camera";
-  }
+function buildPrimaryActionLabel({ activeScore, lessonState, scoreLine }) {
   if (!activeScore || scoreIsDirty(scoreLine, activeScore)) {
     return "Prepare lesson";
   }
@@ -71,7 +47,6 @@ export default function useEurydiceApp() {
   const [password, setPassword] = useState("");
   const [user, setUser] = useState(null);
   const [authStatus, setAuthStatus] = useState("Checking session...");
-  const [skill, setSkill] = useState("GUIDED_LESSON");
   const [status, setStatus] = useState("Ready.");
   const [errorMessage, setErrorMessage] = useState("");
   const [captions, setCaptions] = useState([]);
@@ -520,12 +495,19 @@ export default function useEurydiceApp() {
     async (data) => {
       switch (data.type) {
         case "server.text":
+          if (liveMode === "READ_SCORE") {
+            break;
+          }
           if (!cameraCapturePending) {
             appendCaption("Live", data.text ?? "");
           }
           break;
         case "server.status":
-          setStatus(`Connected in ${data.skill}.`);
+          if (liveMode === "READ_SCORE") {
+            setStatus("Camera reader connected.");
+          } else {
+            setStatus(`Connected in ${data.skill}.`);
+          }
           break;
         case "server.score_capture":
           setCameraCapturePending(false);
@@ -561,7 +543,7 @@ export default function useEurydiceApp() {
           break;
       }
     },
-    [appendCaption, cameraCapturePending],
+    [appendCaption, cameraCapturePending, liveMode],
   );
 
   useEffect(() => {
@@ -611,46 +593,60 @@ export default function useEurydiceApp() {
     return handlePlayPhrase(notes, 120);
   }, [activeScore, handlePlayPhrase]);
 
+  const isReadingScore = isConnected && liveMode === "READ_SCORE";
+
   const handlePrimaryAction = useCallback(async () => {
     if (isBusy) {
       return;
     }
     setIsBusy(true);
     try {
-      if (skill === "HEAR_PHRASE") {
-        await handleHearPhrase();
-      } else if (skill === "READ_SCORE") {
-        if (isConnected && liveMode === "READ_SCORE") {
-          stopLiveSession();
-        } else {
-          await startReadScoreSession();
-        }
-      } else {
-        await runLessonAction();
-      }
+      await runLessonAction();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Action failed.");
       setStatus("Action failed.");
     } finally {
       setIsBusy(false);
     }
-  }, [
-    handleHearPhrase,
-    isBusy,
-    isConnected,
-    liveMode,
-    runLessonAction,
-    skill,
-    startReadScoreSession,
-    stopLiveSession,
-  ]);
+  }, [isBusy, runLessonAction]);
+
+  const handleCapturePhraseAction = useCallback(async () => {
+    if (isBusy) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      await handleHearPhrase();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Phrase capture failed.");
+      setStatus("Phrase capture failed.");
+    } finally {
+      setIsBusy(false);
+    }
+  }, [handleHearPhrase, isBusy]);
+
+  const handleToggleScoreReader = useCallback(async () => {
+    if (isBusy) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      if (isReadingScore) {
+        stopLiveSession();
+      } else {
+        await startReadScoreSession();
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Camera reader action failed.");
+      setStatus("Camera reader action failed.");
+    } finally {
+      setIsBusy(false);
+    }
+  }, [isBusy, isReadingScore, startReadScoreSession, stopLiveSession]);
 
   const primaryActionLabel = useMemo(() => {
-    if (skill === "READ_SCORE" && isConnected && liveMode === "READ_SCORE") {
-      return "Stop reader";
-    }
-    return buildPrimaryActionLabel({ skill, activeScore, lessonState, scoreLine });
-  }, [activeScore, isConnected, lessonState, liveMode, scoreLine, skill]);
+    return buildPrimaryActionLabel({ activeScore, lessonState, scoreLine });
+  }, [activeScore, lessonState, scoreLine]);
 
   const activeNoteRange = useMemo(() => {
     if (lessonState.noteStartIndex == null || lessonState.noteEndIndex == null) {
@@ -700,8 +696,6 @@ export default function useEurydiceApp() {
     password,
     setPassword,
     authStatus,
-    skill,
-    setSkill,
     status,
     errorMessage,
     captions,
@@ -722,6 +716,7 @@ export default function useEurydiceApp() {
     tutorPrompt,
     sessionId,
     liveMode,
+    isReadingScore,
     isBusy,
     isPlaying,
     isConnected,
@@ -736,6 +731,8 @@ export default function useEurydiceApp() {
     setTempoOverride,
     handleSignIn,
     handlePrimaryAction,
+    handleCapturePhraseAction,
+    handleToggleScoreReader,
     handlePlayAnalysis,
     handlePlayScore,
     resetLessonState,

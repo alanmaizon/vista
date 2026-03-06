@@ -23,14 +23,12 @@ See the [Local Setup Guide](docs/LOCAL_SETUP.md) for detailed instructions on ru
 
 ## Features
 
-🎵 **Seven Music Skills:**
-- **GUIDED_LESSON** - Bar-by-bar practice with real-time feedback
-- **HEAR_PHRASE** - Identify melodies, intervals, chords, and arpeggios
-- **SHEET_FRAME_COACH** - Help framing sheet music for clear reading
-- **READ_SCORE** - Read visible musical notation
-- **COMPARE_PERFORMANCE** - Compare played vs. intended performance
-- **EAR_TRAIN** - Listening drills and ear training exercises
-- **GENERATE_EXAMPLE** - Original musical examples and exercises
+🎵 **Unified Guided Lesson Loop:**
+- **Prepare lesson** - Import/prepare notation and set the active bar sequence
+- **Compare bar** - Record one take and run deterministic bar comparison
+- **Advance bar** - Move to the next bar only after review criteria are met
+- **Capture phrase (helper)** - Analyze short melodic phrases without leaving the lesson surface
+- **Read from camera (helper)** - Capture one readable bar into the same lesson workflow
 
 🎤 **Real-time Audio Analysis:**
 - Monophonic pitch detection using FastYIN
@@ -52,10 +50,10 @@ See the [Local Setup Guide](docs/LOCAL_SETUP.md) for detailed instructions on ru
 - Sheet music framing assistance
 - Real-time visual feedback
 
-🔄 **Live AI Interaction:**
+🔄 **Live AI Interaction (Assistant Layer):**
 - WebSocket connection to Gemini Live API
-- Dual-mode audio/video streaming
-- Adaptive lesson pacing based on student performance
+- Camera-assisted score capture for readable bar extraction
+- Deterministic lesson actions remain the source of truth for pacing and progression
 
 ## Repository Structure
 

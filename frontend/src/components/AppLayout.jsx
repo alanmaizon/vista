@@ -1,14 +1,10 @@
 import { Music4 } from "lucide-react";
 import AuthPanel from "./AuthPanel";
-import SkillSelector from "./SkillSelector";
 import ScoreWorkspace from "./ScoreWorkspace";
 import { LessonPanel, SessionLog } from "./StatusPanels";
 
 export default function AppLayout({
-  skills,
   authStatus,
-  skill,
-  onSkillChange,
   authPanelProps,
   scoreWorkspaceProps,
   lessonPanelProps,
@@ -41,7 +37,6 @@ export default function AppLayout({
 
         <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
           <section className="space-y-6">
-            <SkillSelector skills={skills} skill={skill} onChange={onSkillChange} />
             <AuthPanel {...authPanelProps} />
             <ScoreWorkspace {...scoreWorkspaceProps} />
           </section>

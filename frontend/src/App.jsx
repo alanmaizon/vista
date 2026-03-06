@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import AppLayout from "./components/AppLayout";
 import LandingPage from "./components/LandingPage";
-import useEurydiceApp, { SKILLS } from "./hooks/useEurydiceApp";
+import useEurydiceApp from "./hooks/useEurydiceApp";
 
 export default function App() {
   const [signingIn, setSigningIn] = useState(false);
@@ -12,8 +12,6 @@ export default function App() {
     password,
     setPassword,
     authStatus,
-    skill,
-    setSkill,
     status,
     errorMessage,
     captions,
@@ -33,7 +31,7 @@ export default function App() {
     nextDrills,
     tutorPrompt,
     sessionId,
-    liveMode,
+    isReadingScore,
     isBusy,
     isConnected,
     videoRef,
@@ -44,6 +42,8 @@ export default function App() {
     isAuthenticated,
     handleSignIn,
     handlePrimaryAction,
+    handleCapturePhraseAction,
+    handleToggleScoreReader,
     resetLessonState,
   } = useEurydiceApp();
 
@@ -101,10 +101,7 @@ export default function App() {
 
   return (
     <AppLayout
-      skills={SKILLS}
       authStatus={authStatus}
-      skill={skill}
-      onSkillChange={setSkill}
       authPanelProps={{
         email,
         password,
@@ -116,7 +113,7 @@ export default function App() {
         status,
         runtimeSummary,
         sessionId,
-        skill,
+        isReadingScore,
         isBusy,
         primaryActionLabel,
         onEmailChange: setEmail,
@@ -127,6 +124,12 @@ export default function App() {
         onInstrumentProfileChange: setInstrumentProfile,
         onPrimaryAction: () => {
           void handlePrimaryAction();
+        },
+        onCapturePhrase: () => {
+          void handleCapturePhraseAction();
+        },
+        onToggleScoreReader: () => {
+          void handleToggleScoreReader();
         },
       }}
       scoreWorkspaceProps={{
@@ -141,11 +144,10 @@ export default function App() {
           }
         },
         videoRef,
-        liveMode,
+        isReadingScore,
         lessonState,
       }}
       lessonPanelProps={{
-        skill,
         lessonState,
         analysis,
         comparison,

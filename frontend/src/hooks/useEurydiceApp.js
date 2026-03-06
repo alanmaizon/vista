@@ -74,6 +74,13 @@ export default function useEurydiceApp() {
     crepeAvailable: null,
     crepeDetail: "",
   });
+  const [liveToolMetrics, setLiveToolMetrics] = useState({
+    total_calls: 0,
+    total_successes: 0,
+    total_failures: 0,
+    overall_success_rate: 0,
+    metrics: [],
+  });
   const [sessionId, setSessionId] = useState(null);
   const [liveMode, setLiveMode] = useState(null);
   const [cameraCapturePending, setCameraCapturePending] = useState(false);
@@ -264,6 +271,21 @@ export default function useEurydiceApp() {
   }, [user]);
 
   useEffect(() => {
+    if (!user) {
+      setLiveToolMetrics({
+        total_calls: 0,
+        total_successes: 0,
+        total_failures: 0,
+        overall_success_rate: 0,
+        metrics: [],
+      });
+      return undefined;
+    }
+    void loadLiveToolMetrics();
+    return undefined;
+  }, [loadLiveToolMetrics, user]);
+
+  useEffect(() => {
     if (!isConnected || liveMode !== "READ_SCORE" || !cameraEnabled) {
       stopCameraCapture();
       return undefined;
@@ -354,6 +376,24 @@ export default function useEurydiceApp() {
       return false;
     }
   }, [email, password]);
+
+  const loadLiveToolMetrics = useCallback(async () => {
+    if (!user) {
+      return;
+    }
+    try {
+      const payload = await apiRequest("/api/music/analytics/live-tools");
+      setLiveToolMetrics({
+        total_calls: Number(payload?.total_calls || 0),
+        total_successes: Number(payload?.total_successes || 0),
+        total_failures: Number(payload?.total_failures || 0),
+        overall_success_rate: Number(payload?.overall_success_rate || 0),
+        metrics: Array.isArray(payload?.metrics) ? payload.metrics : [],
+      });
+    } catch {
+      // Keep the latest snapshot visible if telemetry fetch fails.
+    }
+  }, [user]);
 
   const ensureGuidedLessonSession = useCallback(async () => {
     if (!user) {
@@ -607,13 +647,16 @@ export default function useEurydiceApp() {
             } else {
               pending.reject(new Error(data.error || `Tool call failed: ${pending.name}`));
             }
+            void loadLiveToolMetrics();
             break;
           }
           if (!data.ok) {
             appendCaption("Tool", `${data.name || "tool"} failed: ${data.error || "Unknown error"}`);
+            void loadLiveToolMetrics();
             break;
           }
           appendCaption("Tool", `${data.name || "tool"} completed.`);
+          void loadLiveToolMetrics();
           break;
         }
         case "server.text":
@@ -665,7 +708,7 @@ export default function useEurydiceApp() {
           break;
       }
     },
-    [appendCaption, cameraCapturePending, liveMode],
+    [appendCaption, cameraCapturePending, liveMode, loadLiveToolMetrics],
   );
 
   useEffect(() => {
@@ -836,6 +879,7 @@ export default function useEurydiceApp() {
     userSkillProfile,
     nextDrills,
     tutorPrompt,
+    liveToolMetrics,
     sessionId,
     liveMode,
     isReadingScore,

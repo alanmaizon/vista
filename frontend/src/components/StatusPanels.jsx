@@ -51,6 +51,7 @@ export function LessonPanel({
   userSkillProfile,
   nextDrills,
   tutorPrompt,
+  liveToolMetrics,
   errorMessage,
 }) {
   return (
@@ -146,6 +147,40 @@ export function LessonPanel({
           <div className="mt-1">{tutorPrompt}</div>
         </div>
       ) : null}
+
+      <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="font-medium text-white">Live tool reliability</div>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300">
+          <div>Total calls: {Number(liveToolMetrics?.total_calls || 0)}</div>
+          <div>
+            Success: {Math.round(Number(liveToolMetrics?.overall_success_rate || 0) * 100)}%
+          </div>
+          <div>Successes: {Number(liveToolMetrics?.total_successes || 0)}</div>
+          <div>Failures: {Number(liveToolMetrics?.total_failures || 0)}</div>
+        </div>
+        {Array.isArray(liveToolMetrics?.metrics) && liveToolMetrics.metrics.length ? (
+          <div className="mt-3 space-y-2">
+            {liveToolMetrics.metrics.slice(0, 4).map((metric) => (
+              <div
+                key={`${metric.tool_name}-${metric.source}`}
+                className="rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-xs text-slate-300"
+              >
+                <div className="font-semibold text-slate-100">
+                  {metric.tool_name} <span className="text-slate-400">({metric.source})</span>
+                </div>
+                <div className="mt-1">
+                  Calls: {metric.total_calls} | Success: {Math.round(Number(metric.success_rate || 0) * 100)}% |
+                  Avg latency: {Math.round(Number(metric.avg_latency_ms || 0))}ms
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-2 text-xs text-slate-400">
+            No live tool telemetry yet. Run a lesson action to populate this panel.
+          </div>
+        )}
+      </div>
 
       {errorMessage ? (
         <div className="mt-4 rounded-2xl border border-red-300/30 bg-red-400/10 px-4 py-3 text-sm text-red-100">

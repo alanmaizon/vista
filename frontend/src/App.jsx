@@ -30,6 +30,7 @@ export default function App() {
     userSkillProfile,
     nextDrills,
     tutorPrompt,
+    liveToolMetrics,
     sessionId,
     isReadingScore,
     isBusy,
@@ -154,6 +155,7 @@ export default function App() {
         userSkillProfile,
         nextDrills,
         tutorPrompt,
+        liveToolMetrics,
         errorMessage,
       }}
       sessionLogProps={{

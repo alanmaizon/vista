@@ -109,13 +109,18 @@ async def _emit_transcription_events(
         transcription = _read_field(payload, field_name)
         if not isinstance(transcription, dict):
             continue
-        text = (
-            _read_field(transcription, "text")
-            or _read_field(transcription, "transcript")
-            or transcription.get("partial")
-        )
+        final_text = _read_field(transcription, "text") or _read_field(transcription, "transcript")
+        partial_text = transcription.get("partial")
+        text = final_text or partial_text
         if text:
-            await queue.put({"type": "server.text", "text": str(text)})
+            await queue.put(
+                {
+                    "type": "server.transcript",
+                    "role": "assistant" if field_name.startswith("output") else "user",
+                    "text": str(text),
+                    "partial": bool(partial_text and not final_text),
+                }
+            )
 
 
 def _parse_live_json_message(raw_message: Any) -> dict[str, Any] | None:
@@ -829,12 +834,22 @@ class _AdkGeminiLiveBridge:
         parts = getattr(content, "parts", None) or []
         for part in parts:
             text = getattr(part, "text", None)
-            if text and not getattr(event, "partial", False):
-                tool_call_event = _parse_text_tool_call(str(text))
-                if tool_call_event is not None:
-                    await self._events.put(tool_call_event)
+            if text:
+                if getattr(event, "partial", False):
+                    await self._events.put(
+                        {
+                            "type": "server.transcript",
+                            "role": "assistant",
+                            "text": str(text),
+                            "partial": True,
+                        }
+                    )
                 else:
-                    await self._events.put({"type": "server.text", "text": str(text)})
+                    tool_call_event = _parse_text_tool_call(str(text))
+                    if tool_call_event is not None:
+                        await self._events.put(tool_call_event)
+                    else:
+                        await self._events.put({"type": "server.text", "text": str(text)})
 
             inline_data = getattr(part, "inline_data", None)
             if inline_data is None:

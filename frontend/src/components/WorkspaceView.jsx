@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Activity, FileMusic, NotebookPen, Waves } from "lucide-react";
+import ConversationPanel from "./ConversationPanel";
 import OrbLayer from "./OrbLayer";
 import WorkspaceControls from "./WorkspaceControls";
 import {
@@ -75,6 +76,7 @@ export default function WorkspaceView({
   orbLayerProps,
   playbackAudioElementRef,
   controlsProps,
+  conversationProps,
   scoreWorkspaceProps,
   lessonPanelProps,
   sessionLogProps,
@@ -105,6 +107,7 @@ export default function WorkspaceView({
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start">
           <section className="space-y-4">
             <OrbLayer orbProps={orbProps} {...orbLayerProps} />
+            <ConversationPanel {...conversationProps} />
 
             <div className="rounded-[1.8rem] border border-white/10 bg-white/[0.04] px-4 py-4 backdrop-blur-md">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

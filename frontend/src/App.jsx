@@ -15,6 +15,7 @@ export default function App() {
     status,
     errorMessage,
     captions,
+    conversationMessages,
     micEnabled,
     setMicEnabled,
     cameraEnabled,
@@ -35,6 +36,11 @@ export default function App() {
     isReadingScore,
     isBusy,
     isConnected,
+    liveMode,
+    liveAudioMode,
+    liveAudioLevels,
+    recentMusicEvents,
+    interruptState,
     isPlaying,
     playbackAudioElement,
     setPlaybackAudioElement,
@@ -50,6 +56,8 @@ export default function App() {
     tempoOverride,
     setTempoOverride,
     handleSignIn,
+    startTutorSession,
+    stopLiveSession,
     handlePrimaryAction,
     handleCapturePhraseAction,
     handleToggleScoreReader,
@@ -118,7 +126,7 @@ export default function App() {
         audioElement: playbackAudioElement,
         active: isPlaying ? Boolean(playbackAudioElement) : micEnabled && isConnected,
         intensity: orbLowPower ? 0.72 : 0.88,
-        theme: isPlaying ? "plasma" : "aurora",
+        theme: isPlaying || liveAudioMode === "MUSIC" ? "plasma" : "aurora",
         performanceMode: orbLowPower ? "lite" : "adaptive",
       }}
       orbLayerProps={{
@@ -132,6 +140,8 @@ export default function App() {
         isPlaying,
         isBusy,
         sessionId,
+        liveAudioMode,
+        interruptState,
       }}
       playbackAudioElementRef={setPlaybackAudioElement}
       controlsProps={{
@@ -140,6 +150,8 @@ export default function App() {
         cameraEnabled,
         instrumentProfile,
         isConnected,
+        liveMode,
+        liveAudioMode,
         status,
         runtimeSummary,
         sessionId,
@@ -150,6 +162,12 @@ export default function App() {
         onToggleMic: () => setMicEnabled((value) => !value),
         onToggleCamera: () => setCameraEnabled((value) => !value),
         onInstrumentProfileChange: setInstrumentProfile,
+        onStartTutorSession: () => {
+          void startTutorSession();
+        },
+        onStopTutorSession: () => {
+          stopLiveSession();
+        },
         onPrimaryAction: () => {
           void handlePrimaryAction();
         },
@@ -160,6 +178,13 @@ export default function App() {
         onToggleScoreReader: () => {
           void handleToggleScoreReader();
         },
+      }}
+      conversationProps={{
+        messages: conversationMessages,
+        liveAudioMode,
+        liveAudioLevels,
+        recentMusicEvents,
+        interruptState,
       }}
       scoreWorkspaceProps={{
         activeScore,

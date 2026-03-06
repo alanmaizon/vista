@@ -1,4 +1,4 @@
-function downsampleBuffer(buffer, sourceRate, targetRate) {
+export function downsampleBuffer(buffer, sourceRate, targetRate) {
   if (targetRate >= sourceRate) {
     return buffer;
   }
@@ -24,7 +24,7 @@ function downsampleBuffer(buffer, sourceRate, targetRate) {
   return result;
 }
 
-function floatToPcm16Bytes(floatBuffer) {
+export function floatToPcm16Bytes(floatBuffer) {
   const pcm = new Int16Array(floatBuffer.length);
   for (let i = 0; i < floatBuffer.length; i += 1) {
     const sample = Math.max(-1, Math.min(1, floatBuffer[i]));

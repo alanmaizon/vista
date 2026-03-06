@@ -21,10 +21,12 @@ CLIENT_VIDEO = "client.video"
 CLIENT_CONFIRM = "client.confirm"
 CLIENT_STOP = "client.stop"
 CLIENT_TOOL = "client.tool"
+CLIENT_TEXT = "client.text"
 
 # Types of events sent by the server
 SERVER_AUDIO = "server.audio"
 SERVER_TEXT = "server.text"
+SERVER_TRANSCRIPT = "server.transcript"
 SERVER_STATUS = "server.status"
 SERVER_SUMMARY = "server.summary"
 SERVER_ERROR = "server.error"
@@ -70,6 +72,13 @@ class ClientConfirm:
 
 
 @dataclass
+class ClientText:
+    """Represents a text turn injected into the live session by the client."""
+
+    text: str
+
+
+@dataclass
 class ServerAudio:
     """Represents an audio chunk from the model to be played by the client."""
 
@@ -82,6 +91,15 @@ class ServerText:
     """Represents a textual response or transcript from the model."""
 
     text: str
+
+
+@dataclass
+class ServerTranscript:
+    """Represents incremental speech transcription from user or assistant audio."""
+
+    role: str
+    text: str
+    partial: bool = False
 
 
 @dataclass

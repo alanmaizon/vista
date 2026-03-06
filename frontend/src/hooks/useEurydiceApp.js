@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useLiveConnection from "./useLiveConnection";
 import { apiRequest } from "../lib/api";
-import { capturePcmClip } from "../lib/audioCapture";
+import { bytesToBase64, capturePcmClip } from "../lib/audioCapture";
+import { createLiveAudioPlayback } from "../lib/liveAudioPlayback";
+import { createLiveAudioRouter } from "../lib/liveAudioRouter";
+import { createLiveEventBus } from "../lib/liveEventBus";
 import { playPhrase } from "../lib/playback";
 
 function appendTimestamped(items, role, text) {
@@ -49,6 +52,13 @@ function generateToolCallId() {
   return `tool-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function generateConversationId(prefix = "msg") {
+  if (window?.crypto?.randomUUID) {
+    return `${prefix}-${window.crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export default function useEurydiceApp() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -57,6 +67,7 @@ export default function useEurydiceApp() {
   const [status, setStatus] = useState("Ready.");
   const [errorMessage, setErrorMessage] = useState("");
   const [captions, setCaptions] = useState([]);
+  const [conversationMessages, setConversationMessages] = useState([]);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [instrumentProfile, setInstrumentProfile] = useState("AUTO");
@@ -85,6 +96,23 @@ export default function useEurydiceApp() {
   });
   const [sessionId, setSessionId] = useState(null);
   const [liveMode, setLiveMode] = useState(null);
+  const [liveAudioMode, setLiveAudioMode] = useState("SILENCE");
+  const [liveAudioLevels, setLiveAudioLevels] = useState({
+    energyDb: -90,
+    speechConfidence: 0,
+    musicConfidence: 0,
+    pitchHz: null,
+    pitchConfidence: 0,
+  });
+  const [recentMusicEvents, setRecentMusicEvents] = useState([]);
+  const [interruptState, setInterruptState] = useState({
+    status: "idle",
+    pendingType: null,
+    pendingSummary: "",
+    queuedCount: 0,
+    lastDetectedAt: null,
+    lastFlushedAt: null,
+  });
   const [cameraCapturePending, setCameraCapturePending] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -100,12 +128,120 @@ export default function useEurydiceApp() {
   const liveMessageHandlerRef = useRef(async () => {});
   const pendingToolCallsRef = useRef(new Map());
   const isConnectedRef = useRef(false);
+  const liveModeRef = useRef(null);
+  const liveAudioRouterRef = useRef(null);
+  const liveAudioPlaybackRef = useRef(null);
+  const liveEventBusRef = useRef(createLiveEventBus());
+  const conversationStreamRefs = useRef({ assistant: null, user: null });
+  const assistantStreamingRef = useRef(false);
+  const lastAssistantAudioAtRef = useRef(0);
+  const pendingMusicInterruptRef = useRef(null);
+  const musicInterruptTimerRef = useRef(null);
+  const autoTutorStartRef = useRef(false);
+  const musicAnalysisInFlightRef = useRef(false);
+  const captureFocusedMusicClipRef = useRef((options) => capturePcmClip(options));
 
   const appendCaption = useCallback((role, text) => {
     if (!text) {
       return;
     }
     setCaptions((items) => appendTimestamped(items, role, text));
+  }, []);
+
+  const appendConversationMessage = useCallback((role, text, { kind = "message", streaming = false } = {}) => {
+    if (!text) {
+      return;
+    }
+    setConversationMessages((items) => [
+      ...items,
+      {
+        id: generateConversationId(role),
+        role,
+        text,
+        kind,
+        streaming,
+      },
+    ]);
+  }, []);
+
+  const upsertConversationStream = useCallback((role, text, { kind = "speech", final = false } = {}) => {
+    if (!text) {
+      return;
+    }
+
+    const activeId = conversationStreamRefs.current[role];
+    const messageId = activeId || generateConversationId(`${role}-stream`);
+    if (!activeId && !final) {
+      conversationStreamRefs.current[role] = messageId;
+    }
+
+    setConversationMessages((items) => {
+      const index = items.findIndex((item) => item.id === messageId);
+      if (index === -1) {
+        return [
+          ...items,
+          {
+            id: messageId,
+            role,
+            text,
+            kind,
+            streaming: !final,
+          },
+        ];
+      }
+
+      const nextItems = [...items];
+      nextItems[index] = {
+        ...nextItems[index],
+        text,
+        kind,
+        streaming: !final,
+      };
+      return nextItems;
+    });
+
+    if (final) {
+      conversationStreamRefs.current[role] = null;
+    }
+  }, []);
+
+  const finalizeAssistantMessage = useCallback((text) => {
+    if (!text) {
+      return;
+    }
+
+    const activeId = conversationStreamRefs.current.assistant;
+    setConversationMessages((items) => {
+      if (activeId) {
+        return items.map((item) =>
+          item.id === activeId
+            ? {
+                ...item,
+                text,
+                kind: "assistant",
+                streaming: false,
+              }
+            : item,
+        );
+      }
+
+      const lastMessage = items.at(-1);
+      if (lastMessage?.role === "assistant" && lastMessage.text === text) {
+        return items;
+      }
+
+      return [
+        ...items,
+        {
+          id: generateConversationId("assistant"),
+          role: "assistant",
+          text,
+          kind: "assistant",
+          streaming: false,
+        },
+      ];
+    });
+    conversationStreamRefs.current.assistant = null;
   }, []);
 
   const resetLessonState = useCallback(() => {
@@ -149,6 +285,22 @@ export default function useEurydiceApp() {
       setLiveMode(null);
       setSessionId(null);
       setCameraCapturePending(false);
+      conversationStreamRefs.current.assistant = null;
+      conversationStreamRefs.current.user = null;
+      assistantStreamingRef.current = false;
+      pendingMusicInterruptRef.current = null;
+      if (musicInterruptTimerRef.current) {
+        window.clearTimeout(musicInterruptTimerRef.current);
+        musicInterruptTimerRef.current = null;
+      }
+      setInterruptState({
+        status: "idle",
+        pendingType: null,
+        pendingSummary: "",
+        queuedCount: 0,
+        lastDetectedAt: null,
+        lastFlushedAt: null,
+      });
       setStatus("Live session closed.");
     },
     onError: () => {
@@ -160,6 +312,10 @@ export default function useEurydiceApp() {
   useEffect(() => {
     isConnectedRef.current = isConnected;
   }, [isConnected]);
+
+  useEffect(() => {
+    liveModeRef.current = liveMode;
+  }, [liveMode]);
 
   const applyPreparedScorePayload = useCallback(
     (payload) => {
@@ -193,8 +349,9 @@ export default function useEurydiceApp() {
       });
       setStatus(payload.status);
       appendCaption("Lesson", payload.prompt);
+      appendConversationMessage("system", payload.prompt, { kind: "lesson" });
     },
-    [appendCaption],
+    [appendCaption, appendConversationMessage],
   );
 
   const applyComparisonPayload = useCallback(
@@ -202,6 +359,7 @@ export default function useEurydiceApp() {
       setComparison(payload);
       setStatus(payload.needs_replay ? "Replay requested." : "Comparison ready.");
       appendCaption("Compare", payload.summary);
+      appendConversationMessage("assistant", payload.summary, { kind: "analysis" });
       for (const mismatch of payload.mismatches ?? []) {
         appendCaption("Difference", mismatch);
       }
@@ -213,7 +371,7 @@ export default function useEurydiceApp() {
         stage: payload.needs_replay || !payload.match ? "awaiting-compare" : "reviewed",
       }));
     },
-    [appendCaption],
+    [appendCaption, appendConversationMessage],
   );
 
   useEffect(() => {
@@ -225,6 +383,9 @@ export default function useEurydiceApp() {
           return;
         }
         setUser(payload);
+        autoTutorStartRef.current = false;
+        conversationStreamRefs.current.assistant = null;
+        conversationStreamRefs.current.user = null;
         setAuthStatus(`Signed in as ${payload.email || payload.uid}`);
         setStatus("Signed in.");
       } catch {
@@ -232,6 +393,20 @@ export default function useEurydiceApp() {
           return;
         }
         setUser(null);
+        autoTutorStartRef.current = false;
+        setConversationMessages([]);
+        conversationStreamRefs.current.assistant = null;
+        conversationStreamRefs.current.user = null;
+        assistantStreamingRef.current = false;
+        setRecentMusicEvents([]);
+        setInterruptState({
+          status: "idle",
+          pendingType: null,
+          pendingSummary: "",
+          queuedCount: 0,
+          lastDetectedAt: null,
+          lastFlushedAt: null,
+        });
         setAuthStatus("Signed out. Click Sign In.");
       }
     }
@@ -356,6 +531,20 @@ export default function useEurydiceApp() {
         },
       });
       setUser(payload);
+      autoTutorStartRef.current = false;
+      setConversationMessages([]);
+      conversationStreamRefs.current.assistant = null;
+      conversationStreamRefs.current.user = null;
+      assistantStreamingRef.current = false;
+      setRecentMusicEvents([]);
+      setInterruptState({
+        status: "idle",
+        pendingType: null,
+        pendingSummary: "",
+        queuedCount: 0,
+        lastDetectedAt: null,
+        lastFlushedAt: null,
+      });
       setAuthStatus(`Signed in as ${payload.email || payload.uid}`);
       setStatus("Signed in.");
       return true;
@@ -414,13 +603,13 @@ export default function useEurydiceApp() {
       throw new Error("Stop camera reader before running guided lesson tools.");
     }
     if (!isConnectedRef.current || liveMode !== "GUIDED_LESSON" || !sessionId) {
-      setStatus("Creating guided lesson session...");
+      setStatus("Creating Gemini Live tutor...");
       const session = await apiRequest("/api/sessions", {
         method: "POST",
         body: {
           domain: "MUSIC",
           mode: "GUIDED_LESSON",
-          goal: "Guide one prepared bar at a time and compare each take deterministically.",
+          goal: "Act as a conversational music tutor. Greet the user, listen to speech and played phrases, and use score or comparison tools when relevant.",
         },
       });
       setSessionId(session.id);
@@ -429,7 +618,7 @@ export default function useEurydiceApp() {
         sessionId: session.id,
         mode: "GUIDED_LESSON",
       });
-      setStatus("Opening guided lesson session...");
+      setStatus("Opening Gemini Live tutor...");
     }
 
     const start = Date.now();
@@ -464,6 +653,11 @@ export default function useEurydiceApp() {
     [ensureGuidedLessonSession, send],
   );
 
+  const startTutorSession = useCallback(async () => {
+    setErrorMessage("");
+    await ensureGuidedLessonSession();
+  }, [ensureGuidedLessonSession]);
+
   const runLessonAction = useCallback(
     async ({ sourceTextOverride = null, forcedPrepare = false } = {}) => {
       setErrorMessage("");
@@ -492,7 +686,7 @@ export default function useEurydiceApp() {
           throw new Error("Turn the microphone on before comparing this bar.");
         }
         setStatus("Recording a comparison take...");
-        const clip = await capturePcmClip({ durationMs: 2800, mode: "music" });
+        const clip = await captureFocusedMusicClipRef.current({ durationMs: 2800, mode: "music" });
         setStatus("Comparing bar...");
         body = {
           score_id: activeScore.score_id,
@@ -558,7 +752,7 @@ export default function useEurydiceApp() {
       throw new Error("Turn the microphone on before capturing a phrase.");
     }
     setStatus("Recording a short phrase...");
-    const clip = await capturePcmClip({ mode: "music" });
+    const clip = await captureFocusedMusicClipRef.current({ mode: "music" });
     setStatus("Transcribing phrase...");
     const payload = await apiRequest("/api/music/transcribe", {
       method: "POST",
@@ -572,11 +766,14 @@ export default function useEurydiceApp() {
     });
     setAnalysis(payload);
     setStatus("Transcription ready.");
+    appendConversationMessage("assistant", payload.summary || "Phrase analysed.", {
+      kind: "analysis",
+    });
     appendCaption("Transcription", payload.summary || "Phrase analysed.");
     for (const warning of payload.warnings ?? []) {
       appendCaption("Warning", warning);
     }
-  }, [appendCaption, instrumentProfile, micEnabled, user]);
+  }, [appendCaption, appendConversationMessage, instrumentProfile, micEnabled, user]);
 
   const startReadScoreSession = useCallback(async () => {
     setErrorMessage("");
@@ -632,8 +829,180 @@ export default function useEurydiceApp() {
     setSessionId(null);
     setCameraCapturePending(false);
     stopCameraCapture();
+    conversationStreamRefs.current.assistant = null;
+    conversationStreamRefs.current.user = null;
+    assistantStreamingRef.current = false;
+    if (musicInterruptTimerRef.current) {
+      window.clearTimeout(musicInterruptTimerRef.current);
+      musicInterruptTimerRef.current = null;
+    }
+    pendingMusicInterruptRef.current = null;
+    setInterruptState({
+      status: "idle",
+      pendingType: null,
+      pendingSummary: "",
+      queuedCount: 0,
+      lastDetectedAt: null,
+      lastFlushedAt: null,
+    });
     setStatus("Live session stopped.");
   }, [disconnect, isConnected, rejectPendingToolCalls, send, stopCameraCapture]);
+
+  const sendLiveText = useCallback(
+    (text) => {
+      const trimmed = text?.trim();
+      if (!trimmed || !isConnectedRef.current || liveModeRef.current !== "GUIDED_LESSON") {
+        return;
+      }
+      send({
+        type: "client.text",
+        text: trimmed,
+      });
+    },
+    [send],
+  );
+
+  const flushPendingMusicInterrupt = useCallback(() => {
+    const pending = pendingMusicInterruptRef.current;
+    if (!pending) {
+      return;
+    }
+    pendingMusicInterruptRef.current = null;
+    setInterruptState((current) => ({
+      ...current,
+      status: "flushing",
+      queuedCount: 0,
+      pendingType: pending.type,
+      pendingSummary: pending.summary,
+      lastFlushedAt: Date.now(),
+    }));
+    sendLiveText(pending.text);
+  }, [sendLiveText]);
+
+  const queueMusicInterrupt = useCallback(
+    ({ text, type, summary }) => {
+      if (!text) {
+        return;
+      }
+      const now = Date.now();
+      const queuedCount = pendingMusicInterruptRef.current
+        ? (pendingMusicInterruptRef.current.count || 1) + 1
+        : 1;
+      pendingMusicInterruptRef.current = {
+        text,
+        type,
+        summary,
+        count: queuedCount,
+        queuedAt: now,
+      };
+      setInterruptState((current) => ({
+        ...current,
+        status: "queued",
+        pendingType: type,
+        pendingSummary: summary,
+        queuedCount,
+        lastDetectedAt: now,
+      }));
+      if (musicInterruptTimerRef.current) {
+        window.clearTimeout(musicInterruptTimerRef.current);
+      }
+      const speakingRecently =
+        assistantStreamingRef.current || Date.now() - lastAssistantAudioAtRef.current < 700;
+      musicInterruptTimerRef.current = window.setTimeout(() => {
+        musicInterruptTimerRef.current = null;
+        flushPendingMusicInterrupt();
+      }, speakingRecently ? 760 : 320);
+    },
+    [flushPendingMusicInterrupt],
+  );
+
+  const handleMusicEvent = useCallback(
+    async (event) => {
+      if (!event || typeof event !== "object") {
+        return;
+      }
+
+      setRecentMusicEvents((items) => [event, ...items].slice(0, 6));
+
+      if (event.type === "NOTE_PLAYED") {
+        appendConversationMessage("music", `Note detected: ${event.pitch}`, { kind: "music" });
+        queueMusicInterrupt({
+          text: `A music interrupt just occurred: NOTE_PLAYED pitch=${event.pitch} confidence=${Math.round(
+            Number(event.confidence || 0) * 100,
+          )}%. Respond briefly once your current sentence ends.`,
+          type: event.type,
+          summary: `Note ${event.pitch}`,
+        });
+        return;
+      }
+
+      if (event.type === "RHYTHM_PATTERN") {
+        appendConversationMessage(
+          "music",
+          `Rhythm detected at ${event.tempo || "?"} BPM`,
+          { kind: "music" },
+        );
+        queueMusicInterrupt({
+          text: `A rhythm interrupt just occurred: RHYTHM_PATTERN tempo=${event.tempo || "unknown"} BPM pattern=${Array.isArray(
+            event.pattern,
+          ) ? event.pattern.join("-") : "unknown"}. Give one short coaching response.`,
+          type: event.type,
+          summary: `Rhythm ${event.tempo || "?"} BPM`,
+        });
+        return;
+      }
+
+      if (event.type !== "PHRASE_PLAYED") {
+        return;
+      }
+
+      appendConversationMessage("music", `Phrase detected: ${event.notes.join(" · ")}`, {
+        kind: "music",
+      });
+
+      if (!user || musicAnalysisInFlightRef.current) {
+        queueMusicInterrupt({
+          text: `A phrase interrupt just occurred: PHRASE_PLAYED notes=${event.notes.join(",")}. Acknowledge it briefly and continue the lesson.`,
+          type: event.type,
+          summary: `Phrase ${event.notes.join(" · ")}`,
+        });
+        return;
+      }
+
+      musicAnalysisInFlightRef.current = true;
+      try {
+        const payload = await apiRequest("/api/music/transcribe", {
+          method: "POST",
+          body: {
+            audio_b64: event.audioB64,
+            mime: event.mime,
+            expected: "AUTO",
+            max_notes: 8,
+            instrument_profile: instrumentProfile,
+          },
+        });
+        setAnalysis(payload);
+        setStatus("Live phrase analysed.");
+        appendConversationMessage("assistant", payload.summary || "Phrase analysed.", {
+          kind: "analysis",
+        });
+        appendCaption("Analysis", payload.summary || "Phrase analysed.");
+        queueMusicInterrupt({
+          text: `A phrase interrupt just occurred. Deterministic analysis summary: ${
+            payload.summary || "Phrase analysed."
+          } Respond briefly using that evidence.`,
+          type: event.type,
+          summary: payload.summary || `Phrase ${event.notes.join(" · ")}`,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to analyse live phrase.";
+        appendConversationMessage("system", message, { kind: "warning" });
+      } finally {
+        musicAnalysisInFlightRef.current = false;
+      }
+    },
+    [appendCaption, appendConversationMessage, instrumentProfile, queueMusicInterrupt, user],
+  );
 
   useEffect(() => {
     runLessonActionRef.current = runLessonAction;
@@ -642,6 +1011,141 @@ export default function useEurydiceApp() {
   useEffect(() => {
     stopLiveSessionRef.current = stopLiveSession;
   }, [stopLiveSession]);
+
+  useEffect(() => {
+    const eventBus = liveEventBusRef.current;
+    const unsubscribeNote = eventBus.on("music.note", (event) => {
+      void handleMusicEvent(event);
+    });
+    const unsubscribePhrase = eventBus.on("music.phrase", (event) => {
+      void handleMusicEvent(event);
+    });
+    const unsubscribeRhythm = eventBus.on("music.rhythm", (event) => {
+      void handleMusicEvent(event);
+    });
+
+    return () => {
+      unsubscribeNote();
+      unsubscribePhrase();
+      unsubscribeRhythm();
+    };
+  }, [handleMusicEvent]);
+
+  useEffect(() => {
+    if (!user || autoTutorStartRef.current) {
+      return undefined;
+    }
+    autoTutorStartRef.current = true;
+    window.setTimeout(() => {
+      void startTutorSession().catch((error) => {
+        setErrorMessage(error instanceof Error ? error.message : "Unable to start Gemini Live.");
+      });
+    }, 180);
+    return undefined;
+  }, [startTutorSession, user]);
+
+  const startLiveAudioRouter = useCallback(async () => {
+    if (!user || !micEnabled || !isConnectedRef.current || liveModeRef.current !== "GUIDED_LESSON") {
+      return;
+    }
+    if (liveAudioRouterRef.current) {
+      return;
+    }
+
+    const router = createLiveAudioRouter({
+      eventBus: liveEventBusRef.current,
+      onSpeechChunk: (pcmBytes) => {
+        if (!isConnectedRef.current || liveModeRef.current !== "GUIDED_LESSON") {
+          return;
+        }
+        send({
+          type: "client.audio",
+          mime: "audio/pcm;rate=16000",
+          data_b64: bytesToBase64(pcmBytes),
+        });
+      },
+      onLevels: (levels) => {
+        setLiveAudioLevels(levels);
+      },
+      onModeChange: (mode) => {
+        setLiveAudioMode(mode);
+      },
+    });
+
+    liveAudioRouterRef.current = router;
+    try {
+      await router.start();
+    } catch (error) {
+      if (liveAudioRouterRef.current === router) {
+        liveAudioRouterRef.current = null;
+      }
+      setErrorMessage(error instanceof Error ? error.message : "Unable to access the microphone.");
+      setStatus("Microphone unavailable.");
+    }
+  }, [micEnabled, send, user]);
+
+  const stopLiveAudioRouter = useCallback(async () => {
+    if (!liveAudioRouterRef.current) {
+      setLiveAudioMode("SILENCE");
+      return;
+    }
+    const router = liveAudioRouterRef.current;
+    liveAudioRouterRef.current = null;
+    await router.stop();
+    setLiveAudioMode("SILENCE");
+  }, []);
+
+  const captureFocusedMusicClip = useCallback(
+    async (options) => {
+      const shouldResumeLiveRouter = Boolean(liveAudioRouterRef.current);
+      if (shouldResumeLiveRouter) {
+        await stopLiveAudioRouter();
+      }
+      try {
+        return await capturePcmClip(options);
+      } finally {
+        if (shouldResumeLiveRouter) {
+          await startLiveAudioRouter();
+        }
+      }
+    },
+    [startLiveAudioRouter, stopLiveAudioRouter],
+  );
+
+  useEffect(() => {
+    captureFocusedMusicClipRef.current = captureFocusedMusicClip;
+  }, [captureFocusedMusicClip]);
+
+  useEffect(() => {
+    if (!user || !micEnabled || !isConnected || liveMode !== "GUIDED_LESSON") {
+      void stopLiveAudioRouter();
+      return undefined;
+    }
+
+    void startLiveAudioRouter();
+
+    return () => {
+      void stopLiveAudioRouter();
+    };
+  }, [isConnected, liveMode, micEnabled, startLiveAudioRouter, stopLiveAudioRouter, user]);
+
+  useEffect(() => {
+    const playback = createLiveAudioPlayback();
+    const eventBus = liveEventBusRef.current;
+    liveAudioPlaybackRef.current = playback;
+    return () => {
+      if (musicInterruptTimerRef.current) {
+        window.clearTimeout(musicInterruptTimerRef.current);
+      }
+      pendingMusicInterruptRef.current = null;
+      eventBus.clear();
+      void stopLiveAudioRouter();
+      if (liveAudioPlaybackRef.current === playback) {
+        void playback.close();
+        liveAudioPlaybackRef.current = null;
+      }
+    };
+  }, [stopLiveAudioRouter]);
 
   const handleLiveMessage = useCallback(
     async (data) => {
@@ -669,12 +1173,65 @@ export default function useEurydiceApp() {
           void loadLiveToolMetrics();
           break;
         }
+        case "server.audio":
+          lastAssistantAudioAtRef.current = Date.now();
+          if (liveAudioPlaybackRef.current) {
+            try {
+              await liveAudioPlaybackRef.current.enqueue(data.data_b64, data.mime);
+            } catch {
+              // Keep the text transcript flowing even if audio playback is unavailable.
+            }
+          }
+          break;
+        case "server.transcript": {
+          if (liveMode === "READ_SCORE") {
+            break;
+          }
+          const role = data.role === "user" ? "user" : "assistant";
+          const text = typeof data.text === "string" ? data.text : "";
+          if (!text) {
+            break;
+          }
+          if (role === "assistant") {
+            assistantStreamingRef.current = Boolean(data.partial);
+            if (!pendingMusicInterruptRef.current) {
+              setInterruptState((current) => ({
+                ...current,
+                status: "listening",
+              }));
+            }
+          }
+          upsertConversationStream(role, text, {
+            kind: "speech",
+            final: !data.partial,
+          });
+          if (!data.partial && role === "user") {
+            appendCaption("You", text);
+          }
+          break;
+        }
         case "server.text":
           if (liveMode === "READ_SCORE") {
             break;
           }
           if (!cameraCapturePending) {
+            assistantStreamingRef.current = false;
+            finalizeAssistantMessage(data.text ?? "");
             appendCaption("Live", data.text ?? "");
+            if (pendingMusicInterruptRef.current) {
+              if (musicInterruptTimerRef.current) {
+                window.clearTimeout(musicInterruptTimerRef.current);
+              }
+              musicInterruptTimerRef.current = window.setTimeout(() => {
+                musicInterruptTimerRef.current = null;
+                flushPendingMusicInterrupt();
+              }, 120);
+            } else {
+              setInterruptState((current) => ({
+                ...current,
+                status: "listening",
+              }));
+            }
           }
           break;
         case "server.status":
@@ -682,6 +1239,17 @@ export default function useEurydiceApp() {
             setStatus("Camera reader connected.");
           } else {
             setStatus(`Connected in ${data.skill}.`);
+            setInterruptState((current) => ({
+              ...current,
+              status: data.skill === "GUIDED_LESSON" ? "listening" : current.status,
+            }));
+            appendConversationMessage(
+              "system",
+              data.skill === "GUIDED_LESSON"
+                ? "Gemini Live is ready. Speak naturally or play when prompted."
+                : `Connected in ${data.skill}.`,
+              { kind: "status" },
+            );
           }
           break;
         case "server.score_capture":
@@ -705,6 +1273,11 @@ export default function useEurydiceApp() {
           );
           break;
         case "server.summary":
+          appendConversationMessage(
+            "system",
+            Array.isArray(data.bullets) ? data.bullets.join(" ") : "Live session complete.",
+            { kind: "status" },
+          );
           appendCaption(
             "Summary",
             Array.isArray(data.bullets) ? data.bullets.join(" ") : "Session complete.",
@@ -713,12 +1286,24 @@ export default function useEurydiceApp() {
         case "error":
           setErrorMessage(data.message || "Live session error.");
           setStatus("Error.");
+          appendConversationMessage("system", data.message || "Live session error.", {
+            kind: "warning",
+          });
           break;
         default:
           break;
       }
     },
-    [appendCaption, cameraCapturePending, liveMode, loadLiveToolMetrics],
+    [
+      appendCaption,
+      appendConversationMessage,
+      cameraCapturePending,
+      finalizeAssistantMessage,
+      flushPendingMusicInterrupt,
+      liveMode,
+      loadLiveToolMetrics,
+      upsertConversationStream,
+    ],
   );
 
   useEffect(() => {
@@ -878,6 +1463,7 @@ export default function useEurydiceApp() {
     status,
     errorMessage,
     captions,
+    conversationMessages,
     micEnabled,
     setMicEnabled,
     cameraEnabled,
@@ -896,6 +1482,10 @@ export default function useEurydiceApp() {
     liveToolMetrics,
     sessionId,
     liveMode,
+    liveAudioMode,
+    liveAudioLevels,
+    recentMusicEvents,
+    interruptState,
     isReadingScore,
     isBusy,
     isPlaying,
@@ -914,6 +1504,8 @@ export default function useEurydiceApp() {
     tempoOverride,
     setTempoOverride,
     handleSignIn,
+    startTutorSession,
+    stopLiveSession,
     handlePrimaryAction,
     handleCapturePhraseAction,
     handleToggleScoreReader,

@@ -47,6 +47,8 @@ export default function OrbLayer({
   isPlaying,
   isBusy,
   sessionId,
+  liveAudioMode,
+  interruptState,
 }) {
   const captureMode = resolveCaptureMode({ isReadingScore, isPlaying, micEnabled });
   const stageLabel = lessonState?.stage ? lessonState.stage.replaceAll("-", " ") : "idle";
@@ -122,9 +124,11 @@ export default function OrbLayer({
             </div>
             <div className="rounded-[1.6rem] border border-white/10 bg-white/5 px-4 py-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                Source
+                Route
               </div>
-              <div className="mt-2 text-base font-medium text-white">{captureMode}</div>
+              <div className="mt-2 text-base font-medium text-white">
+                {liveAudioMode && liveAudioMode !== "SILENCE" ? liveAudioMode : captureMode}
+              </div>
             </div>
             <div className="rounded-[1.6rem] border border-white/10 bg-white/5 px-4 py-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
@@ -133,6 +137,17 @@ export default function OrbLayer({
               <div className="mt-2 truncate text-base font-medium text-white">
                 {sessionId || "Pending"}
               </div>
+            </div>
+            <div className="rounded-[1.6rem] border border-white/10 bg-white/5 px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                Interrupt
+              </div>
+              <div className="mt-2 text-base font-medium capitalize text-white">
+                {interruptState?.status || "idle"}
+              </div>
+              {interruptState?.pendingSummary ? (
+                <div className="mt-1 text-xs text-slate-400">{interruptState.pendingSummary}</div>
+              ) : null}
             </div>
           </div>
         </div>

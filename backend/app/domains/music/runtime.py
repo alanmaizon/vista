@@ -112,15 +112,7 @@ class MusicRuntime(SessionRuntime):
                 }
             ]
         if self.skill == "GUIDED_LESSON":
-            return [
-                {
-                    "type": "server.text",
-                    "text": (
-                        "Prepare one bar, then move through the lesson with Next bar and Compare bar. "
-                        "The lesson flow is driven by the score and deterministic comparison."
-                    ),
-                }
-            ]
+            return []
         if self.skill == "COMPARE_PERFORMANCE":
             return [
                 {
@@ -143,7 +135,13 @@ class MusicRuntime(SessionRuntime):
         return []
 
     def uses_model_opening_prompt(self) -> bool:
-        return self.skill in {"READ_SCORE", "SHEET_FRAME_COACH", "EAR_TRAIN", "GENERATE_EXAMPLE"}
+        return self.skill in {
+            "READ_SCORE",
+            "SHEET_FRAME_COACH",
+            "EAR_TRAIN",
+            "GENERATE_EXAMPLE",
+            "GUIDED_LESSON",
+        }
 
     def opening_prompt(self) -> str:
         goal_fragment = (
@@ -162,6 +160,13 @@ class MusicRuntime(SessionRuntime):
             if self.skill == "HEAR_PHRASE"
             else ""
         )
+        guided_lesson_fragment = (
+            "For GUIDED_LESSON, greet the user first, ask one short question about what they want to practice, "
+            "and keep the exchange conversational. When the user plays music, treat it as evidence for the lesson. "
+            "If deterministic comparison or score tools are available, reference them briefly instead of overwhelming the user with controls. "
+            if self.skill == "GUIDED_LESSON"
+            else ""
+        )
         read_score_fragment = (
             "For READ_SCORE, once one short bar is clearly readable, give a short musical description and, when you are confident, "
             "include a second sentence that starts exactly with NOTE_LINE: followed by a simple token sequence like C4/q D4/q E4/h. "
@@ -176,6 +181,7 @@ class MusicRuntime(SessionRuntime):
             f"{goal_fragment}"
             f"{frame_fragment}"
             f"{live_phrase_fragment}"
+            f"{guided_lesson_fragment}"
             f"{read_score_fragment}"
             "Never guess musical details. If the score view or the performance is unclear, "
             "ask for one narrower replay or one clearer frame before you analyze."
@@ -269,7 +275,7 @@ class MusicRuntime(SessionRuntime):
         self.saw_assistant_audio = True
 
     def allow_model_audio(self) -> bool:
-        return self.skill in {"EAR_TRAIN", "GENERATE_EXAMPLE"}
+        return self.skill in {"EAR_TRAIN", "GENERATE_EXAMPLE", "GUIDED_LESSON", "HEAR_PHRASE"}
 
     def summary_payload(self) -> dict[str, list[str]]:
         bullets = [

@@ -33,7 +33,15 @@ from .domains.music.live_tools import (
 from .domains.music.models import MusicLiveToolCall
 from .domains.music.render import verovio_runtime_status
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
-from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_INIT, CLIENT_STOP, CLIENT_TOOL, CLIENT_VIDEO
+from .live.protocol import (
+    CLIENT_AUDIO,
+    CLIENT_CONFIRM,
+    CLIENT_INIT,
+    CLIENT_STOP,
+    CLIENT_TEXT,
+    CLIENT_TOOL,
+    CLIENT_VIDEO,
+)
 from .models import Session
 from .sessions import router as sessions_router
 from .settings import settings
@@ -648,6 +656,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         call_id=str(message.get("call_id", "")).strip() or None,
                         send_to_model=send_to_model,
                     )
+                elif message_type == CLIENT_TEXT:
+                    text = str(message.get("text", "")).strip()
+                    if not text:
+                        raise ValueError("client.text requires a non-empty text field")
+                    await bridge.send_text(text, role="user")
                 elif message_type == CLIENT_STOP:
                     stop_requested = True
                     await ws.send_json({"type": "server.summary", **runtime.summary_payload()})

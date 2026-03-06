@@ -256,6 +256,105 @@ def test_ws_live_executes_client_tool_call_without_model_echo(
     assert bridge.sent_text == []
 
 
+def test_ws_live_forwards_client_text_to_bridge(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = uuid.uuid4()
+
+    async def fake_guided_session(*_args, **_kwargs):
+        return SimpleNamespace(goal="Coach me on D minor", domain="MUSIC", mode="GUIDED_LESSON")
+
+    monkeypatch.setattr(main_module, "_load_owned_session", fake_guided_session)
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "GUIDED_LESSON",
+            }
+        )
+        status_payload = ws.receive_json()
+
+        ws.send_json({"type": "client.text", "text": "Can we work on D minor?"})
+        ws.send_json({"type": "client.stop"})
+        summary_payload = ws.receive_json()
+
+    bridge = FakeBridge.created[0]
+    assert status_payload["type"] == "server.status"
+    assert status_payload["skill"] == "GUIDED_LESSON"
+    assert summary_payload["type"] == "server.summary"
+    assert "I am starting a GUIDED_LESSON music tutoring session." in bridge.sent_text[0][0]
+    assert bridge.sent_text[0][1] == "user"
+    assert bridge.sent_text[-1] == ("Can we work on D minor?", "user")
+
+
+def test_ws_live_emits_transcript_events_progressively(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    FakeBridge.initial_events = [
+        {
+            "type": "server.transcript",
+            "role": "assistant",
+            "text": "Let's begin",
+            "partial": True,
+        },
+        {
+            "type": "server.transcript",
+            "role": "user",
+            "text": "I want help with arpeggios",
+            "partial": False,
+        },
+        {"type": "server.text", "text": "Let's begin with a D minor arpeggio."},
+    ]
+    session_id = uuid.uuid4()
+
+    async def fake_guided_session(*_args, **_kwargs):
+        return SimpleNamespace(goal="Coach me on arpeggios", domain="MUSIC", mode="GUIDED_LESSON")
+
+    monkeypatch.setattr(main_module, "_load_owned_session", fake_guided_session)
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "GUIDED_LESSON",
+            }
+        )
+        status_payload = ws.receive_json()
+        assistant_partial = ws.receive_json()
+        user_transcript = ws.receive_json()
+        assistant_text = ws.receive_json()
+        ws.send_json({"type": "client.stop"})
+        summary_payload = ws.receive_json()
+
+    bridge = FakeBridge.created[0]
+    assert status_payload["type"] == "server.status"
+    assert "I am starting a GUIDED_LESSON music tutoring session." in bridge.sent_text[0][0]
+    assert assistant_partial == {
+        "type": "server.transcript",
+        "role": "assistant",
+        "text": "Let's begin",
+        "partial": True,
+    }
+    assert user_transcript == {
+        "type": "server.transcript",
+        "role": "user",
+        "text": "I want help with arpeggios",
+        "partial": False,
+    }
+    assert assistant_text == {
+        "type": "server.text",
+        "text": "Let's begin with a D minor arpeggio.",
+    }
+    assert summary_payload["type"] == "server.summary"
+
+
 def test_ws_live_executes_model_tool_call_and_returns_tool_result(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

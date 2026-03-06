@@ -8,6 +8,8 @@ import {
   MessageCircle,
   Mic,
   MicOff,
+  PauseCircle,
+  PlayCircle,
   Radio,
   ScanLine,
   SlidersHorizontal,
@@ -44,6 +46,8 @@ export default function WorkspaceControls({
   cameraEnabled,
   instrumentProfile,
   isConnected,
+  liveMode,
+  liveAudioMode,
   status,
   runtimeSummary,
   sessionId,
@@ -54,6 +58,8 @@ export default function WorkspaceControls({
   onToggleMic,
   onToggleCamera,
   onInstrumentProfileChange,
+  onStartTutorSession,
+  onStopTutorSession,
   onPrimaryAction,
   onCapturePhrase,
   onToggleOrbLowPower,
@@ -84,6 +90,20 @@ export default function WorkspaceControls({
         </div>
       </div>
 
+      <button
+        type="button"
+        onClick={isConnected && liveMode === "GUIDED_LESSON" ? onStopTutorSession : onStartTutorSession}
+        disabled={isBusy && !(isConnected && liveMode === "GUIDED_LESSON")}
+        className="mt-4 flex w-full min-h-13 items-center justify-center gap-2 rounded-[1.5rem] border border-sky-300/20 bg-sky-400/12 px-4 py-3 text-sm font-semibold text-sky-50 transition hover:bg-sky-400/18 disabled:cursor-wait disabled:opacity-70"
+      >
+        {isConnected && liveMode === "GUIDED_LESSON" ? (
+          <PauseCircle className="h-4 w-4" />
+        ) : (
+          <PlayCircle className="h-4 w-4" />
+        )}
+        {isConnected && liveMode === "GUIDED_LESSON" ? "Pause Gemini Live" : "Start Gemini Live"}
+      </button>
+
       {/* Primary action — always visible */}
       <button
         type="button"
@@ -94,6 +114,21 @@ export default function WorkspaceControls({
         {isBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Radio className="h-4 w-4" />}
         {primaryActionLabel}
       </button>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="rounded-[1.4rem] border border-white/10 bg-white/5 px-3 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            Live mode
+          </div>
+          <div className="mt-2 text-sm font-medium text-white">{liveMode || "offline"}</div>
+        </div>
+        <div className="rounded-[1.4rem] border border-white/10 bg-white/5 px-3 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            Audio route
+          </div>
+          <div className="mt-2 text-sm font-medium text-white">{liveAudioMode}</div>
+        </div>
+      </div>
 
       {/* Contextual actions — revealed on demand */}
       {isConnected && (

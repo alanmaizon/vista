@@ -35,6 +35,7 @@ export default function App() {
     sessionId,
     isReadingScore,
     isBusy,
+    isSessionStarting,
     isConnected,
     liveMode,
     liveAudioMode,
@@ -42,10 +43,7 @@ export default function App() {
     recentMusicEvents,
     interruptState,
     isPlaying,
-    playbackAudioElement,
     setPlaybackAudioElement,
-    orbLowPower,
-    setOrbLowPower,
     videoRef,
     primaryActionLabel,
     activeNoteRange,
@@ -121,14 +119,6 @@ export default function App() {
   return (
     <WorkspaceView
       authStatus={authStatus}
-      orbProps={{
-        audioSource: isPlaying && playbackAudioElement ? "element" : "microphone",
-        audioElement: playbackAudioElement,
-        active: isPlaying ? Boolean(playbackAudioElement) : micEnabled && isConnected,
-        intensity: orbLowPower ? 0.72 : 0.88,
-        theme: isPlaying || liveAudioMode === "MUSIC" ? "plasma" : "aurora",
-        performanceMode: orbLowPower ? "lite" : "adaptive",
-      }}
       orbLayerProps={{
         status,
         runtimeSummary,
@@ -139,6 +129,7 @@ export default function App() {
         isReadingScore,
         isPlaying,
         isBusy,
+        isSessionStarting,
         sessionId,
         liveAudioMode,
         interruptState,
@@ -157,7 +148,7 @@ export default function App() {
         sessionId,
         isReadingScore,
         isBusy,
-        orbLowPower,
+        isSessionStarting,
         primaryActionLabel,
         onToggleMic: () => setMicEnabled((value) => !value),
         onToggleCamera: () => setCameraEnabled((value) => !value),
@@ -174,7 +165,6 @@ export default function App() {
         onCapturePhrase: () => {
           void handleCapturePhraseAction();
         },
-        onToggleOrbLowPower: () => setOrbLowPower((value) => !value),
         onToggleScoreReader: () => {
           void handleToggleScoreReader();
         },

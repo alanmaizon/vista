@@ -3,7 +3,6 @@ import {
   Camera,
   CameraOff,
   ChevronDown,
-  Cpu,
   LoaderCircle,
   MessageCircle,
   Mic,
@@ -12,32 +11,33 @@ import {
   PlayCircle,
   Radio,
   ScanLine,
-  SlidersHorizontal,
   Sparkles,
 } from "lucide-react";
 
+const WORKSPACE_CAPABILITIES = [
+  "Live conversation and lesson prompting",
+  "Focused phrase capture and deterministic analysis",
+  "Camera score reading for one bar at a time",
+];
+
 const GUIDE_PROMPTS = {
-  idle: "Hi! I'm Eurydice. Start a session and I'll walk you through your first lesson.",
-  connecting: "Setting things up — give me a moment to connect…",
-  connected: "We're connected. Tell me what you'd like to work on, or I'll suggest a starting point.",
-  lesson: "Follow along with the guided prompts. I'll surface controls when you need them.",
-  busy: "Working on it — hang tight…",
+  idle: "Start Session when you want Gemini Live to join the studio.",
+  starting: "Starting the live tutor. Microphone routing will open after the session is ready.",
+  connected: "The tutor is live. Speak naturally, or use the lesson controls when you are ready.",
+  busy: "A lesson action is running. Wait for it to finish before starting another.",
 };
 
-function resolveGuideMessage({ isConnected, isBusy, status, runtimeSummary }) {
+function resolveGuideMessage({ isConnected, isBusy, isSessionStarting, runtimeSummary }) {
   if (isBusy) {
     return GUIDE_PROMPTS.busy;
   }
-  if (!isConnected && status === "Connecting…") {
-    return GUIDE_PROMPTS.connecting;
+  if (isSessionStarting) {
+    return GUIDE_PROMPTS.starting;
   }
-  if (!isConnected) {
-    return GUIDE_PROMPTS.idle;
+  if (isConnected) {
+    return runtimeSummary || GUIDE_PROMPTS.connected;
   }
-  if (runtimeSummary) {
-    return runtimeSummary;
-  }
-  return GUIDE_PROMPTS.connected;
+  return GUIDE_PROMPTS.idle;
 }
 
 export default function WorkspaceControls({
@@ -53,7 +53,7 @@ export default function WorkspaceControls({
   sessionId,
   isReadingScore,
   isBusy,
-  orbLowPower,
+  isSessionStarting,
   primaryActionLabel,
   onToggleMic,
   onToggleCamera,
@@ -62,177 +62,167 @@ export default function WorkspaceControls({
   onStopTutorSession,
   onPrimaryAction,
   onCapturePhrase,
-  onToggleOrbLowPower,
   onToggleScoreReader,
 }) {
   const [showActions, setShowActions] = useState(false);
-  const guideMessage = resolveGuideMessage({ isConnected, isBusy, status, runtimeSummary });
+  const guideMessage = resolveGuideMessage({ isConnected, isBusy, isSessionStarting, runtimeSummary });
+  const guidedSessionActive = isConnected && liveMode === "GUIDED_LESSON";
+  const lessonControlsEnabled = guidedSessionActive && !isSessionStarting;
 
   return (
     <aside className="glass rounded-[2.2rem] p-5">
-      {/* AI guide surface — primary interaction point */}
       <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-400/15">
-          <Sparkles className="h-4 w-4 text-sky-200" />
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-white">
+          <Sparkles className="h-4 w-4" />
         </div>
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-200">
-            Gemini Live
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            Live tutor
           </div>
-          <div className="mt-0.5 text-xs text-slate-400">{status}</div>
+          <div className="mt-0.5 text-xs text-slate-500">{status}</div>
         </div>
       </div>
 
-      <div className="mt-4 rounded-[1.8rem] border border-white/10 bg-slate-950/50 px-4 py-4">
+      <div className="mt-4 rounded-[1.8rem] border border-slate-300 bg-[#f8f9fb] px-4 py-4">
         <div className="flex items-start gap-3">
-          <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-sky-300" />
-          <p className="text-sm leading-relaxed text-slate-200">{guideMessage}</p>
+          <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-slate-700" />
+          <p className="text-sm leading-relaxed text-slate-700">{guideMessage}</p>
         </div>
       </div>
 
       <button
         type="button"
-        onClick={isConnected && liveMode === "GUIDED_LESSON" ? onStopTutorSession : onStartTutorSession}
-        disabled={isBusy && !(isConnected && liveMode === "GUIDED_LESSON")}
-        className="mt-4 flex w-full min-h-13 items-center justify-center gap-2 rounded-[1.5rem] border border-sky-300/20 bg-sky-400/12 px-4 py-3 text-sm font-semibold text-sky-50 transition hover:bg-sky-400/18 disabled:cursor-wait disabled:opacity-70"
+        onClick={guidedSessionActive ? onStopTutorSession : onStartTutorSession}
+        disabled={isSessionStarting || (isBusy && !guidedSessionActive)}
+        className="mt-4 flex w-full min-h-13 items-center justify-center gap-2 rounded-[1.5rem] bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-70"
       >
-        {isConnected && liveMode === "GUIDED_LESSON" ? (
+        {isSessionStarting ? (
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+        ) : guidedSessionActive ? (
           <PauseCircle className="h-4 w-4" />
         ) : (
           <PlayCircle className="h-4 w-4" />
         )}
-        {isConnected && liveMode === "GUIDED_LESSON" ? "Pause Gemini Live" : "Start Gemini Live"}
+        {isSessionStarting ? "Starting session..." : guidedSessionActive ? "Stop session" : "Start session"}
       </button>
 
-      {/* Primary action — always visible */}
       <button
         type="button"
         onClick={onPrimaryAction}
-        disabled={isBusy}
-        className="mt-4 flex w-full min-h-14 items-center justify-center gap-2 rounded-[1.6rem] bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-70"
+        disabled={!lessonControlsEnabled || isBusy}
+        className="mt-4 flex w-full min-h-14 items-center justify-center gap-2 rounded-[1.6rem] border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-55"
       >
         {isBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Radio className="h-4 w-4" />}
         {primaryActionLabel}
       </button>
 
+      {!lessonControlsEnabled ? (
+        <div className="mt-2 text-xs leading-relaxed text-slate-500">
+          Start Session first. Guided lesson tools no longer auto-open Gemini Live implicitly.
+        </div>
+      ) : null}
+
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <div className="rounded-[1.4rem] border border-white/10 bg-white/5 px-3 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+        <div className="rounded-[1.4rem] border border-slate-300 bg-white px-3 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
             Live mode
           </div>
-          <div className="mt-2 text-sm font-medium text-white">{liveMode || "offline"}</div>
+          <div className="mt-2 text-sm font-medium text-slate-900">{liveMode || "closed"}</div>
         </div>
-        <div className="rounded-[1.4rem] border border-white/10 bg-white/5 px-3 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+        <div className="rounded-[1.4rem] border border-slate-300 bg-white px-3 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
             Audio route
           </div>
-          <div className="mt-2 text-sm font-medium text-white">{liveAudioMode}</div>
+          <div className="mt-2 text-sm font-medium text-slate-900">{liveAudioMode}</div>
         </div>
       </div>
 
-      {/* Contextual actions — revealed on demand */}
-      {isConnected && (
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => setShowActions((v) => !v)}
-            className="flex w-full items-center justify-between gap-2 rounded-[1.4rem] border border-white/10 bg-white/[0.04] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300 transition hover:bg-white/[0.08]"
-          >
-            Actions
-            <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${showActions ? "rotate-180" : ""}`} />
-          </button>
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={() => setShowActions((value) => !value)}
+          className="flex w-full items-center justify-between gap-2 rounded-[1.4rem] border border-slate-300 bg-white px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600 transition hover:bg-slate-50"
+        >
+          Secondary actions
+          <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${showActions ? "rotate-180" : ""}`} />
+        </button>
 
-          {showActions && (
-            <div className="mt-3 grid gap-2">
+        {showActions ? (
+          <div className="mt-3 grid gap-2">
+            <button
+              type="button"
+              onClick={onCapturePhrase}
+              disabled={isBusy || isSessionStarting}
+              className="flex items-center justify-center gap-2 rounded-[1.4rem] border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-70"
+            >
+              <Mic className="h-4 w-4" />
+              Capture phrase
+            </button>
+            <button
+              type="button"
+              onClick={onToggleScoreReader}
+              disabled={isBusy || isSessionStarting}
+              className="flex items-center justify-center gap-2 rounded-[1.4rem] border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-70"
+            >
+              <ScanLine className="h-4 w-4" />
+              {isReadingScore ? "Stop reader" : "Read from camera"}
+            </button>
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={onCapturePhrase}
-                disabled={isBusy}
-                className="flex items-center justify-center gap-2 rounded-[1.4rem] border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-100 transition hover:bg-white/10 disabled:cursor-wait disabled:opacity-70"
+                onClick={onToggleMic}
+                className={`flex items-center justify-center gap-2 rounded-[1.4rem] px-3 py-2.5 text-xs font-medium transition ${
+                  micEnabled ? "bg-emerald-50 text-emerald-700" : "bg-white text-slate-500"
+                }`}
               >
-                <Mic className="h-4 w-4" />
-                Capture phrase
+                {micEnabled ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
+                Mic
               </button>
               <button
                 type="button"
-                onClick={onToggleScoreReader}
-                disabled={isBusy}
-                className="flex items-center justify-center gap-2 rounded-[1.4rem] border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-100 transition hover:bg-white/10 disabled:cursor-wait disabled:opacity-70"
+                onClick={onToggleCamera}
+                className={`flex items-center justify-center gap-2 rounded-[1.4rem] px-3 py-2.5 text-xs font-medium transition ${
+                  cameraEnabled ? "bg-slate-900 text-white" : "bg-white text-slate-500"
+                }`}
               >
-                <ScanLine className="h-4 w-4" />
-                {isReadingScore ? "Stop reader" : "Read from camera"}
+                {cameraEnabled ? <Camera className="h-3.5 w-3.5" /> : <CameraOff className="h-3.5 w-3.5" />}
+                Camera
               </button>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={onToggleMic}
-                  className={`flex items-center justify-center gap-2 rounded-[1.4rem] px-3 py-2.5 text-xs font-medium transition ${
-                    micEnabled ? "bg-emerald-400/15 text-emerald-100" : "bg-white/5 text-slate-400"
-                  }`}
-                >
-                  {micEnabled ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
-                  Mic
-                </button>
-                <button
-                  type="button"
-                  onClick={onToggleCamera}
-                  className={`flex items-center justify-center gap-2 rounded-[1.4rem] px-3 py-2.5 text-xs font-medium transition ${
-                    cameraEnabled ? "bg-sky-400/15 text-sky-100" : "bg-white/5 text-slate-400"
-                  }`}
-                >
-                  {cameraEnabled ? <Camera className="h-3.5 w-3.5" /> : <CameraOff className="h-3.5 w-3.5" />}
-                  Camera
-                </button>
-              </div>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        ) : null}
+      </div>
 
-      {/* Session tuning — collapsed by default */}
-      <details className="mt-4 rounded-[1.8rem] border border-white/10 bg-slate-950/45 px-4 py-4">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
-          <span className="inline-flex items-center gap-2">
-            <SlidersHorizontal className="h-3.5 w-3.5 text-sky-300" />
-            Session tuning
-          </span>
+      <details className="mt-4 rounded-[1.8rem] border border-slate-300 bg-white px-4 py-4">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+          <span>Studio onboarding</span>
+          <ChevronDown className="h-4 w-4 text-slate-500" />
+        </summary>
+
+        <div className="mt-4 space-y-3">
+          {WORKSPACE_CAPABILITIES.map((item) => (
+            <div key={item} className="rounded-[1.3rem] border border-slate-300 bg-[#f8f9fb] px-3 py-3 text-sm text-slate-600">
+              {item}
+            </div>
+          ))}
+        </div>
+      </details>
+
+      <details className="mt-4 rounded-[1.8rem] border border-slate-300 bg-white px-4 py-4">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+          <span>Session tuning</span>
           <ChevronDown className="h-4 w-4 text-slate-500" />
         </summary>
 
         <div className="mt-4 space-y-4">
-          <div className="rounded-[1.4rem] border border-white/10 bg-white/5 px-3 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                  Orb performance
-                </div>
-                <div className="mt-1 text-xs text-slate-400">
-                  Low-power stays on by default to keep the workstation responsive.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={onToggleOrbLowPower}
-                className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] transition ${
-                  orbLowPower
-                    ? "bg-amber-300/20 text-amber-100"
-                    : "bg-emerald-400/15 text-emerald-100"
-                }`}
-              >
-                <Cpu className="h-3.5 w-3.5" />
-                {orbLowPower ? "Low-power" : "Adaptive"}
-              </button>
-            </div>
-          </div>
-
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
               Instrument profile
             </label>
             <select
               value={instrumentProfile}
               onChange={(event) => onInstrumentProfileChange(event.target.value)}
-              className="mt-2 w-full rounded-[1.4rem] border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-300/60"
+              className="mt-2 w-full rounded-[1.4rem] border border-slate-300 bg-[#f8f9fb] px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-500"
             >
               <option value="AUTO">Auto (generic)</option>
               <option value="PIANO">Piano / keys</option>
@@ -244,10 +234,10 @@ export default function WorkspaceControls({
             </select>
           </div>
 
-          <div className="rounded-[1.4rem] border border-white/10 bg-white/5 px-3 py-3 text-xs text-slate-400">
-            <div className="font-semibold uppercase tracking-[0.14em] text-slate-300">Identity</div>
+          <div className="rounded-[1.4rem] border border-slate-300 bg-[#f8f9fb] px-3 py-3 text-xs text-slate-500">
+            <div className="font-semibold uppercase tracking-[0.14em] text-slate-600">Identity</div>
             <div className="mt-2 break-all">{authStatus}</div>
-            {sessionId ? <div className="mt-2 text-slate-500">Session: {sessionId}</div> : null}
+            {sessionId ? <div className="mt-2">Session: {sessionId}</div> : null}
           </div>
         </div>
       </details>

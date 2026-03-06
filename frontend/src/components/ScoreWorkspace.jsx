@@ -88,10 +88,10 @@ function WorkflowRail({ activeScore, lessonState, isBusy }) {
               key={step.key}
               className={`rounded-2xl border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] ${
                 isCurrent
-                  ? "border-sky-300/40 bg-sky-400/15 text-sky-100"
+                  ? "border-slate-400 bg-slate-900 text-white"
                   : isComplete
-                    ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100"
-                    : "border-white/10 bg-white/5 text-slate-400"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-slate-300 bg-white text-slate-500"
               }`}
             >
               {step.label}
@@ -108,11 +108,11 @@ function StatusChip({ icon, label, active, tone = "sky" }) {
   const toneClasses =
     tone === "emerald"
       ? active
-        ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100"
-        : "border-white/10 bg-white/5 text-slate-400"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+        : "border-slate-300 bg-white text-slate-500"
       : active
-        ? "border-sky-300/30 bg-sky-400/10 text-sky-100"
-        : "border-white/10 bg-white/5 text-slate-400";
+        ? "border-slate-400 bg-slate-900 text-white"
+        : "border-slate-300 bg-white text-slate-500";
 
   return (
     <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses}`}>
@@ -136,26 +136,26 @@ export function ComposerPanel({
     <div className="glass rounded-3xl p-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-            <FileMusic className="h-4 w-4 text-sky-300" />
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <FileMusic className="h-4 w-4 text-slate-700" />
             Composition draft
           </div>
-          <p className="mt-2 max-w-2xl text-sm text-slate-300">
+          <p className="mt-2 max-w-2xl text-sm text-slate-600">
             Keep the current phrase or bar editable here. This is the source Eurydice prepares before capture and comparison.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-          <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+        <div className="grid grid-cols-3 gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
             <div className="text-slate-500">Bars</div>
-            <div className="mt-1 text-sm text-white">{measureCount || "—"}</div>
+            <div className="mt-1 text-sm text-slate-900">{measureCount || "—"}</div>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+          <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
             <div className="text-slate-500">Notes</div>
-            <div className="mt-1 text-sm text-white">{noteCount || "—"}</div>
+            <div className="mt-1 text-sm text-slate-900">{noteCount || "—"}</div>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+          <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
             <div className="text-slate-500">Tempo</div>
-            <div className="mt-1 text-sm text-white">{detectedTempo ? Math.round(detectedTempo) : "—"}</div>
+            <div className="mt-1 text-sm text-slate-900">{detectedTempo ? Math.round(detectedTempo) : "—"}</div>
           </div>
         </div>
       </div>
@@ -163,15 +163,15 @@ export function ComposerPanel({
         value={scoreLine}
         onChange={(event) => onScoreLineChange(event.target.value)}
         rows={4}
-        className="mt-4 w-full rounded-3xl border border-white/10 bg-slate-950/60 px-4 py-4 text-sm text-slate-100 outline-none transition focus:border-sky-300/60"
+        className="mt-4 w-full rounded-3xl border border-slate-300 bg-white px-4 py-4 text-sm text-slate-800 outline-none transition focus:border-slate-500"
         placeholder="C4/q D4/q E4/h | G4/q A4/q B4/h"
       />
       <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em]">
-        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-400">
+        <span className="rounded-full border border-slate-300 bg-white px-3 py-1 text-slate-500">
           Guided lesson source
         </span>
         {lessonState.measureIndex != null ? (
-          <span className="rounded-full border border-sky-300/25 bg-sky-400/10 px-3 py-1 text-sky-100">
+          <span className="rounded-full border border-slate-400 bg-slate-900 px-3 py-1 text-white">
             Active bar {lessonState.measureIndex}
           </span>
         ) : null}
@@ -200,11 +200,11 @@ export function LiveFeedPanel({
     <div className="glass rounded-3xl p-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-            <Waves className="h-4 w-4 text-sky-300" />
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <Waves className="h-4 w-4 text-slate-700" />
             Live feed
           </div>
-          <p className="mt-2 text-sm text-slate-300">
+          <p className="mt-2 text-sm text-slate-600">
             Live capture stays in the center of the lesson loop. Record, compare, or scan a bar without leaving the workspace.
           </p>
         </div>
@@ -224,19 +224,19 @@ export function LiveFeedPanel({
       </div>
 
       <div className="mt-5 grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_22rem]">
-        <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/75">
+        <div className="relative overflow-hidden rounded-[2rem] border border-slate-300 bg-white">
           {cameraEnabled || isReadingScore ? (
             <video ref={videoRef} autoPlay muted playsInline className="aspect-[16/10] w-full object-cover" />
           ) : (
-            <div className="relative flex aspect-[16/10] items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_35%,rgba(56,189,248,0.18),transparent_26%),linear-gradient(180deg,rgba(8,15,34,0.92),rgba(3,7,18,1))]">
-              <div className="absolute inset-x-8 bottom-8 top-8 rounded-[1.8rem] border border-white/8 bg-[linear-gradient(180deg,rgba(56,189,248,0.08),rgba(15,23,42,0.0))]" />
+            <div className="relative flex aspect-[16/10] items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_35%,rgba(201,205,211,0.32),transparent_26%),linear-gradient(180deg,rgba(248,249,251,1),rgba(230,232,235,1))]">
+              <div className="absolute inset-x-8 bottom-8 top-8 rounded-[1.8rem] border border-slate-300 bg-[linear-gradient(180deg,rgba(255,255,255,0.55),rgba(255,255,255,0))]" />
               <div className="relative z-10 flex w-full max-w-[32rem] flex-col items-center px-8">
                 <SignalBars active={signalActive} />
-                <div className="mt-6 flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-200">
+                <div className="mt-6 flex items-center gap-3 rounded-full border border-slate-300 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
                   <span className={`status-dot ${signalActive ? "status-dot-live" : ""}`} />
                   {captureMode}
                 </div>
-                <div className="mt-3 max-w-sm text-center text-sm text-slate-300">
+                <div className="mt-3 max-w-sm text-center text-sm text-slate-600">
                   {cameraEnabled
                     ? "Camera is armed. Start the reader to scan a bar."
                     : "Mic and playback activity will animate this signal deck during capture and listening."}
@@ -244,7 +244,7 @@ export function LiveFeedPanel({
               </div>
             </div>
           )}
-          <div className="absolute inset-x-0 bottom-0 flex items-center justify-between border-t border-white/10 bg-slate-950/70 px-4 py-3 text-xs text-slate-300 backdrop-blur-md">
+          <div className="absolute inset-x-0 bottom-0 flex items-center justify-between border-t border-slate-300 bg-white/90 px-4 py-3 text-xs text-slate-600 backdrop-blur-md">
             <div className="flex items-center gap-2">
               <span className={`status-dot ${isBusy || isReadingScore ? "status-dot-live" : ""}`} />
               {status}
@@ -254,41 +254,41 @@ export function LiveFeedPanel({
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-[1.8rem] border border-white/10 bg-slate-950/50 p-4">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+          <div className="rounded-[1.8rem] border border-slate-300 bg-white p-4">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
               <span>Signal preview</span>
               <span>{signalActive ? "Active" : "Idle"}</span>
             </div>
-            <div className="mt-4 rounded-[1.4rem] border border-white/8 bg-white/5 px-4 py-5">
+            <div className="mt-4 rounded-[1.4rem] border border-slate-300 bg-[#f8f9fb] px-4 py-5">
               <SignalBars active={signalActive} />
             </div>
           </div>
 
-          <div className="rounded-[1.8rem] border border-white/10 bg-slate-950/50 p-4">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+          <div className="rounded-[1.8rem] border border-slate-300 bg-white p-4">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
               <span>Session context</span>
               <span>{isConnected ? "Linked" : "Standby"}</span>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-slate-200">
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-slate-700">
+              <div className="rounded-2xl border border-slate-300 bg-[#f8f9fb] px-3 py-3">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">State</div>
-                <div className="mt-1 font-medium text-white">{lessonState.stage}</div>
+                <div className="mt-1 font-medium text-slate-900">{lessonState.stage}</div>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
+              <div className="rounded-2xl border border-slate-300 bg-[#f8f9fb] px-3 py-3">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Source</div>
-                <div className="mt-1 font-medium text-white">
+                <div className="mt-1 font-medium text-slate-900">
                   {isReadingScore ? "Camera" : isPlaying ? "Playback" : micEnabled ? "Mic" : "Manual"}
                 </div>
               </div>
             </div>
-            <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-300">
+            <div className="mt-3 rounded-2xl border border-slate-300 bg-[#f8f9fb] px-3 py-3 text-sm text-slate-600">
               {activeScore
                 ? "Prepared score is loaded. Capture and compare without leaving the current lesson surface."
                 : "No prepared score yet. Draft a phrase and run Prepare lesson to populate the loop."}
             </div>
           </div>
 
-          <div className="rounded-[1.8rem] border border-white/10 bg-slate-950/50 p-4">
+          <div className="rounded-[1.8rem] border border-slate-300 bg-white p-4">
             <WorkflowRail activeScore={activeScore} lessonState={lessonState} isBusy={isBusy} />
           </div>
         </div>
@@ -323,22 +323,22 @@ export function RenderedScorePanel({
     <div className="glass rounded-[2rem] p-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-            <Music2 className="h-4 w-4 text-sky-300" />
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <Music2 className="h-4 w-4 text-slate-700" />
             Rendered score
           </div>
-          <p className="mt-2 text-sm text-slate-300">
+          <p className="mt-2 text-sm text-slate-600">
             The score canvas is the main composition surface. Playback, zoom, and note-state feedback stay attached to the notation.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {lessonState.measureIndex != null ? (
-            <span className="rounded-full border border-sky-300/25 bg-sky-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-100">
+            <span className="rounded-full border border-slate-400 bg-slate-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-white">
               Bar {lessonState.measureIndex}
             </span>
           ) : null}
           {detectedTempo ? (
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
+            <span className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
               Phrase {Math.round(detectedTempo)} BPM
             </span>
           ) : null}
@@ -351,7 +351,7 @@ export function RenderedScorePanel({
             type="button"
             onClick={onPlayScore}
             disabled={isPlaying || !activeScore?.measures?.length}
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Play className="h-4 w-4" />
             {isPlaying ? "Playing..." : "Play score"}
@@ -360,7 +360,7 @@ export function RenderedScorePanel({
             type="button"
             onClick={onPlayAnalysis}
             disabled={isPlaying || !hasAnalysisPlayback}
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Sparkles className="h-4 w-4" />
             Play phrase
@@ -370,31 +370,31 @@ export function RenderedScorePanel({
             onChange={(event) => onTempoOverrideChange(event.target.value)}
             inputMode="numeric"
             placeholder="Tempo"
-            className="w-24 rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-sky-300/60"
+            className="w-24 rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-500"
           />
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => adjustZoom(-10)}
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 transition hover:bg-white/10"
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 transition hover:bg-slate-50"
           >
             <ZoomOut className="h-4 w-4" />
           </button>
-          <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-100">
+          <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800">
             {zoomPercent}%
           </div>
           <button
             type="button"
             onClick={() => adjustZoom(10)}
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 transition hover:bg-white/10"
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 transition hover:bg-slate-50"
           >
             <ZoomIn className="h-4 w-4" />
           </button>
           <button
             type="button"
             onClick={() => setZoomPercent(100)}
-            className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10"
+            className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-50"
           >
             Fit
           </button>
@@ -423,8 +423,8 @@ export function RenderedScorePanel({
 
       {activeScore?.expected_notes?.length ? (
         <div className="mt-4 space-y-3">
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-            <ChevronRight className="h-4 w-4 text-sky-300" />
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            <ChevronRight className="h-4 w-4 text-slate-700" />
             Note-state timeline
           </div>
           <div className="flex flex-wrap gap-2">

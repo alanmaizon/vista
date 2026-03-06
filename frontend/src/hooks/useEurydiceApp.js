@@ -150,10 +150,10 @@ export default function useEurydiceApp() {
   });
   const [cameraCapturePending, setCameraCapturePending] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [isSessionStarting, setIsSessionStarting] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [tempoOverride, setTempoOverride] = useState("");
   const [playbackAudioElement, setPlaybackAudioElement] = useState(null);
-  const [orbLowPower, setOrbLowPower] = useState(true);
 
   const videoRef = useRef(null);
   const cameraStreamRef = useRef(null);
@@ -180,7 +180,8 @@ export default function useEurydiceApp() {
   const lastAssistantAudioAtRef = useRef(0);
   const pendingMusicInterruptRef = useRef(null);
   const musicInterruptTimerRef = useRef(null);
-  const autoTutorStartRef = useRef(false);
+  const sessionStartPromiseRef = useRef(null);
+  const sessionIdRef = useRef(null);
   const musicAnalysisInFlightRef = useRef(false);
   const captureFocusedMusicClipRef = useRef((options) => capturePcmClip(options));
 
@@ -327,6 +328,9 @@ export default function useEurydiceApp() {
       stopCameraCapture();
       setLiveMode(null);
       setSessionId(null);
+      sessionIdRef.current = null;
+      sessionStartPromiseRef.current = null;
+      setIsSessionStarting(false);
       setCameraCapturePending(false);
       conversationStreamRefs.current.assistant = null;
       conversationStreamRefs.current.user = null;
@@ -348,6 +352,8 @@ export default function useEurydiceApp() {
     },
     onError: () => {
       rejectPendingToolCalls("Live connection error before tool response.");
+      sessionStartPromiseRef.current = null;
+      setIsSessionStarting(false);
       setStatus("Live connection error.");
     },
   });
@@ -359,6 +365,10 @@ export default function useEurydiceApp() {
   useEffect(() => {
     liveModeRef.current = liveMode;
   }, [liveMode]);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   useEffect(() => {
     liveAudioLevelsRef.current = liveAudioLevels;
@@ -430,21 +440,21 @@ export default function useEurydiceApp() {
           return;
         }
         setUser(payload);
-        autoTutorStartRef.current = false;
         conversationStreamRefs.current.assistant = null;
         conversationStreamRefs.current.user = null;
         setAuthStatus(`Signed in as ${payload.email || payload.uid}`);
-        setStatus("Signed in.");
+        setStatus("Signed in. Start a session when ready.");
       } catch {
         if (!active) {
           return;
         }
         setUser(null);
-        autoTutorStartRef.current = false;
         setConversationMessages([]);
         conversationStreamRefs.current.assistant = null;
         conversationStreamRefs.current.user = null;
         assistantStreamingRef.current = false;
+        sessionStartPromiseRef.current = null;
+        setIsSessionStarting(false);
         setRecentMusicEvents([]);
         setInterruptState({
           status: "idle",
@@ -578,11 +588,12 @@ export default function useEurydiceApp() {
         },
       });
       setUser(payload);
-      autoTutorStartRef.current = false;
       setConversationMessages([]);
       conversationStreamRefs.current.assistant = null;
       conversationStreamRefs.current.user = null;
       assistantStreamingRef.current = false;
+      sessionStartPromiseRef.current = null;
+      setIsSessionStarting(false);
       setRecentMusicEvents([]);
       setInterruptState({
         status: "idle",
@@ -593,7 +604,7 @@ export default function useEurydiceApp() {
         lastFlushedAt: null,
       });
       setAuthStatus(`Signed in as ${payload.email || payload.uid}`);
-      setStatus("Signed in.");
+      setStatus("Signed in. Start a session when ready.");
       return true;
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Sign-in failed.");
@@ -688,44 +699,88 @@ export default function useEurydiceApp() {
     return undefined;
   }, [loadLiveToolMetrics, user]);
 
-  const ensureGuidedLessonSession = useCallback(async () => {
-    if (!user) {
-      throw new Error("Sign in before starting the guided lesson.");
-    }
-    if (liveMode === "READ_SCORE" && isConnectedRef.current) {
-      throw new Error("Stop camera reader before running guided lesson tools.");
-    }
-    if (!isConnectedRef.current || liveMode !== "GUIDED_LESSON" || !sessionId) {
-      setStatus("Creating Gemini Live tutor...");
-      const session = await apiRequest("/api/sessions", {
-        method: "POST",
-        body: {
-          domain: "MUSIC",
-          mode: "GUIDED_LESSON",
-          goal: "Act as a conversational music tutor. Greet the user, listen to speech and played phrases, and use score or comparison tools when relevant.",
-        },
-      });
-      setSessionId(session.id);
-      setLiveMode("GUIDED_LESSON");
-      connect({
-        sessionId: session.id,
-        mode: "GUIDED_LESSON",
-      });
-      setStatus("Opening Gemini Live tutor...");
-    }
-
+  const waitForGuidedLessonSession = useCallback(async () => {
     const start = Date.now();
-    while (!isConnectedRef.current) {
+    while (
+      !(
+        isConnectedRef.current &&
+        liveModeRef.current === "GUIDED_LESSON" &&
+        sessionIdRef.current
+      )
+    ) {
       if (Date.now() - start > 6000) {
         throw new Error("Timed out waiting for guided lesson live connection.");
       }
       await new Promise((resolve) => window.setTimeout(resolve, 120));
     }
-  }, [connect, liveMode, sessionId, user]);
+    return sessionIdRef.current;
+  }, []);
+
+  const ensureGuidedLessonSession = useCallback(async () => {
+    if (!user) {
+      throw new Error("Sign in before starting the guided lesson.");
+    }
+    if (liveModeRef.current === "READ_SCORE") {
+      throw new Error("Stop camera reader before running guided lesson tools.");
+    }
+    if (isConnectedRef.current && liveModeRef.current === "GUIDED_LESSON" && sessionIdRef.current) {
+      return sessionIdRef.current;
+    }
+    if (sessionStartPromiseRef.current) {
+      return sessionStartPromiseRef.current;
+    }
+
+    const startPromise = (async () => {
+      setIsSessionStarting(true);
+      try {
+        setStatus("Creating Gemini Live tutor...");
+        const session = await apiRequest("/api/sessions", {
+          method: "POST",
+          body: {
+            domain: "MUSIC",
+            mode: "GUIDED_LESSON",
+            goal: "Act as a conversational music tutor. Greet the user, listen to speech and played phrases, and use score or comparison tools when relevant.",
+          },
+        });
+        setSessionId(session.id);
+        sessionIdRef.current = session.id;
+        setLiveMode("GUIDED_LESSON");
+        connect({
+          sessionId: session.id,
+          mode: "GUIDED_LESSON",
+        });
+        setStatus("Opening Gemini Live tutor...");
+        await waitForGuidedLessonSession();
+        setStatus("Gemini Live ready.");
+        return session.id;
+      } catch (error) {
+        sessionIdRef.current = null;
+        setSessionId(null);
+        setLiveMode(null);
+        disconnect();
+        throw error;
+      } finally {
+        sessionStartPromiseRef.current = null;
+        setIsSessionStarting(false);
+      }
+    })();
+
+    sessionStartPromiseRef.current = startPromise;
+    return startPromise;
+  }, [connect, disconnect, user, waitForGuidedLessonSession]);
+
+  const requireGuidedLessonSession = useCallback(() => {
+    if (sessionStartPromiseRef.current) {
+      throw new Error("Gemini Live is still starting. Wait until the session is ready.");
+    }
+    if (!isConnectedRef.current || liveModeRef.current !== "GUIDED_LESSON" || !sessionIdRef.current) {
+      throw new Error("Start Session before using guided lesson controls.");
+    }
+  }, []);
 
   const invokeLiveTool = useCallback(
     async (name, args, { sendToModel = false } = {}) => {
-      await ensureGuidedLessonSession();
+      requireGuidedLessonSession();
       const callId = generateToolCallId();
       const payload = await new Promise((resolve, reject) => {
         const timeoutId = window.setTimeout(() => {
@@ -743,7 +798,7 @@ export default function useEurydiceApp() {
       });
       return payload;
     },
-    [ensureGuidedLessonSession, send],
+    [requireGuidedLessonSession, send],
   );
 
   const startTutorSession = useCallback(async () => {
@@ -920,6 +975,9 @@ export default function useEurydiceApp() {
     disconnect();
     setLiveMode(null);
     setSessionId(null);
+    sessionIdRef.current = null;
+    sessionStartPromiseRef.current = null;
+    setIsSessionStarting(false);
     setCameraCapturePending(false);
     stopCameraCapture();
     conversationStreamRefs.current.assistant = null;
@@ -1142,19 +1200,6 @@ export default function useEurydiceApp() {
       unsubscribeRhythm();
     };
   }, [handleMusicEvent]);
-
-  useEffect(() => {
-    if (!user || autoTutorStartRef.current) {
-      return undefined;
-    }
-    autoTutorStartRef.current = true;
-    window.setTimeout(() => {
-      void startTutorSession().catch((error) => {
-        setErrorMessage(error instanceof Error ? error.message : "Unable to start Gemini Live.");
-      });
-    }, 180);
-    return undefined;
-  }, [startTutorSession, user]);
 
   const startLiveAudioRouter = useCallback(async () => {
     if (!user || !micEnabled || !isConnectedRef.current || liveModeRef.current !== "GUIDED_LESSON") {
@@ -1600,12 +1645,11 @@ export default function useEurydiceApp() {
     interruptState,
     isReadingScore,
     isBusy,
+    isSessionStarting,
     isPlaying,
     isConnected,
     playbackAudioElement,
     setPlaybackAudioElement,
-    orbLowPower,
-    setOrbLowPower,
     videoRef,
     primaryActionLabel,
     activeNoteRange,

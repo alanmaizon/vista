@@ -1,16 +1,16 @@
 import { Camera, LoaderCircle, Mic, Radio, Wifi, WifiOff } from "lucide-react";
-import AudioReactiveOrb from "./AudioReactiveOrb";
+import MarbleSphere from "./MarbleSphere";
 
-function SurfaceBadge({ icon, label, active = false, tone = "sky" }) {
+function SurfaceBadge({ icon, label, active = false, tone = "graphite" }) {
   const IconComponent = icon;
   const toneClass =
     tone === "emerald"
       ? active
-        ? "border-emerald-300/30 bg-emerald-400/12 text-emerald-100"
-        : "border-white/10 bg-white/5 text-slate-400"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+        : "border-slate-300 bg-white/70 text-slate-500"
       : active
-        ? "border-sky-300/30 bg-sky-400/12 text-sky-100"
-        : "border-white/10 bg-white/5 text-slate-400";
+        ? "border-slate-400 bg-slate-900 text-white"
+        : "border-slate-300 bg-white/70 text-slate-500";
 
   return (
     <div
@@ -27,16 +27,15 @@ function resolveCaptureMode({ isReadingScore, isPlaying, micEnabled }) {
     return "Camera reader";
   }
   if (isPlaying) {
-    return "Playback focus";
+    return "Playback";
   }
   if (micEnabled) {
-    return "Live mic";
+    return "Microphone";
   }
-  return "Draft mode";
+  return "Manual";
 }
 
 export default function OrbLayer({
-  orbProps,
   status,
   runtimeSummary,
   lessonState,
@@ -46,6 +45,7 @@ export default function OrbLayer({
   isReadingScore,
   isPlaying,
   isBusy,
+  isSessionStarting,
   sessionId,
   liveAudioMode,
   interruptState,
@@ -53,101 +53,104 @@ export default function OrbLayer({
   const captureMode = resolveCaptureMode({ isReadingScore, isPlaying, micEnabled });
   const stageLabel = lessonState?.stage ? lessonState.stage.replaceAll("-", " ") : "idle";
   const prompt = lessonState?.prompt || status;
+  const sessionLabel = isSessionStarting ? "Starting" : isConnected ? "Live" : "Closed";
 
   return (
-    <section className="glass relative overflow-hidden rounded-[2.4rem] px-5 py-5 md:px-7 md:py-6">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.14),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02)_30%,rgba(2,6,23,0.18)_100%)]" />
-      <div className="relative z-10 flex flex-col gap-6">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-200">
-              Orb Layer
-            </div>
-            <h2 className="mt-2 text-2xl font-semibold text-white md:text-3xl">
-              Central listening surface
-            </h2>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
-              Keep the workspace centered on one surface. Capture, playback, and tutoring all
-              resolve here before you open deeper inspectors.
-            </p>
+    <section className="glass rounded-[2.4rem] px-5 py-5 md:px-7 md:py-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            Marble sphere layer
           </div>
-          <div className="flex flex-wrap gap-2">
-            <SurfaceBadge
-              icon={isConnected ? Wifi : WifiOff}
-              label={isConnected ? "Live linked" : "Standby"}
-              active={isConnected}
-            />
-            <SurfaceBadge icon={Mic} label={captureMode} active={micEnabled || isPlaying} tone="emerald" />
-            <SurfaceBadge icon={Camera} label={cameraEnabled ? "Camera armed" : "Camera idle"} active={cameraEnabled} />
-          </div>
+          <h2 className="mt-2 text-2xl font-semibold text-slate-900 md:text-3xl">
+            Central studio surface
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
+            The workspace stays anchored around one quiet object. Session state, lesson focus, and
+            live routing sit around the sphere instead of competing with it.
+          </p>
         </div>
-
-        <div className="relative flex min-h-[54vh] items-center justify-center overflow-hidden rounded-[2.2rem] border border-white/10 bg-[radial-gradient(circle_at_50%_42%,rgba(56,189,248,0.12),transparent_22%),radial-gradient(circle_at_50%_62%,rgba(56,189,248,0.08),transparent_38%),linear-gradient(180deg,rgba(2,6,23,0.96),rgba(8,15,34,0.9)_48%,rgba(2,6,23,0.98))] px-4 py-8">
-          <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(148,163,184,0.05)_1px,transparent_1px),linear-gradient(180deg,rgba(148,163,184,0.04)_1px,transparent_1px)] bg-[size:32px_32px] opacity-20" />
-          <div className="absolute inset-x-[12%] top-[14%] h-40 rounded-full bg-sky-400/10 blur-3xl" />
-          <div className="absolute inset-x-[18%] bottom-[10%] h-32 rounded-full bg-indigo-400/10 blur-3xl" />
-          <div className="relative flex items-center justify-center">
-            <div className="absolute inset-[-12%] rounded-full bg-[radial-gradient(circle_at_center,rgba(125,211,252,0.18),transparent_48%),radial-gradient(circle_at_center,rgba(99,102,241,0.14),transparent_70%)] blur-3xl" />
-            <AudioReactiveOrb
-              audioSource={orbProps.audioSource}
-              audioElement={orbProps.audioElement}
-              active={orbProps.active}
-              intensity={orbProps.intensity}
-              theme={orbProps.theme}
-              performanceMode={orbProps.performanceMode}
-              size="studio"
-              className="relative z-10"
-            />
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <SurfaceBadge
+            icon={isConnected ? Wifi : WifiOff}
+            label={sessionLabel}
+            active={isConnected || isSessionStarting}
+          />
+          <SurfaceBadge
+            icon={Mic}
+            label={captureMode}
+            active={micEnabled || isPlaying}
+            tone="emerald"
+          />
+          <SurfaceBadge
+            icon={Camera}
+            label={cameraEnabled ? "Camera armed" : "Camera idle"}
+            active={cameraEnabled}
+          />
         </div>
+      </div>
 
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_18rem]">
-          <div className="rounded-[1.6rem] border border-white/10 bg-slate-950/45 px-4 py-4">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-              {isBusy ? (
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin text-sky-300" />
-              ) : (
-                <Radio className="h-3.5 w-3.5 text-sky-300" />
-              )}
-              Current focus
+      <div className="mt-6 rounded-[2.2rem] border border-slate-300/90 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.98),rgba(242,243,245,0.98)_48%,rgba(230,232,235,1)_100%)] px-4 py-6 md:px-6 md:py-8">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-center">
+          <div className="flex flex-col items-center justify-center">
+            <MarbleSphere className="mx-auto" />
+            <div className="mt-5 max-w-xl text-center">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Current focus
+              </div>
+              <div className="mt-2 text-base font-medium text-slate-900">{prompt}</div>
+              <div className="mt-2 text-sm leading-relaxed text-slate-600">{runtimeSummary}</div>
             </div>
-            <div className="mt-2 text-sm text-white">{prompt}</div>
-            <div className="mt-2 text-xs text-slate-400">{runtimeSummary}</div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-            <div className="rounded-[1.6rem] border border-white/10 bg-white/5 px-4 py-3">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                Stage
+          <div className="grid gap-3">
+            <div className="rounded-[1.6rem] border border-slate-300 bg-white/80 px-4 py-4 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                {isBusy || isSessionStarting ? (
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin text-slate-700" />
+                ) : (
+                  <Radio className="h-3.5 w-3.5 text-slate-700" />
+                )}
+                Session status
               </div>
-              <div className="mt-2 text-base font-medium capitalize text-white">{stageLabel}</div>
-            </div>
-            <div className="rounded-[1.6rem] border border-white/10 bg-white/5 px-4 py-3">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                Route
-              </div>
-              <div className="mt-2 text-base font-medium text-white">
-                {liveAudioMode && liveAudioMode !== "SILENCE" ? liveAudioMode : captureMode}
-              </div>
-            </div>
-            <div className="rounded-[1.6rem] border border-white/10 bg-white/5 px-4 py-3">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                Session
-              </div>
-              <div className="mt-2 truncate text-base font-medium text-white">
-                {sessionId || "Pending"}
+              <div className="mt-2 text-lg font-medium capitalize text-slate-900">{stageLabel}</div>
+              <div className="mt-1 text-sm text-slate-600">
+                {isSessionStarting
+                  ? "Starting the live tutor."
+                  : isConnected
+                    ? "Tutor session is active."
+                    : "Tutor session is closed."}
               </div>
             </div>
-            <div className="rounded-[1.6rem] border border-white/10 bg-white/5 px-4 py-3">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                Interrupt
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <div className="rounded-[1.6rem] border border-slate-300 bg-white/80 px-4 py-3 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Audio route
+                </div>
+                <div className="mt-2 text-base font-medium text-slate-900">
+                  {liveAudioMode && liveAudioMode !== "SILENCE" ? liveAudioMode : captureMode}
+                </div>
               </div>
-              <div className="mt-2 text-base font-medium capitalize text-white">
-                {interruptState?.status || "idle"}
+              <div className="rounded-[1.6rem] border border-slate-300 bg-white/80 px-4 py-3 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Interrupts
+                </div>
+                <div className="mt-2 text-base font-medium capitalize text-slate-900">
+                  {interruptState?.status || "idle"}
+                </div>
+                {interruptState?.pendingSummary ? (
+                  <div className="mt-1 text-xs text-slate-500">{interruptState.pendingSummary}</div>
+                ) : null}
               </div>
-              {interruptState?.pendingSummary ? (
-                <div className="mt-1 text-xs text-slate-400">{interruptState.pendingSummary}</div>
-              ) : null}
+              <div className="rounded-[1.6rem] border border-slate-300 bg-white/80 px-4 py-3 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Session id
+                </div>
+                <div className="mt-2 truncate text-base font-medium text-slate-900">
+                  {sessionId || "Not started"}
+                </div>
+              </div>
             </div>
           </div>
         </div>

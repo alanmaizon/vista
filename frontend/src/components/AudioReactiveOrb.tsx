@@ -9,7 +9,6 @@ type AudioReactiveOrbWrapperProps = AudioReactiveOrbProps & {
 
 const sizeClassMap = {
   hero: "h-[min(76vw,46rem)] w-[min(76vw,46rem)]",
-  studio: "h-[min(68vw,38rem)] w-[min(68vw,38rem)]",
   workspace: "h-[22rem] w-[22rem] md:h-[25rem] md:w-[25rem]",
   panel: "h-[18rem] w-[18rem]",
 } as const;

@@ -8,7 +8,7 @@ import noiseSource from "../shaders/noise.glsl?raw";
 const orbFragmentSource = orbFragmentTemplate.replace("__NOISE_GLSL__", noiseSource);
 
 type OrbTheme = "nebula" | "aurora" | "plasma";
-type OrbSize = "hero" | "workspace" | "panel" | "studio";
+type OrbSize = "hero" | "workspace" | "panel";
 type OrbPerformanceMode = "adaptive" | "lite" | "full";
 
 export interface AudioReactiveOrbProps {
@@ -31,7 +31,6 @@ const paletteMap: Record<OrbTheme, [string, string, string]> = {
 
 const sizeClassMap: Record<OrbSize, string> = {
   hero: "h-[min(76vw,46rem)] w-[min(76vw,46rem)]",
-  studio: "h-[min(68vw,38rem)] w-[min(68vw,38rem)]",
   workspace: "h-[22rem] w-[22rem] md:h-[25rem] md:w-[25rem]",
   panel: "h-[18rem] w-[18rem]",
 };

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import AppLayout from "./components/AppLayout";
 import LandingPage from "./components/LandingPage";
+import WorkspaceView from "./components/WorkspaceView";
 import useEurydiceApp from "./hooks/useEurydiceApp";
 
 export default function App() {
@@ -111,7 +111,7 @@ export default function App() {
   }
 
   return (
-    <AppLayout
+    <WorkspaceView
       authStatus={authStatus}
       orbProps={{
         audioSource: isPlaying && playbackAudioElement ? "element" : "microphone",
@@ -121,10 +121,20 @@ export default function App() {
         theme: isPlaying ? "plasma" : "aurora",
         performanceMode: orbLowPower ? "lite" : "adaptive",
       }}
+      orbLayerProps={{
+        status,
+        runtimeSummary,
+        lessonState,
+        isConnected,
+        micEnabled,
+        cameraEnabled,
+        isReadingScore,
+        isPlaying,
+        isBusy,
+        sessionId,
+      }}
       playbackAudioElementRef={setPlaybackAudioElement}
-      authPanelProps={{
-        email,
-        password,
+      controlsProps={{
         authStatus,
         micEnabled,
         cameraEnabled,
@@ -137,9 +147,6 @@ export default function App() {
         isBusy,
         orbLowPower,
         primaryActionLabel,
-        onEmailChange: setEmail,
-        onPasswordChange: setPassword,
-        onSignIn: handleSignIn,
         onToggleMic: () => setMicEnabled((value) => !value),
         onToggleCamera: () => setCameraEnabled((value) => !value),
         onInstrumentProfileChange: setInstrumentProfile,

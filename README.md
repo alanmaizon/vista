@@ -82,6 +82,7 @@ vista/
 ├── docs/                   # Documentation
 │   ├── AUDIT_REPORT.md     # Codebase audit and recommendations
 │   ├── EURYDICE_CHALLENGE_BRIEF.md  # Product specification
+│   ├── CONTENT_INGESTION_AND_CURATION.md  # Content library and guided pack workflow
 │   ├── LOCAL_SETUP.md      # Development setup guide
 │   ├── DEPLOYMENT.md       # Cloud Run deployment instructions
 │   └── CONSTITUTION.md     # AI system instructions
@@ -215,6 +216,7 @@ pre-commit run --all-files
 ## Documentation
 
 - **[Product Specification](docs/EURYDICE_CHALLENGE_BRIEF.md)** - Comprehensive challenge brief
+- **[Content Ingestion & Curation](docs/CONTENT_INGESTION_AND_CURATION.md)** - Library metadata, curation and guided pack loading
 - **[Local Setup](docs/LOCAL_SETUP.md)** - Step-by-step development guide
 - **[Deployment](docs/DEPLOYMENT.md)** - Cloud Run deployment instructions
 - **[Constitution](docs/CONSTITUTION.md)** - AI system behavior rules

@@ -28,7 +28,10 @@ from .models import (
     MusicChallengeAttempt,
     MusicCollaborationSession,
     MusicEngagementProfile,
+    MusicLibraryItem,
     MusicLessonAssignment,
+    MusicLessonPack,
+    MusicLessonPackEntry,
     MusicPerformanceAttempt,
     MusicScore,
     MusicSkillProfile,
@@ -451,6 +454,121 @@ class MusicCollaborationSessionResponse(BaseModel):
     updated_at: str | None
 
 
+LibraryContentTypeLiteral = Literal["EXERCISE", "REPERTOIRE", "THEORY", "ETUDE", "LESSON_FRAGMENT"]
+LibraryDifficultyLiteral = Literal["BEGINNER", "INTERMEDIATE", "ADVANCED"]
+
+
+class MusicLibraryItemCreateRequest(BaseModel):
+    """Create a library content item."""
+
+    content_type: LibraryContentTypeLiteral
+    title: str = Field(..., min_length=3, max_length=180)
+    description: str = Field("", max_length=6000)
+    instrument: str = Field("GENERAL", max_length=24)
+    difficulty: LibraryDifficultyLiteral = "INTERMEDIATE"
+    technique_tags: list[str] = Field(default_factory=list)
+    learning_objective: str = Field("", max_length=200)
+    source_format: Literal["NOTE_LINE", "MUSICXML", "MNX"] = "NOTE_LINE"
+    source_text: str = Field("", max_length=20000)
+    metadata: dict[str, object] = Field(default_factory=dict)
+    curated: bool = False
+
+
+class MusicLibraryItemResponse(BaseModel):
+    """Library item payload."""
+
+    item_id: UUID
+    owner_user_id: str | None
+    is_curated: bool
+    content_type: str
+    title: str
+    description: str
+    instrument: str
+    difficulty: str
+    technique_tags: list[str]
+    learning_objective: str
+    source_format: str
+    source_text: str
+    metadata: dict[str, object]
+    created_at: str | None
+
+
+class MusicLibraryListResponse(BaseModel):
+    """Filtered library query payload."""
+
+    items: list[MusicLibraryItemResponse]
+
+
+class MusicLibraryRecommendationsResponse(BaseModel):
+    """Adaptive content recommendation payload."""
+
+    focus_dimension: str
+    items: list[MusicLibraryItemResponse]
+    recommendation_reason: str
+
+
+class MusicLessonPackCreateRequest(BaseModel):
+    """Create a lesson pack from ordered library item ids."""
+
+    title: str = Field(..., min_length=3, max_length=180)
+    description: str = Field("", max_length=6000)
+    instrument: str = Field("GENERAL", max_length=24)
+    difficulty: LibraryDifficultyLiteral = "INTERMEDIATE"
+    tags: list[str] = Field(default_factory=list)
+    expected_outcomes: list[str] = Field(default_factory=list)
+    curated: bool = False
+    item_ids: list[UUID] = Field(default_factory=list)
+    item_expected_outcomes: list[str] = Field(default_factory=list)
+
+
+class MusicLessonPackEntryResponse(BaseModel):
+    """One ordered lesson pack entry."""
+
+    entry_id: UUID
+    sort_order: int
+    item: MusicLibraryItemResponse
+    expected_outcome: str
+
+
+class MusicLessonPackResponse(BaseModel):
+    """Lesson pack payload including ordered entries."""
+
+    pack_id: UUID
+    owner_user_id: str | None
+    is_curated: bool
+    title: str
+    description: str
+    instrument: str
+    difficulty: str
+    tags: list[str]
+    expected_outcomes: list[str]
+    status: str
+    entries: list[MusicLessonPackEntryResponse]
+    created_at: str | None
+
+
+class MusicLessonPackListResponse(BaseModel):
+    """Lesson pack list payload."""
+
+    packs: list[MusicLessonPackResponse]
+
+
+class MusicLessonPackLoadResponse(BaseModel):
+    """Pack load payload suitable for direct guided lesson start."""
+
+    pack: MusicLessonPackResponse
+    selected_item_id: UUID
+    score: MusicScorePrepareResponse
+    lesson: MusicLessonStepResponse
+
+
+class MusicLessonPackLoadRequest(BaseModel):
+    """Select which pack entry to load into guided lesson."""
+
+    entry_index: int = Field(1, ge=1)
+    time_signature: str = Field("4/4")
+
+
 async def _get_owned_score(db: AsyncSession, score_id: UUID, user_id: str) -> MusicScore:
     result = await db.execute(select(MusicScore).where(MusicScore.id == score_id))
     score = result.scalar_one_or_none()
@@ -741,13 +859,88 @@ def _teacher_email_allowlist() -> set[str]:
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
 
-def _require_teacher_access(current_user: dict) -> None:
+def _has_teacher_access(current_user: dict) -> bool:
     uid = str(current_user.get("uid", "")).strip()
     email = str(current_user.get("email", "")).strip().lower()
     allowed_uid = uid and uid in _teacher_uid_allowlist()
     allowed_email = email and email in _teacher_email_allowlist()
-    if not (allowed_uid or allowed_email):
+    return bool(allowed_uid or allowed_email)
+
+
+def _require_teacher_access(current_user: dict) -> None:
+    if not _has_teacher_access(current_user):
         raise HTTPException(status_code=403, detail="Teacher access required.")
+
+
+def _normalize_tag(tag: str) -> str:
+    return tag.strip().lower().replace("_", "-")
+
+
+def _library_item_visible(item: MusicLibraryItem, user_id: str) -> bool:
+    if bool(item.is_curated):
+        return True
+    return (item.owner_user_id or "") == user_id
+
+
+def _to_library_item_response(item: MusicLibraryItem) -> MusicLibraryItemResponse:
+    return MusicLibraryItemResponse(
+        item_id=item.id,
+        owner_user_id=item.owner_user_id,
+        is_curated=bool(item.is_curated),
+        content_type=item.content_type,
+        title=item.title,
+        description=item.description or "",
+        instrument=item.instrument,
+        difficulty=item.difficulty,
+        technique_tags=list(item.technique_tags or []),
+        learning_objective=item.learning_objective or "",
+        source_format=item.source_format,
+        source_text=item.source_text or "",
+        metadata=dict(item.metadata_json or {}),
+        created_at=_iso_or_none(item.created_at),
+    )
+
+
+def _pack_visible(pack: MusicLessonPack, user_id: str) -> bool:
+    if bool(pack.is_curated):
+        return True
+    return (pack.owner_user_id or "") == user_id
+
+
+def _to_pack_response(
+    pack: MusicLessonPack,
+    *,
+    entries: list[MusicLessonPackEntry],
+    item_by_id: dict[UUID, MusicLibraryItem],
+) -> MusicLessonPackResponse:
+    sorted_entries = sorted(entries, key=lambda entry: int(entry.sort_order or 0))
+    entry_payloads: list[MusicLessonPackEntryResponse] = []
+    for entry in sorted_entries:
+        item = item_by_id.get(entry.item_id)
+        if item is None:
+            continue
+        entry_payloads.append(
+            MusicLessonPackEntryResponse(
+                entry_id=entry.id,
+                sort_order=int(entry.sort_order or 0),
+                item=_to_library_item_response(item),
+                expected_outcome=entry.expected_outcome or "",
+            )
+        )
+    return MusicLessonPackResponse(
+        pack_id=pack.id,
+        owner_user_id=pack.owner_user_id,
+        is_curated=bool(pack.is_curated),
+        title=pack.title,
+        description=pack.description or "",
+        instrument=pack.instrument,
+        difficulty=pack.difficulty,
+        tags=list(pack.tags or []),
+        expected_outcomes=list(pack.expected_outcomes or []),
+        status=pack.status or "ACTIVE",
+        entries=entry_payloads,
+        created_at=_iso_or_none(pack.created_at),
+    )
 
 
 def _measure_note_range(score: MusicScore, measure_index: int) -> tuple[int, int]:
@@ -1019,6 +1212,324 @@ async def get_teacher_student_detail(
         recent_attempts=recent_attempts,
         measure_heatmap=heatmap,
         assignments=[_assignment_to_response(item) for item in assignments],
+    )
+
+
+@router.post("/library/items", response_model=MusicLibraryItemResponse)
+async def create_library_item(
+    payload: MusicLibraryItemCreateRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicLibraryItemResponse:
+    """Create one content library item (curated or user-generated)."""
+    is_teacher = _has_teacher_access(current_user)
+    if payload.curated and not is_teacher:
+        raise HTTPException(status_code=403, detail="Teacher access required for curated library items.")
+
+    tags = sorted({_normalize_tag(tag) for tag in payload.technique_tags if tag.strip()})
+    item = MusicLibraryItem(
+        owner_user_id=current_user["uid"],
+        is_curated=bool(payload.curated and is_teacher),
+        content_type=payload.content_type,
+        title=payload.title.strip(),
+        description=(payload.description or "").strip(),
+        instrument=(payload.instrument or "GENERAL").strip().upper(),
+        difficulty=payload.difficulty,
+        technique_tags=tags,
+        learning_objective=(payload.learning_objective or "").strip(),
+        source_format=payload.source_format,
+        source_text=(payload.source_text or "").strip(),
+        metadata_json=dict(payload.metadata or {}),
+    )
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return _to_library_item_response(item)
+
+
+@router.get("/library/items", response_model=MusicLibraryListResponse)
+async def list_library_items(
+    instrument: str | None = None,
+    difficulty: str | None = None,
+    technique: str | None = None,
+    content_type: str | None = None,
+    include_private: bool = True,
+    limit: int = 50,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicLibraryListResponse:
+    """List library content with filtering by instrument/difficulty/technique/type."""
+    safe_limit = max(1, min(200, int(limit)))
+    query = await db.execute(select(MusicLibraryItem))
+    items = list(query.scalars().all())
+    user_id = current_user["uid"]
+
+    instrument_filter = (instrument or "").strip().upper()
+    difficulty_filter = (difficulty or "").strip().upper()
+    type_filter = (content_type or "").strip().upper()
+    technique_filter = _normalize_tag(technique) if (technique or "").strip() else ""
+
+    filtered: list[MusicLibraryItem] = []
+    for item in items:
+        visible = _library_item_visible(item, user_id)
+        if not visible:
+            continue
+        if not include_private and not bool(item.is_curated):
+            continue
+        if instrument_filter and item.instrument.upper() != instrument_filter:
+            continue
+        if difficulty_filter and item.difficulty.upper() != difficulty_filter:
+            continue
+        if type_filter and item.content_type.upper() != type_filter:
+            continue
+        if technique_filter:
+            tags = {_normalize_tag(tag) for tag in (item.technique_tags or [])}
+            if technique_filter not in tags:
+                continue
+        filtered.append(item)
+
+    filtered.sort(
+        key=lambda row: (
+            0 if row.is_curated else 1,
+            -(row.created_at.timestamp() if row.created_at else 0),
+        )
+    )
+    return MusicLibraryListResponse(items=[_to_library_item_response(row) for row in filtered[:safe_limit]])
+
+
+@router.get("/library/recommendations/me", response_model=MusicLibraryRecommendationsResponse)
+async def recommend_library_items_for_user(
+    limit: int = 6,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicLibraryRecommendationsResponse:
+    """Recommend library items using adaptive profile metadata."""
+    safe_limit = max(1, min(20, int(limit)))
+    profile_query = await db.execute(select(MusicSkillProfile).where(MusicSkillProfile.user_id == current_user["uid"]))
+    profile = profile_query.scalar_one_or_none()
+    focus_dimension = (profile.weakest_dimension if profile is not None else "pitch") or "pitch"
+
+    dimension_tags: dict[str, set[str]] = {
+        "pitch": {"intonation", "intervals", "ear-training"},
+        "rhythm": {"rhythm", "subdivision", "timing", "groove"},
+        "tempo": {"tempo", "timing", "metronome"},
+        "dynamics": {"dynamics", "expression", "control"},
+        "articulation": {"articulation", "phrasing", "staccato", "legato"},
+    }
+    target_tags = dimension_tags.get(focus_dimension, {"timing"})
+
+    item_query = await db.execute(select(MusicLibraryItem))
+    visible_items = [
+        item
+        for item in item_query.scalars().all()
+        if _library_item_visible(item, current_user["uid"])
+    ]
+
+    tagged_matches: list[MusicLibraryItem] = []
+    fallback_matches: list[MusicLibraryItem] = []
+    for item in visible_items:
+        tags = {_normalize_tag(tag) for tag in (item.technique_tags or [])}
+        if tags.intersection(target_tags):
+            tagged_matches.append(item)
+            continue
+        objective = (item.learning_objective or "").lower()
+        if focus_dimension in objective:
+            fallback_matches.append(item)
+
+    candidates = tagged_matches or fallback_matches or visible_items
+    candidates.sort(
+        key=lambda row: (
+            0 if row.is_curated else 1,
+            0 if row.difficulty.upper() == "BEGINNER" else 1 if row.difficulty.upper() == "INTERMEDIATE" else 2,
+            -(row.created_at.timestamp() if row.created_at else 0),
+        )
+    )
+
+    return MusicLibraryRecommendationsResponse(
+        focus_dimension=focus_dimension,
+        recommendation_reason=(
+            f"Recommendations target your weakest dimension: {focus_dimension}. "
+            "Items are ranked by technique-tag alignment and content visibility."
+        ),
+        items=[_to_library_item_response(item) for item in candidates[:safe_limit]],
+    )
+
+
+@router.post("/library/packs", response_model=MusicLessonPackResponse)
+async def create_lesson_pack(
+    payload: MusicLessonPackCreateRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicLessonPackResponse:
+    """Create one ordered lesson pack from library items."""
+    is_teacher = _has_teacher_access(current_user)
+    if payload.curated and not is_teacher:
+        raise HTTPException(status_code=403, detail="Teacher access required for curated lesson packs.")
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids is required to create a lesson pack.")
+
+    item_query = await db.execute(select(MusicLibraryItem))
+    item_by_id = {item.id: item for item in item_query.scalars().all()}
+    for item_id in payload.item_ids:
+        item = item_by_id.get(item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail=f"Library item not found: {item_id}")
+        if not _library_item_visible(item, current_user["uid"]):
+            raise HTTPException(status_code=403, detail=f"Not authorised to use library item: {item_id}")
+
+    pack = MusicLessonPack(
+        owner_user_id=current_user["uid"],
+        is_curated=bool(payload.curated and is_teacher),
+        title=payload.title.strip(),
+        description=(payload.description or "").strip(),
+        instrument=(payload.instrument or "GENERAL").strip().upper(),
+        difficulty=payload.difficulty,
+        tags=sorted({_normalize_tag(tag) for tag in payload.tags if tag.strip()}),
+        expected_outcomes=[item.strip() for item in payload.expected_outcomes if item.strip()],
+        status="ACTIVE",
+    )
+    db.add(pack)
+    await db.commit()
+    await db.refresh(pack)
+
+    entries: list[MusicLessonPackEntry] = []
+    for index, item_id in enumerate(payload.item_ids):
+        expected_outcome = payload.item_expected_outcomes[index] if index < len(payload.item_expected_outcomes) else ""
+        entry = MusicLessonPackEntry(
+            pack_id=pack.id,
+            item_id=item_id,
+            sort_order=index + 1,
+            expected_outcome=(expected_outcome or "").strip(),
+        )
+        db.add(entry)
+        entries.append(entry)
+    await db.commit()
+
+    return _to_pack_response(pack, entries=entries, item_by_id=item_by_id)
+
+
+@router.get("/library/packs", response_model=MusicLessonPackListResponse)
+async def list_lesson_packs(
+    instrument: str | None = None,
+    difficulty: str | None = None,
+    tag: str | None = None,
+    include_private: bool = True,
+    limit: int = 50,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicLessonPackListResponse:
+    """List lesson packs with filtering and visibility controls."""
+    safe_limit = max(1, min(200, int(limit)))
+    pack_query = await db.execute(select(MusicLessonPack))
+    packs = list(pack_query.scalars().all())
+    entry_query = await db.execute(select(MusicLessonPackEntry))
+    entries = list(entry_query.scalars().all())
+    item_query = await db.execute(select(MusicLibraryItem))
+    item_by_id = {item.id: item for item in item_query.scalars().all()}
+
+    entries_by_pack: dict[UUID, list[MusicLessonPackEntry]] = {}
+    for entry in entries:
+        entries_by_pack.setdefault(entry.pack_id, []).append(entry)
+
+    instrument_filter = (instrument or "").strip().upper()
+    difficulty_filter = (difficulty or "").strip().upper()
+    tag_filter = _normalize_tag(tag) if (tag or "").strip() else ""
+
+    visible_packs: list[MusicLessonPack] = []
+    for pack in packs:
+        if not _pack_visible(pack, current_user["uid"]):
+            continue
+        if not include_private and not bool(pack.is_curated):
+            continue
+        if instrument_filter and pack.instrument.upper() != instrument_filter:
+            continue
+        if difficulty_filter and pack.difficulty.upper() != difficulty_filter:
+            continue
+        if tag_filter:
+            tags = {_normalize_tag(item) for item in (pack.tags or [])}
+            if tag_filter not in tags:
+                continue
+        visible_packs.append(pack)
+
+    visible_packs.sort(
+        key=lambda row: (
+            0 if row.is_curated else 1,
+            -(row.created_at.timestamp() if row.created_at else 0),
+        )
+    )
+    payload = [
+        _to_pack_response(pack, entries=entries_by_pack.get(pack.id, []), item_by_id=item_by_id)
+        for pack in visible_packs[:safe_limit]
+    ]
+    return MusicLessonPackListResponse(packs=payload)
+
+
+@router.post("/library/packs/{pack_id}/load", response_model=MusicLessonPackLoadResponse)
+async def load_lesson_pack_into_guided_flow(
+    pack_id: UUID,
+    payload: MusicLessonPackLoadRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicLessonPackLoadResponse:
+    """Load one lesson pack entry directly into guided lesson workflow."""
+    pack_query = await db.execute(select(MusicLessonPack).where(MusicLessonPack.id == pack_id))
+    pack = pack_query.scalar_one_or_none()
+    if pack is None:
+        raise HTTPException(status_code=404, detail="Lesson pack not found.")
+    if not _pack_visible(pack, current_user["uid"]):
+        raise HTTPException(status_code=403, detail="Not authorised to access this lesson pack.")
+
+    entry_query = await db.execute(select(MusicLessonPackEntry))
+    all_entries = [entry for entry in entry_query.scalars().all() if entry.pack_id == pack.id]
+    all_entries.sort(key=lambda row: int(row.sort_order or 0))
+    if not all_entries:
+        raise HTTPException(status_code=400, detail="Lesson pack has no entries.")
+    if payload.entry_index > len(all_entries):
+        raise HTTPException(status_code=400, detail="entry_index exceeds lesson pack length.")
+
+    selected_entry = all_entries[payload.entry_index - 1]
+    item_query = await db.execute(select(MusicLibraryItem))
+    item_by_id = {item.id: item for item in item_query.scalars().all()}
+    selected_item = item_by_id.get(selected_entry.item_id)
+    if selected_item is None:
+        raise HTTPException(status_code=404, detail="Selected lesson item no longer exists.")
+    if selected_item.source_format.upper() != "NOTE_LINE":
+        raise HTTPException(status_code=400, detail="Only NOTE_LINE lesson items can be loaded into guided workflow today.")
+    source_text = (selected_item.source_text or "").strip()
+    if not source_text:
+        raise HTTPException(status_code=400, detail="Selected lesson item has no source_text.")
+
+    time_signature = (
+        str((selected_item.metadata_json or {}).get("time_signature", "")).strip()
+        or payload.time_signature
+        or "4/4"
+    )
+    imported = import_simple_score(source_text, time_signature=time_signature)
+    stored_score = MusicScore(
+        user_id=current_user["uid"],
+        source_format=imported.format,
+        time_signature=time_signature,
+        note_count=imported.note_count,
+        normalized=imported.normalized,
+        summary=imported.summary,
+        warnings=list(imported.warnings),
+        measures=score_to_dict(imported)["measures"],
+    )
+    db.add(stored_score)
+    await db.commit()
+    await db.refresh(stored_score)
+
+    prepared_score = _prepare_music_score_payload(imported, stored_score, time_signature)
+    lesson_step = _build_lesson_step_from_score(
+        stored_score,
+        MusicLessonStepRequest(current_measure_index=None, lesson_stage="idle"),
+    )
+    pack_payload = _to_pack_response(pack, entries=all_entries, item_by_id=item_by_id)
+    return MusicLessonPackLoadResponse(
+        pack=pack_payload,
+        selected_item_id=selected_item.id,
+        score=prepared_score,
+        lesson=lesson_step,
     )
 
 

@@ -28,7 +28,10 @@ from app.domains.music.models import (
     MusicChallengeAttempt,
     MusicCollaborationSession,
     MusicEngagementProfile,
+    MusicLibraryItem,
     MusicLessonAssignment,
+    MusicLessonPack,
+    MusicLessonPackEntry,
     MusicPerformanceAttempt,
     MusicScore,
     MusicSkillProfile,
@@ -563,6 +566,9 @@ class FakeMusicDB:
         self.attempts = {}
         self.assignments = {}
         self.collaboration_sessions = {}
+        self.library_items = {}
+        self.lesson_packs = {}
+        self.lesson_pack_entries = {}
         self._pending = []
 
     def add(self, instance) -> None:
@@ -586,6 +592,12 @@ class FakeMusicDB:
                 self.assignments[pending.id] = pending
             elif isinstance(pending, MusicCollaborationSession):
                 self.collaboration_sessions[pending.id] = pending
+            elif isinstance(pending, MusicLibraryItem):
+                self.library_items[pending.id] = pending
+            elif isinstance(pending, MusicLessonPack):
+                self.lesson_packs[pending.id] = pending
+            elif isinstance(pending, MusicLessonPackEntry):
+                self.lesson_pack_entries[pending.id] = pending
         self._pending = []
 
     async def refresh(self, instance) -> None:
@@ -622,6 +634,18 @@ class FakeMusicDB:
             if lookup_key is None:
                 return FakeScalarResult(scalars=self.collaboration_sessions.values())
             return FakeScalarResult(self.collaboration_sessions.get(lookup_key))
+        if entity is MusicLibraryItem:
+            if lookup_key is None:
+                return FakeScalarResult(scalars=self.library_items.values())
+            return FakeScalarResult(self.library_items.get(lookup_key))
+        if entity is MusicLessonPack:
+            if lookup_key is None:
+                return FakeScalarResult(scalars=self.lesson_packs.values())
+            return FakeScalarResult(self.lesson_packs.get(lookup_key))
+        if entity is MusicLessonPackEntry:
+            if lookup_key is None:
+                return FakeScalarResult(scalars=self.lesson_pack_entries.values())
+            return FakeScalarResult(self.lesson_pack_entries.get(lookup_key))
         if lookup_key is None:
             return FakeScalarResult(scalars=self.scores.values())
         return FakeScalarResult(self.scores.get(lookup_key))
@@ -1202,6 +1226,193 @@ def test_teacher_student_detail_returns_attempts_heatmap_and_assignments(
     assert body["recent_attempts"]
     assert body["measure_heatmap"][0]["measure_index"] == 1
     assert body["assignments"][0]["title"] == "Rhythm cleanup"
+
+
+def test_library_items_endpoint_filters_by_instrument_difficulty_and_technique(
+    client: TestClient,
+) -> None:
+    create_payloads = [
+        {
+            "content_type": "EXERCISE",
+            "title": "Rhythm Subdivision Drill",
+            "instrument": "PIANO",
+            "difficulty": "BEGINNER",
+            "technique_tags": ["rhythm", "subdivision"],
+            "source_format": "NOTE_LINE",
+            "source_text": "C4/q D4/q",
+        },
+        {
+            "content_type": "EXERCISE",
+            "title": "Pitch Ladder",
+            "instrument": "PIANO",
+            "difficulty": "INTERMEDIATE",
+            "technique_tags": ["intonation"],
+            "source_format": "NOTE_LINE",
+            "source_text": "C4/q E4/q",
+        },
+        {
+            "content_type": "THEORY",
+            "title": "Guitar Chord Shapes",
+            "instrument": "GUITAR",
+            "difficulty": "BEGINNER",
+            "technique_tags": ["harmony"],
+            "source_format": "NOTE_LINE",
+            "source_text": "G3/h",
+        },
+    ]
+    for payload in create_payloads:
+        created = client.post(
+            "/api/music/library/items",
+            headers={"Authorization": "Bearer test-token"},
+            json=payload,
+        )
+        assert created.status_code == 200
+
+    filtered = client.get(
+        "/api/music/library/items",
+        headers={"Authorization": "Bearer test-token"},
+        params={
+            "instrument": "PIANO",
+            "difficulty": "BEGINNER",
+            "technique": "rhythm",
+        },
+    )
+
+    assert filtered.status_code == 200
+    body = filtered.json()
+    assert len(body["items"]) == 1
+    assert body["items"][0]["title"] == "Rhythm Subdivision Drill"
+    assert body["items"][0]["instrument"] == "PIANO"
+    assert body["items"][0]["difficulty"] == "BEGINNER"
+
+
+def test_lesson_pack_load_endpoint_prepares_score_and_guided_lesson(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    first_item = client.post(
+        "/api/music/library/items",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "content_type": "EXERCISE",
+            "title": "Warmup Pattern",
+            "instrument": "PIANO",
+            "difficulty": "BEGINNER",
+            "technique_tags": ["rhythm"],
+            "source_format": "NOTE_LINE",
+            "source_text": "C4/q D4/q",
+        },
+    )
+    second_item = client.post(
+        "/api/music/library/items",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "content_type": "REPERTOIRE",
+            "title": "Mini Phrase",
+            "instrument": "PIANO",
+            "difficulty": "BEGINNER",
+            "technique_tags": ["phrasing"],
+            "source_format": "NOTE_LINE",
+            "source_text": "E4/q F4/q G4/h",
+        },
+    )
+    assert first_item.status_code == 200
+    assert second_item.status_code == 200
+
+    pack = client.post(
+        "/api/music/library/packs",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "title": "Starter Lesson Pack",
+            "instrument": "PIANO",
+            "difficulty": "BEGINNER",
+            "item_ids": [
+                first_item.json()["item_id"],
+                second_item.json()["item_id"],
+            ],
+            "item_expected_outcomes": [
+                "Steady quarter note pulse.",
+                "Shape a simple three-note phrase.",
+            ],
+        },
+    )
+    assert pack.status_code == 200
+    pack_body = pack.json()
+    assert len(pack_body["entries"]) == 2
+
+    loaded = client.post(
+        f"/api/music/library/packs/{pack_body['pack_id']}/load",
+        headers={"Authorization": "Bearer test-token"},
+        json={"entry_index": 2, "time_signature": "4/4"},
+    )
+
+    assert loaded.status_code == 200
+    body = loaded.json()
+    assert body["selected_item_id"] == second_item.json()["item_id"]
+    assert body["score"]["normalized"] == "E4/q F4/q G4/h"
+    assert body["lesson"]["measure_index"] == 1
+    assert body["lesson"]["lesson_complete"] is False
+
+    score_id = uuid.UUID(body["score"]["score_id"])
+    assert score_id in fake_music_db.scores
+    assert fake_music_db.scores[score_id].user_id == "music-user"
+
+
+def test_library_recommendations_follow_weakest_dimension_tags(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    fake_music_db.profiles["music-user"] = MusicSkillProfile(
+        user_id="music-user",
+        sample_count=5,
+        weakest_dimension="rhythm",
+        consistency_score=0.51,
+        practice_frequency=0.44,
+        last_improvement_trend=0.02,
+        overall_score=0.58,
+    )
+    rhythm_item = client.post(
+        "/api/music/library/items",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "content_type": "EXERCISE",
+            "title": "Rhythm Focus Drill",
+            "instrument": "PIANO",
+            "difficulty": "BEGINNER",
+            "technique_tags": ["rhythm", "timing"],
+            "source_format": "NOTE_LINE",
+            "source_text": "C4/q C4/q C4/q C4/q",
+            "metadata": {"time_signature": "4/4"},
+        },
+    )
+    pitch_item = client.post(
+        "/api/music/library/items",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "content_type": "EXERCISE",
+            "title": "Pitch Focus Drill",
+            "instrument": "PIANO",
+            "difficulty": "BEGINNER",
+            "technique_tags": ["intonation"],
+            "source_format": "NOTE_LINE",
+            "source_text": "C4/q E4/q G4/q",
+        },
+    )
+    assert rhythm_item.status_code == 200
+    assert pitch_item.status_code == 200
+
+    recommended = client.get(
+        "/api/music/library/recommendations/me",
+        headers={"Authorization": "Bearer test-token"},
+        params={"limit": 3},
+    )
+
+    assert recommended.status_code == 200
+    body = recommended.json()
+    assert body["focus_dimension"] == "rhythm"
+    assert body["items"]
+    assert body["items"][0]["item_id"] == rhythm_item.json()["item_id"]
+    assert "weakest dimension: rhythm" in body["recommendation_reason"]
 
 
 def test_engagement_call_response_challenge_updates_streak_and_milestones(

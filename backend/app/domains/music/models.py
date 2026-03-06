@@ -156,3 +156,63 @@ class MusicCollaborationSession(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class MusicLibraryItem(Base):
+    """Canonical reusable content item (exercise, repertoire, theory, etc.)."""
+
+    __tablename__ = "music_library_items"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_user_id: Optional[str] = Column(String, nullable=True, index=True)
+    is_curated: bool = Column(Boolean, nullable=False, default=False, server_default="false", index=True)
+
+    content_type: str = Column(String(24), nullable=False, index=True)
+    title: str = Column(String(180), nullable=False)
+    description: str = Column(Text, nullable=False, default="", server_default="")
+    instrument: str = Column(String(24), nullable=False, default="GENERAL", server_default="GENERAL", index=True)
+    difficulty: str = Column(String(24), nullable=False, default="INTERMEDIATE", server_default="INTERMEDIATE", index=True)
+    technique_tags: list[str] | None = Column(JSONB, nullable=True)
+    learning_objective: str = Column(String(200), nullable=False, default="", server_default="")
+
+    source_format: str = Column(String(32), nullable=False, default="NOTE_LINE", server_default="NOTE_LINE")
+    source_text: str = Column(Text, nullable=False, default="", server_default="")
+    metadata_json: dict | None = Column("metadata", JSONB, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class MusicLessonPack(Base):
+    """Ordered set of library items that can be loaded into guided workflow."""
+
+    __tablename__ = "music_lesson_packs"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_user_id: Optional[str] = Column(String, nullable=True, index=True)
+    is_curated: bool = Column(Boolean, nullable=False, default=False, server_default="false", index=True)
+
+    title: str = Column(String(180), nullable=False)
+    description: str = Column(Text, nullable=False, default="", server_default="")
+    instrument: str = Column(String(24), nullable=False, default="GENERAL", server_default="GENERAL", index=True)
+    difficulty: str = Column(String(24), nullable=False, default="INTERMEDIATE", server_default="INTERMEDIATE", index=True)
+    tags: list[str] | None = Column(JSONB, nullable=True)
+    expected_outcomes: list[str] | None = Column(JSONB, nullable=True)
+    status: str = Column(String(24), nullable=False, default="ACTIVE", server_default="ACTIVE", index=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class MusicLessonPackEntry(Base):
+    """One ordered item inside a lesson pack."""
+
+    __tablename__ = "music_lesson_pack_entries"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pack_id: uuid.UUID = Column(UUID(as_uuid=True), nullable=False, index=True)
+    item_id: uuid.UUID = Column(UUID(as_uuid=True), nullable=False, index=True)
+    sort_order: int = Column(Integer, nullable=False, default=1, server_default="1")
+    expected_outcome: str = Column(Text, nullable=False, default="", server_default="")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

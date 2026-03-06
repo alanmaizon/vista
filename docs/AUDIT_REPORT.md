@@ -37,7 +37,16 @@ There is also a practical local development issue worth calling out:
 - If `CLOUDSQL_INSTANCE_CONNECTION_NAME` is set in `backend/.env` during local runs and no Cloud SQL Unix socket is mounted, backend startup fails with `FileNotFoundError` during database initialization.
 - For local development, prefer:
   - `DB_HOST` / `DB_PORT` with local Postgres or Cloud SQL Proxy over TCP
-  - and leave `CLOUDSQL_INSTANCE_CONNECTION_NAME` blank unless you are in Cloud Run or explicitly mounting `/cloudsql/...`
+- and leave `CLOUDSQL_INSTANCE_CONNECTION_NAME` blank unless you are in Cloud Run or explicitly mounting `/cloudsql/...`
+
+## March 6, 2026 Addendum
+
+Phase 5 content ecosystem coverage has now been added in backend API and tests:
+
+- Library item ingestion (`/api/music/library/items`) supports structured metadata for recommendation usage.
+- Library filtering (`instrument`, `difficulty`, `technique`, `content_type`) is now verified by tests.
+- Guided lesson packs (`/api/music/library/packs`) can be loaded directly into guided flow (`/load` endpoint).
+- Ingestion and curation workflow is documented in `docs/CONTENT_INGESTION_AND_CURATION.md`.
 
 ---
 

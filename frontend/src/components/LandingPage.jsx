@@ -188,7 +188,9 @@ export default function LandingPage({
           <AudioReactiveOrb
             active={false}
             audioSource="microphone"
-            intensity={0.95}
+            deferMount
+            intensity={0.78}
+            performanceMode="lite"
             size="hero"
             theme="nebula"
             className="hero-orb"

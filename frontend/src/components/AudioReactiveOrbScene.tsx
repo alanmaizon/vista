@@ -19,6 +19,7 @@ export interface AudioReactiveOrbProps {
   theme?: OrbTheme;
   size?: OrbSize;
   performanceMode?: OrbPerformanceMode;
+  pauseWhenOffscreen?: boolean;
   className?: string;
 }
 
@@ -68,6 +69,7 @@ export default function AudioReactiveOrb({
   theme = "nebula",
   size = "hero",
   performanceMode = "adaptive",
+  pauseWhenOffscreen = true,
   className,
 }: AudioReactiveOrbProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -76,8 +78,9 @@ export default function AudioReactiveOrb({
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const uniformsRef = useRef<OrbUniforms | null>(null);
   const analyzerRef = useRef<AudioAnalyzer | null>(null);
-  const pointerTargetRef = useRef(new THREE.Vector2(0.5, 0.5));
   const pointerCurrentRef = useRef(new THREE.Vector2(0.5, 0.5));
+  const pointerTargetRef = useRef(new THREE.Vector2(0.5, 0.5));
+  const isVisibleRef = useRef(true);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -157,35 +160,51 @@ export default function AudioReactiveOrb({
     resizeObserver.observe(host);
     resizeRenderer();
 
-    // Map pointer motion into the orb's local bounds so parallax still feels natural
-    // when the orb is used in different layouts.
-    const onPointerMove = (event: PointerEvent) => {
-      const bounds = host.getBoundingClientRect();
-      const normalizedX = bounds.width ? (event.clientX - bounds.left) / bounds.width : 0.5;
-      const normalizedY = bounds.height ? (event.clientY - bounds.top) / bounds.height : 0.5;
-      pointerTargetRef.current.set(clamp01(normalizedX), 1 - clamp01(normalizedY));
-    };
-    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    let intersectionObserver: IntersectionObserver | null = null;
+    if (pauseWhenOffscreen && "IntersectionObserver" in window) {
+      intersectionObserver = new IntersectionObserver(
+        ([entry]) => {
+          isVisibleRef.current = Boolean(entry?.isIntersecting);
+        },
+        {
+          threshold: 0.02,
+        },
+      );
+      intersectionObserver.observe(host);
+    }
 
-    const clock = new THREE.Clock();
+    const timer = new THREE.Timer();
+    timer.connect(document);
+    timer.reset();
     let frameId = 0;
     let lastRenderAt = 0;
 
-    const renderFrame = () => {
+    const renderFrame = (timestamp: number) => {
       frameId = window.requestAnimationFrame(renderFrame);
+      if ((pauseWhenOffscreen && !isVisibleRef.current) || document.hidden) {
+        return;
+      }
       const now = performance.now();
       if (now - lastRenderAt < targetFrameMs) {
         return;
       }
       lastRenderAt = now;
-      const elapsed = clock.getElapsedTime();
+      timer.update(timestamp);
+      const elapsed = timer.getElapsed();
       const uniformsCurrent = uniformsRef.current;
       if (!uniformsCurrent) {
         return;
       }
 
       const bands = analyzer.sample(elapsed);
-      pointerCurrentRef.current.lerp(pointerTargetRef.current, 0.06);
+      const driftX = 0.5 + Math.sin(elapsed * 0.22) * 0.16;
+      const driftY = 0.5 + Math.cos(elapsed * 0.18) * 0.12;
+      const energyPull = (bands.low - bands.high) * 0.04;
+      pointerTargetRef.current.set(clamp01(driftX + energyPull), clamp01(driftY - energyPull * 0.6));
+      pointerCurrentRef.current.lerp(
+        pointerTargetRef.current,
+        0.08,
+      );
 
       uniformsCurrent.uTime.value = elapsed;
       uniformsCurrent.uAudioLow.value = Math.min(1.25, bands.low * intensity + bands.beat * 0.16);
@@ -197,12 +216,13 @@ export default function AudioReactiveOrb({
       renderer.render(scene, camera);
     };
 
-    renderFrame();
+    frameId = window.requestAnimationFrame(renderFrame);
 
     return () => {
       window.cancelAnimationFrame(frameId);
-      window.removeEventListener("pointermove", onPointerMove);
+      intersectionObserver?.disconnect();
       resizeObserver.disconnect();
+      timer.dispose();
       analyzer.dispose();
       scene.remove(mesh);
       geometry.dispose();
@@ -215,7 +235,7 @@ export default function AudioReactiveOrb({
       cameraRef.current = null;
       analyzerRef.current = null;
     };
-  }, [performanceMode]);
+  }, [pauseWhenOffscreen, performanceMode]);
 
   useEffect(() => {
     const uniforms = uniformsRef.current;

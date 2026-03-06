@@ -1,7 +1,11 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import type { AudioReactiveOrbProps } from "./AudioReactiveOrbScene";
 
 const AudioReactiveOrbScene = lazy(() => import("./AudioReactiveOrbScene"));
+
+type AudioReactiveOrbWrapperProps = AudioReactiveOrbProps & {
+  deferMount?: boolean;
+};
 
 const sizeClassMap = {
   hero: "h-[min(76vw,46rem)] w-[min(76vw,46rem)]",
@@ -35,7 +39,59 @@ function AudioReactiveOrbFallback({
 
 export type { AudioReactiveOrbProps } from "./AudioReactiveOrbScene";
 
-export default function AudioReactiveOrb(props: AudioReactiveOrbProps) {
+export default function AudioReactiveOrb({
+  deferMount = false,
+  ...props
+}: AudioReactiveOrbWrapperProps) {
+  const [shouldMount, setShouldMount] = useState(!deferMount);
+
+  useEffect(() => {
+    if (!deferMount) {
+      setShouldMount(true);
+      return undefined;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    const idleWindow = window as Window & typeof globalThis & {
+      requestIdleCallback?: (
+        callback: IdleRequestCallback,
+        options?: IdleRequestOptions,
+      ) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const idleCallback =
+      typeof idleWindow.requestIdleCallback === "function"
+        ? idleWindow.requestIdleCallback(() => {
+            if (!cancelled) {
+              setShouldMount(true);
+            }
+          }, { timeout: 1200 })
+        : null;
+
+    if (idleCallback == null) {
+      timeoutId = window.setTimeout(() => {
+        if (!cancelled) {
+          setShouldMount(true);
+        }
+      }, 320);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleCallback != null && typeof idleWindow.cancelIdleCallback === "function") {
+        idleWindow.cancelIdleCallback(idleCallback);
+      }
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [deferMount]);
+
+  if (!shouldMount) {
+    return <AudioReactiveOrbFallback size={props.size} className={props.className} />;
+  }
+
   return (
     <Suspense fallback={<AudioReactiveOrbFallback size={props.size} className={props.className} />}>
       <AudioReactiveOrbScene {...props} />

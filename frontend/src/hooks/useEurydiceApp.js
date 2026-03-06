@@ -42,6 +42,13 @@ function initialLessonState() {
   };
 }
 
+function generateToolCallId() {
+  if (window?.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  return `tool-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export default function useEurydiceApp() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -80,6 +87,8 @@ export default function useEurydiceApp() {
   const runLessonActionRef = useRef(null);
   const stopLiveSessionRef = useRef(() => {});
   const liveMessageHandlerRef = useRef(async () => {});
+  const pendingToolCallsRef = useRef(new Map());
+  const isConnectedRef = useRef(false);
 
   const appendCaption = useCallback((role, text) => {
     if (!text) {
@@ -110,11 +119,21 @@ export default function useEurydiceApp() {
     }
   }, []);
 
+  const rejectPendingToolCalls = useCallback((reason) => {
+    const pending = pendingToolCallsRef.current;
+    for (const [callId, entry] of pending.entries()) {
+      window.clearTimeout(entry.timeoutId);
+      entry.reject(new Error(reason || `Tool call timed out (${callId}).`));
+    }
+    pending.clear();
+  }, []);
+
   const { connect, disconnect, send, isConnected } = useLiveConnection({
     onMessage: (data) => {
       void liveMessageHandlerRef.current(data);
     },
     onClose: () => {
+      rejectPendingToolCalls("Live session closed before tool response.");
       stopCameraCapture();
       setLiveMode(null);
       setSessionId(null);
@@ -122,9 +141,14 @@ export default function useEurydiceApp() {
       setStatus("Live session closed.");
     },
     onError: () => {
+      rejectPendingToolCalls("Live connection error before tool response.");
       setStatus("Live connection error.");
     },
   });
+
+  useEffect(() => {
+    isConnectedRef.current = isConnected;
+  }, [isConnected]);
 
   const applyPreparedScorePayload = useCallback(
     (payload) => {
@@ -306,6 +330,10 @@ export default function useEurydiceApp() {
     stopCameraCapture();
   }, [stopCameraCapture]);
 
+  useEffect(() => () => {
+    rejectPendingToolCalls("Session context disposed before tool response.");
+  }, [rejectPendingToolCalls]);
+
   const handleSignIn = useCallback(async () => {
     setErrorMessage("");
     try {
@@ -326,6 +354,65 @@ export default function useEurydiceApp() {
       return false;
     }
   }, [email, password]);
+
+  const ensureGuidedLessonSession = useCallback(async () => {
+    if (!user) {
+      throw new Error("Sign in before starting the guided lesson.");
+    }
+    if (liveMode === "READ_SCORE" && isConnectedRef.current) {
+      throw new Error("Stop camera reader before running guided lesson tools.");
+    }
+    if (!isConnectedRef.current || liveMode !== "GUIDED_LESSON" || !sessionId) {
+      setStatus("Creating guided lesson session...");
+      const session = await apiRequest("/api/sessions", {
+        method: "POST",
+        body: {
+          domain: "MUSIC",
+          mode: "GUIDED_LESSON",
+          goal: "Guide one prepared bar at a time and compare each take deterministically.",
+        },
+      });
+      setSessionId(session.id);
+      setLiveMode("GUIDED_LESSON");
+      connect({
+        sessionId: session.id,
+        mode: "GUIDED_LESSON",
+      });
+      setStatus("Opening guided lesson session...");
+    }
+
+    const start = Date.now();
+    while (!isConnectedRef.current) {
+      if (Date.now() - start > 6000) {
+        throw new Error("Timed out waiting for guided lesson live connection.");
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+    }
+  }, [connect, liveMode, sessionId, user]);
+
+  const invokeLiveTool = useCallback(
+    async (name, args, { sendToModel = false } = {}) => {
+      await ensureGuidedLessonSession();
+      const callId = generateToolCallId();
+      const payload = await new Promise((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => {
+          pendingToolCallsRef.current.delete(callId);
+          reject(new Error(`Tool call timed out: ${name}`));
+        }, 20000);
+        pendingToolCallsRef.current.set(callId, { resolve, reject, timeoutId, name });
+        send({
+          type: "client.tool",
+          call_id: callId,
+          name,
+          args,
+          send_to_model: Boolean(sendToModel),
+        });
+      });
+      return payload;
+    },
+    [ensureGuidedLessonSession, send],
+  );
 
   const runLessonAction = useCallback(
     async ({ sourceTextOverride = null, forcedPrepare = false } = {}) => {
@@ -376,10 +463,7 @@ export default function useEurydiceApp() {
         };
       }
 
-      const payload = await apiRequest("/api/music/lesson-action", {
-        method: "POST",
-        body,
-      });
+      const payload = await invokeLiveTool("lesson_action", body);
 
       if (payload?.score) {
         applyPreparedScorePayload(payload.score);
@@ -409,6 +493,7 @@ export default function useEurydiceApp() {
       lessonState.stage,
       micEnabled,
       instrumentProfile,
+      invokeLiveTool,
       scoreLine,
       user,
     ],
@@ -451,6 +536,13 @@ export default function useEurydiceApp() {
     if (!cameraEnabled) {
       throw new Error("Turn the camera on before reading a score.");
     }
+    if (isConnected) {
+      rejectPendingToolCalls("Live mode changed before tool response.");
+      disconnect();
+      setLiveMode(null);
+      setSessionId(null);
+      stopCameraCapture();
+    }
     setStatus("Creating live score reader...");
     const session = await apiRequest("/api/sessions", {
       method: "POST",
@@ -469,9 +561,19 @@ export default function useEurydiceApp() {
     });
     setStatus("Opening live score reader...");
     appendCaption("Setup", "Keep one short bar centered and steady until Eurydice captures a NOTE_LINE.");
-  }, [appendCaption, cameraEnabled, connect, user]);
+  }, [
+    appendCaption,
+    cameraEnabled,
+    connect,
+    disconnect,
+    isConnected,
+    rejectPendingToolCalls,
+    stopCameraCapture,
+    user,
+  ]);
 
   const stopLiveSession = useCallback(() => {
+    rejectPendingToolCalls("Live session stopped before tool response.");
     if (isConnected) {
       send({ type: "client.stop" });
     }
@@ -481,7 +583,7 @@ export default function useEurydiceApp() {
     setCameraCapturePending(false);
     stopCameraCapture();
     setStatus("Live session stopped.");
-  }, [disconnect, isConnected, send, stopCameraCapture]);
+  }, [disconnect, isConnected, rejectPendingToolCalls, send, stopCameraCapture]);
 
   useEffect(() => {
     runLessonActionRef.current = runLessonAction;
@@ -494,6 +596,26 @@ export default function useEurydiceApp() {
   const handleLiveMessage = useCallback(
     async (data) => {
       switch (data.type) {
+        case "server.tool_result": {
+          const callId = typeof data.call_id === "string" ? data.call_id : "";
+          if (callId && pendingToolCallsRef.current.has(callId)) {
+            const pending = pendingToolCallsRef.current.get(callId);
+            pendingToolCallsRef.current.delete(callId);
+            window.clearTimeout(pending.timeoutId);
+            if (data.ok) {
+              pending.resolve(data.result ?? {});
+            } else {
+              pending.reject(new Error(data.error || `Tool call failed: ${pending.name}`));
+            }
+            break;
+          }
+          if (!data.ok) {
+            appendCaption("Tool", `${data.name || "tool"} failed: ${data.error || "Unknown error"}`);
+            break;
+          }
+          appendCaption("Tool", `${data.name || "tool"} completed.`);
+          break;
+        }
         case "server.text":
           if (liveMode === "READ_SCORE") {
             break;

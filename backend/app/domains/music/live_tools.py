@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .api import (
@@ -44,6 +44,24 @@ class LiveMusicToolError(Exception):
         self.status_code = status_code
 
 
+class _LessonActionToolArgs(MusicLessonActionRequest):
+    model_config = ConfigDict(extra="forbid")
+
+
+class _LessonStepToolArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    score_id: UUID
+    current_measure_index: int | None = None
+    lesson_stage: str = "idle"
+
+
+class _RenderScoreToolArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    score_id: UUID
+
+
 def music_live_tool_prompt_fragment() -> str:
     """Prompt fragment instructing Gemini how to request deterministic tools."""
     return (
@@ -52,15 +70,6 @@ def music_live_tool_prompt_fragment() -> str:
         "Supported tool names: lesson_action, lesson_step, render_score.\n"
         "Do not include extra prose in a TOOL_CALL line."
     )
-
-
-def _parse_uuid(value: Any, field_name: str) -> UUID:
-    if not isinstance(value, str) or not value.strip():
-        raise LiveMusicToolError(f"{field_name} is required.")
-    try:
-        return UUID(value.strip())
-    except ValueError as exc:
-        raise LiveMusicToolError(f"{field_name} must be a valid UUID.") from exc
 
 
 def _normalize_tool_name(name: Any) -> str:
@@ -83,20 +92,20 @@ async def run_live_music_tool(
 
     try:
         if normalized_name == "lesson_action":
-            request = MusicLessonActionRequest.model_validate(payload)
+            request = _LessonActionToolArgs.model_validate(payload)
             result = await run_guided_lesson_action(request, current_user=current_user, db=db)
             return result.model_dump(mode="json")
 
         if normalized_name == "lesson_step":
-            score_id = _parse_uuid(payload.get("score_id"), "score_id")
+            request = _LessonStepToolArgs.model_validate(payload)
             request = MusicLessonStepRequest.model_validate(
                 {
-                    "current_measure_index": payload.get("current_measure_index"),
-                    "lesson_stage": payload.get("lesson_stage", "idle"),
+                    "current_measure_index": request.current_measure_index,
+                    "lesson_stage": request.lesson_stage,
                 }
             )
             result = await next_guided_lesson_step(
-                score_id,
+                request.score_id,
                 request,
                 current_user=current_user,
                 db=db,
@@ -104,9 +113,9 @@ async def run_live_music_tool(
             return result.model_dump(mode="json")
 
         if normalized_name == "render_score":
-            score_id = _parse_uuid(payload.get("score_id"), "score_id")
+            request = _RenderScoreToolArgs.model_validate(payload)
             result = await render_stored_music_score(
-                score_id,
+                request.score_id,
                 current_user=current_user,
                 db=db,
             )
@@ -118,4 +127,3 @@ async def run_live_music_tool(
 
     available = ", ".join(spec["name"] for spec in LIVE_MUSIC_TOOL_SPECS)
     raise LiveMusicToolError(f"Unsupported tool '{normalized_name}'. Supported tools: {available}.")
-

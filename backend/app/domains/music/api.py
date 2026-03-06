@@ -32,6 +32,7 @@ from .models import (
     MusicLessonAssignment,
     MusicLessonPack,
     MusicLessonPackEntry,
+    MusicLiveToolCall,
     MusicPerformanceAttempt,
     MusicScore,
     MusicSkillProfile,
@@ -257,6 +258,29 @@ class MusicRuntimeStatusResponse(BaseModel):
     verovio_detail: str
     crepe_available: bool
     crepe_detail: str
+
+
+class MusicLiveToolMetric(BaseModel):
+    """Aggregated metric row for one live tool + source."""
+
+    tool_name: str
+    source: str
+    total_calls: int
+    successes: int
+    failures: int
+    success_rate: float
+    avg_latency_ms: float
+    last_called_at: str | None
+
+
+class MusicLiveToolMetricsResponse(BaseModel):
+    """User-scoped live tool reliability summary."""
+
+    total_calls: int
+    total_successes: int
+    total_failures: int
+    overall_success_rate: float
+    metrics: list[MusicLiveToolMetric]
 
 
 class MusicProgressSnapshotResponse(BaseModel):
@@ -1082,6 +1106,89 @@ async def music_runtime_status(
         verovio_detail=detail,
         crepe_available=crepe_available,
         crepe_detail=crepe_detail,
+    )
+
+
+@router.get("/analytics/live-tools", response_model=MusicLiveToolMetricsResponse)
+async def live_tool_metrics(
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicLiveToolMetricsResponse:
+    """Return user-scoped success/failure telemetry for deterministic live tools."""
+    result = await db.execute(
+        select(MusicLiveToolCall)
+        .where(MusicLiveToolCall.user_id == current_user["uid"])
+        .order_by(MusicLiveToolCall.created_at.desc())
+        .limit(1000)
+    )
+    rows = list(result.scalars().all())
+    if not rows:
+        return MusicLiveToolMetricsResponse(
+            total_calls=0,
+            total_successes=0,
+            total_failures=0,
+            overall_success_rate=0.0,
+            metrics=[],
+        )
+
+    grouped: dict[tuple[str, str], dict[str, object]] = {}
+    for row in rows:
+        key = ((row.tool_name or "unknown").lower(), (row.source or "client").lower())
+        bucket = grouped.setdefault(
+            key,
+            {
+                "tool_name": key[0],
+                "source": key[1],
+                "total_calls": 0,
+                "successes": 0,
+                "failures": 0,
+                "latency_sum": 0,
+                "latency_count": 0,
+                "last_called_at": None,
+            },
+        )
+        bucket["total_calls"] = int(bucket["total_calls"]) + 1
+        if (row.status or "").upper() == "SUCCESS":
+            bucket["successes"] = int(bucket["successes"]) + 1
+        else:
+            bucket["failures"] = int(bucket["failures"]) + 1
+        if row.latency_ms is not None:
+            bucket["latency_sum"] = int(bucket["latency_sum"]) + int(row.latency_ms)
+            bucket["latency_count"] = int(bucket["latency_count"]) + 1
+        if bucket["last_called_at"] is None:
+            bucket["last_called_at"] = _iso_or_none(row.created_at)
+
+    metrics = [
+        MusicLiveToolMetric(
+            tool_name=str(bucket["tool_name"]),
+            source=str(bucket["source"]),
+            total_calls=int(bucket["total_calls"]),
+            successes=int(bucket["successes"]),
+            failures=int(bucket["failures"]),
+            success_rate=round(
+                int(bucket["successes"]) / max(1, int(bucket["total_calls"])),
+                3,
+            ),
+            avg_latency_ms=round(
+                int(bucket["latency_sum"]) / max(1, int(bucket["latency_count"])),
+                1,
+            ),
+            last_called_at=bucket["last_called_at"],
+        )
+        for bucket in grouped.values()
+    ]
+    metrics.sort(key=lambda item: (-item.total_calls, item.tool_name, item.source))
+
+    total_calls = len(rows)
+    total_successes = sum(1 for row in rows if (row.status or "").upper() == "SUCCESS")
+    total_failures = total_calls - total_successes
+
+    return MusicLiveToolMetricsResponse(
+        total_calls=total_calls,
+        total_successes=total_successes,
+        total_failures=total_failures,
+        overall_success_rate=round(total_successes / max(1, total_calls), 3),
+        metrics=metrics,
     )
 
 

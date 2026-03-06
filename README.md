@@ -56,6 +56,7 @@ See the [Local Setup Guide](docs/LOCAL_SETUP.md) for detailed instructions on ru
 - Deterministic lesson actions remain the source of truth for pacing and progression
 - MCP-style live tool routing (`client.tool` + `server.tool_result`) for deterministic lesson/score actions
 - Optional model-triggered `TOOL_CALL` handling with backend execution and `TOOL_RESULT` feedback
+- Tool reliability telemetry (`/api/music/analytics/live-tools`) with per-tool success/failure rates
 
 ## Repository Structure
 

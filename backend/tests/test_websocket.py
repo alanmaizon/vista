@@ -82,6 +82,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(main_module, "_load_owned_session", fake_load_owned_session)
     monkeypatch.setattr(main_module, "_update_session_start_metadata", fake_noop)
     monkeypatch.setattr(main_module, "_persist_session_completion", fake_noop)
+    monkeypatch.setattr(main_module, "_record_live_tool_call", fake_noop)
 
     with TestClient(main_module.app) as test_client:
         yield test_client

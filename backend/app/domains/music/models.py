@@ -183,6 +183,24 @@ class MusicLibraryItem(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class MusicLiveToolCall(Base):
+    """Telemetry row for deterministic live-tool execution."""
+
+    __tablename__ = "music_live_tool_calls"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: str = Column(String, nullable=False, index=True)
+    session_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), nullable=True, index=True)
+
+    tool_name: str = Column(String(64), nullable=False, index=True)
+    source: str = Column(String(16), nullable=False, default="client", server_default="client", index=True)
+    status: str = Column(String(16), nullable=False, default="SUCCESS", server_default="SUCCESS", index=True)
+    latency_ms: Optional[int] = Column(Integer, nullable=True)
+    error_message: Optional[str] = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class MusicLessonPack(Base):
     """Ordered set of library items that can be loaded into guided workflow."""
 

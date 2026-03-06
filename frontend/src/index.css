@@ -74,6 +74,30 @@
   }
 }
 
+@keyframes eurydice-signal-rise {
+  0%,
+  100% {
+    transform: scaleY(0.22);
+    opacity: 0.32;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes eurydice-status-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    box-shadow: 0 0 0 0 rgb(56 189 248 / 0.18);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 8px rgb(56 189 248 / 0);
+  }
+}
+
 @layer components {
   .landing-hero-gradient {
     background:
@@ -190,6 +214,46 @@
   .landing-cta:hover::after {
     opacity: 1;
   }
+
+  .signal-bars {
+    display: grid;
+    grid-template-columns: repeat(18, minmax(0, 1fr));
+    gap: 0.35rem;
+    width: 100%;
+    min-height: 7rem;
+    align-items: end;
+  }
+
+  .signal-bar {
+    display: block;
+    height: var(--signal-height, 52%);
+    border-radius: 9999px;
+    transform-origin: bottom center;
+    background: linear-gradient(180deg, rgb(56 189 248 / 0.92), rgb(125 211 252 / 0.18));
+  }
+
+  .signal-bar-active {
+    animation: eurydice-signal-rise 1.7s ease-in-out infinite;
+    animation-delay: var(--signal-delay, 0ms);
+  }
+
+  .signal-bar-idle {
+    opacity: 0.26;
+    transform: scaleY(0.26);
+  }
+
+  .status-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 9999px;
+    background: rgb(148 163 184 / 0.8);
+    flex: none;
+  }
+
+  .status-dot-live {
+    background: rgb(56 189 248 / 0.95);
+    animation: eurydice-status-pulse 1.8s ease-in-out infinite;
+  }
 }
 
 @media (width <= 768px) {
@@ -206,6 +270,11 @@
     .parallax-section {
       background-attachment: scroll;
     }
+
+    .signal-bars {
+      min-height: 5.5rem;
+      gap: 0.25rem;
+    }
   }
 }
 
@@ -221,7 +290,9 @@
     }
 
     .hero-orb,
-    .workspace-orb-shell {
+    .workspace-orb-shell,
+    .signal-bar-active,
+    .status-dot-live {
       animation: none !important;
     }
   }

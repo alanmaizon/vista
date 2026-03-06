@@ -156,6 +156,12 @@ export default function App() {
       }}
       scoreWorkspaceProps={{
         activeScore,
+        status,
+        isConnected,
+        isBusy,
+        micEnabled,
+        cameraEnabled,
+        sessionId,
         activeNoteRange,
         comparisonStateByIndex,
         scoreLine,

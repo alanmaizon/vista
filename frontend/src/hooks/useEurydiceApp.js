@@ -90,7 +90,7 @@ export default function useEurydiceApp() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [tempoOverride, setTempoOverride] = useState("");
   const [playbackAudioElement, setPlaybackAudioElement] = useState(null);
-  const [orbLowPower, setOrbLowPower] = useState(false);
+  const [orbLowPower, setOrbLowPower] = useState(true);
 
   const videoRef = useRef(null);
   const cameraStreamRef = useRef(null);

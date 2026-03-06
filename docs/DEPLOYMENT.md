@@ -54,6 +54,7 @@
   - Optional private asset source for landing-page feature art
   - Point it at a GCS folder such as `gs://eurydice-private-assets/features`
   - Cloud Build syncs that folder into `frontend/public/features` before the Docker build
+  - You can update the bucket explicitly with `bash infra/sync_feature_assets.sh`
 - `ALLOW_UNAUTHENTICATED`
   - Defaults to `false`
   - If set to `true`, the deploy script passes `--allow-unauthenticated`
@@ -73,6 +74,9 @@
   - Firebase Admin access if you rely on ADC instead of `FIREBASE_SERVICE_ACCOUNT_JSON`
   - `roles/storage.objectViewer` on the private asset bucket if you use `FRONTEND_FEATURES_URI`
 - The repository ignores `frontend/public/features/*` so those assets stay out of git and are expected to arrive via local copy or Cloud Build sync.
+- To mirror the local landing-page feature art into the private bucket:
+  - `FRONTEND_FEATURES_URI=gs://YOUR_BUCKET/features bash infra/sync_feature_assets.sh`
+  - Add `--dry-run` to preview changes first
 
 ## GitHub CI/CD
 

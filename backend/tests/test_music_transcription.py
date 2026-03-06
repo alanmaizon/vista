@@ -24,7 +24,12 @@ from app.domains.music import compare as music_compare_module
 from app.domains.music import transcription as music_transcription_module
 from app.domains.music.compare import compare_performance_against_score
 from app.domains.music.feedback import comparison_calibration_for_profile
-from app.domains.music.models import MusicScore, MusicSkillProfile
+from app.domains.music.models import (
+    MusicLessonAssignment,
+    MusicPerformanceAttempt,
+    MusicScore,
+    MusicSkillProfile,
+)
 from app.domains.music.pitch import PitchEstimate, estimate_pitch_fastyin
 from app.domains.music.render import build_note_layout, render_music_score, score_to_musicxml
 from app.domains.music.symbolic import NoteEvent, SymbolicPhrase, import_simple_score
@@ -528,17 +533,30 @@ def test_compare_performance_against_score_requests_replay_for_low_confidence(
 
 
 class FakeScalarResult:
-    def __init__(self, scalar=None) -> None:
+    def __init__(self, scalar=None, scalars=None) -> None:
         self._scalar = scalar
+        self._scalars = list(scalars or [])
 
     def scalar_one_or_none(self):
         return self._scalar
+
+    def scalars(self):
+        class _Scalars:
+            def __init__(self, values):
+                self._values = values
+
+            def all(self):
+                return list(self._values)
+
+        return _Scalars(self._scalars)
 
 
 class FakeMusicDB:
     def __init__(self) -> None:
         self.scores = {}
         self.profiles = {}
+        self.attempts = {}
+        self.assignments = {}
         self._pending = []
 
     def add(self, instance) -> None:
@@ -552,6 +570,10 @@ class FakeMusicDB:
                 self.scores[pending.id] = pending
             elif isinstance(pending, MusicSkillProfile):
                 self.profiles[pending.user_id] = pending
+            elif isinstance(pending, MusicPerformanceAttempt):
+                self.attempts[pending.id] = pending
+            elif isinstance(pending, MusicLessonAssignment):
+                self.assignments[pending.id] = pending
         self._pending = []
 
     async def refresh(self, instance) -> None:
@@ -562,9 +584,22 @@ class FakeMusicDB:
         entity = None
         if statement.column_descriptions:
             entity = statement.column_descriptions[0].get("entity")
-        lookup_key = statement.whereclause.right.value
+        whereclause = getattr(statement, "whereclause", None)
+        lookup_key = whereclause.right.value if whereclause is not None else None
         if entity is MusicSkillProfile:
+            if lookup_key is None:
+                return FakeScalarResult(scalars=self.profiles.values())
             return FakeScalarResult(self.profiles.get(lookup_key))
+        if entity is MusicPerformanceAttempt:
+            if lookup_key is None:
+                return FakeScalarResult(scalars=self.attempts.values())
+            return FakeScalarResult(self.attempts.get(lookup_key))
+        if entity is MusicLessonAssignment:
+            if lookup_key is None:
+                return FakeScalarResult(scalars=self.assignments.values())
+            return FakeScalarResult(self.assignments.get(lookup_key))
+        if lookup_key is None:
+            return FakeScalarResult(scalars=self.scores.values())
         return FakeScalarResult(self.scores.get(lookup_key))
 
 
@@ -924,3 +959,222 @@ def test_guided_lesson_action_compares_current_bar(
     assert len(body["next_drills"]) >= 2
     assert isinstance(body["tutor_prompt"], str)
     assert "music-user" in fake_music_db.profiles
+
+
+def test_music_analytics_me_returns_profile_snapshot(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    fake_music_db.profiles["music-user"] = MusicSkillProfile(
+        user_id="music-user",
+        sample_count=9,
+        weakest_dimension="rhythm",
+        consistency_score=0.72,
+        practice_frequency=0.61,
+        last_improvement_trend=0.08,
+        overall_score=0.69,
+        pitch_score=0.76,
+        rhythm_score=0.55,
+        tempo_score=0.7,
+        dynamics_score=0.66,
+        articulation_score=0.64,
+    )
+
+    response = client.get(
+        "/api/music/analytics/me",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["has_profile"] is True
+    assert body["weakest_dimension"] == "rhythm"
+    assert body["sample_count"] == 9
+    assert "pitchAccuracy" in body["rolling_metrics"]
+
+
+def test_music_analytics_teacher_students_requires_teacher_access(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/api/music/analytics/teacher/students",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_music_analytics_teacher_students_returns_roster_for_allowed_teacher(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VISTA_TEACHER_UID_ALLOWLIST", "music-user")
+    fake_music_db.profiles["student-a"] = MusicSkillProfile(
+        user_id="student-a",
+        sample_count=12,
+        weakest_dimension="pitch",
+        consistency_score=0.71,
+        practice_frequency=0.64,
+        last_improvement_trend=0.03,
+        overall_score=0.74,
+    )
+    fake_music_db.profiles["student-b"] = MusicSkillProfile(
+        user_id="student-b",
+        sample_count=4,
+        weakest_dimension="tempo",
+        consistency_score=0.48,
+        practice_frequency=0.32,
+        last_improvement_trend=-0.06,
+        overall_score=0.43,
+    )
+
+    response = client.get(
+        "/api/music/analytics/teacher/students",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["students"]) == 2
+    assert body["students"][0]["user_id"] == "student-a"
+
+
+def test_compare_endpoint_records_performance_attempt(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    stored = build_stored_score()
+    fake_music_db.scores[stored.id] = stored
+
+    response = client.post(
+        f"/api/music/score/{stored.id}/compare",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "audio_b64": base64.b64encode(synth_phrase([261.63, 293.66, 329.63])).decode("ascii"),
+            "mime": "audio/pcm;rate=16000",
+            "max_notes": 12,
+            "measure_index": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert fake_music_db.attempts
+    stored_attempt = next(iter(fake_music_db.attempts.values()))
+    assert stored_attempt.user_id == "music-user"
+    assert stored_attempt.score_id == stored.id
+    assert stored_attempt.measure_index == 1
+
+
+def test_teacher_assignment_create_and_list(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VISTA_TEACHER_UID_ALLOWLIST", "music-user")
+    score = build_stored_score()
+    fake_music_db.scores[score.id] = score
+
+    create_response = client.post(
+        "/api/music/analytics/teacher/assignments",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "student_user_id": "student-a",
+            "score_id": str(score.id),
+            "title": "Bar 1 stability pass",
+            "instructions": "Practice at 60 BPM and compare three takes.",
+            "target_measures": [1],
+        },
+    )
+
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["teacher_user_id"] == "music-user"
+    assert created["student_user_id"] == "student-a"
+
+    list_response = client.get(
+        "/api/music/analytics/teacher/assignments",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert list_response.status_code == 200
+    body = list_response.json()
+    assert len(body["assignments"]) == 1
+    assert body["assignments"][0]["title"] == "Bar 1 stability pass"
+
+
+def test_teacher_student_detail_returns_attempts_heatmap_and_assignments(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VISTA_TEACHER_UID_ALLOWLIST", "music-user")
+    fake_music_db.profiles["student-a"] = MusicSkillProfile(
+        user_id="student-a",
+        sample_count=6,
+        weakest_dimension="rhythm",
+        consistency_score=0.63,
+        practice_frequency=0.51,
+        last_improvement_trend=0.05,
+        overall_score=0.67,
+        pitch_score=0.72,
+        rhythm_score=0.52,
+        tempo_score=0.59,
+        dynamics_score=0.7,
+        articulation_score=0.66,
+    )
+    attempt_a_id = uuid.uuid4()
+    attempt_a = MusicPerformanceAttempt(
+        user_id="student-a",
+        score_id=uuid.uuid4(),
+        measure_index=1,
+        instrument_profile="PIANO",
+        accuracy=0.81,
+        match=True,
+        needs_replay=False,
+        summary="Matched bar 1 with stable timing.",
+        performance_feedback={"pitchAccuracy": 0.84, "rhythmAccuracy": 0.79},
+    )
+    attempt_a.id = attempt_a_id
+    fake_music_db.attempts[attempt_a_id] = attempt_a
+
+    attempt_b_id = uuid.uuid4()
+    attempt_b = MusicPerformanceAttempt(
+        user_id="student-a",
+        score_id=uuid.uuid4(),
+        measure_index=1,
+        instrument_profile="PIANO",
+        accuracy=0.58,
+        match=False,
+        needs_replay=True,
+        summary="Replay requested for bar 1.",
+        performance_feedback={"pitchAccuracy": 0.61, "rhythmAccuracy": 0.48},
+    )
+    attempt_b.id = attempt_b_id
+    fake_music_db.attempts[attempt_b_id] = attempt_b
+
+    assignment_id = uuid.uuid4()
+    assignment = MusicLessonAssignment(
+        teacher_user_id="music-user",
+        student_user_id="student-a",
+        score_id=None,
+        title="Rhythm cleanup",
+        instructions="Focus on subdivision consistency.",
+        status="ASSIGNED",
+        target_measures=[1],
+    )
+    assignment.id = assignment_id
+    fake_music_db.assignments[assignment_id] = assignment
+
+    response = client.get(
+        "/api/music/analytics/teacher/students/student-a",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user_id"] == "student-a"
+    assert body["profile"]["has_profile"] is True
+    assert body["recent_attempts"]
+    assert body["measure_heatmap"][0]["measure_index"] == 1
+    assert body["assignments"][0]["title"] == "Rhythm cleanup"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from datetime import datetime, timezone
 from uuid import UUID
 from typing import Literal
 
@@ -22,12 +24,13 @@ from .transcription import (
     transcription_to_dict,
 )
 from .compare import compare_performance_against_score, comparison_to_dict
-from .models import MusicScore
+from .models import MusicLessonAssignment, MusicPerformanceAttempt, MusicScore, MusicSkillProfile
 from .render import render_music_score, verovio_runtime_status
 
 
 router = APIRouter(prefix="/api/music", tags=["music"])
 InstrumentProfileLiteral = Literal["AUTO", "VOICE", "PIANO", "GUITAR", "STRINGS", "WINDS", "PERCUSSION"]
+_EPOCH_UTC = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 class MusicTranscriptionRequest(BaseModel):
@@ -245,6 +248,104 @@ class MusicRuntimeStatusResponse(BaseModel):
     crepe_detail: str
 
 
+class MusicProgressSnapshotResponse(BaseModel):
+    """Per-user adaptive progress payload for analytics surfaces."""
+
+    user_id: str
+    has_profile: bool
+    sample_count: int
+    weakest_dimension: str | None
+    consistency_score: float
+    practice_frequency: float
+    last_improvement_trend: float
+    overall_score: float
+    rolling_metrics: dict[str, float]
+
+
+class MusicTeacherStudentSummary(BaseModel):
+    """Teacher-facing summary row for one student profile."""
+
+    user_id: str
+    sample_count: int
+    weakest_dimension: str
+    consistency_score: float
+    practice_frequency: float
+    overall_score: float
+    last_improvement_trend: float
+
+
+class MusicTeacherStudentsResponse(BaseModel):
+    """Teacher dashboard roster payload."""
+
+    students: list[MusicTeacherStudentSummary]
+
+
+class MusicTeacherAssignmentCreateRequest(BaseModel):
+    """Create one teacher assignment for a student."""
+
+    student_user_id: str = Field(..., description="Student uid.")
+    score_id: UUID | None = Field(None, description="Optional prepared score id.")
+    title: str = Field(..., min_length=3, max_length=160)
+    instructions: str = Field("", max_length=3000)
+    target_measures: list[int] = Field(default_factory=list)
+    due_at: datetime | None = Field(None, description="Optional due timestamp (ISO8601).")
+
+
+class MusicTeacherAssignmentResponse(BaseModel):
+    """Teacher assignment payload."""
+
+    assignment_id: UUID
+    teacher_user_id: str
+    student_user_id: str
+    score_id: UUID | None
+    title: str
+    instructions: str
+    status: str
+    target_measures: list[int]
+    due_at: str | None
+    created_at: str | None
+
+
+class MusicTeacherAssignmentsResponse(BaseModel):
+    """Teacher assignment roster payload."""
+
+    assignments: list[MusicTeacherAssignmentResponse]
+
+
+class MusicPerformanceAttemptSummary(BaseModel):
+    """Performance timeline row."""
+
+    attempt_id: UUID
+    created_at: str | None
+    score_id: UUID | None
+    measure_index: int | None
+    accuracy: float
+    match: bool
+    needs_replay: bool
+    summary: str
+    performance_feedback: dict[str, float]
+
+
+class MusicMeasureHeatmapCell(BaseModel):
+    """Measure-level aggregate for dashboard heatmap rendering."""
+
+    measure_index: int
+    attempts: int
+    avg_accuracy: float
+    replay_rate: float
+    mismatch_rate: float
+
+
+class MusicTeacherStudentDetailResponse(BaseModel):
+    """Teacher-facing detail snapshot for one student."""
+
+    user_id: str
+    profile: MusicProgressSnapshotResponse
+    recent_attempts: list[MusicPerformanceAttemptSummary]
+    measure_heatmap: list[MusicMeasureHeatmapCell]
+    assignments: list[MusicTeacherAssignmentResponse]
+
+
 async def _get_owned_score(db: AsyncSession, score_id: UUID, user_id: str) -> MusicScore:
     result = await db.execute(select(MusicScore).where(MusicScore.id == score_id))
     score = result.scalar_one_or_none()
@@ -257,6 +358,158 @@ async def _get_owned_score(db: AsyncSession, score_id: UUID, user_id: str) -> Mu
 
 def _flatten_expected_notes(score: MusicScore) -> list[dict]:
     return [note for measure in (score.measures or []) for note in measure.get("notes", [])]
+
+
+def _profile_overall_score(profile: MusicSkillProfile) -> float:
+    return float(profile.overall_score or 0.0)
+
+
+def _profile_rolling_metrics(profile: MusicSkillProfile) -> dict[str, float]:
+    return {
+        "pitchAccuracy": float(profile.pitch_score or 0.0),
+        "rhythmAccuracy": float(profile.rhythm_score or 0.0),
+        "tempoStability": float(profile.tempo_score or 0.0),
+        "dynamicRange": float(profile.dynamics_score or 0.0),
+        "articulationVariance": float(profile.articulation_score or 0.0),
+    }
+
+
+def _iso_or_none(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
+
+
+def _assignment_to_response(assignment: MusicLessonAssignment) -> MusicTeacherAssignmentResponse:
+    return MusicTeacherAssignmentResponse(
+        assignment_id=assignment.id,
+        teacher_user_id=assignment.teacher_user_id,
+        student_user_id=assignment.student_user_id,
+        score_id=assignment.score_id,
+        title=assignment.title,
+        instructions=assignment.instructions or "",
+        status=assignment.status or "ASSIGNED",
+        target_measures=list(assignment.target_measures or []),
+        due_at=_iso_or_none(assignment.due_at),
+        created_at=_iso_or_none(assignment.created_at),
+    )
+
+
+def _attempt_to_summary(attempt: MusicPerformanceAttempt) -> MusicPerformanceAttemptSummary:
+    return MusicPerformanceAttemptSummary(
+        attempt_id=attempt.id,
+        created_at=_iso_or_none(attempt.created_at),
+        score_id=attempt.score_id,
+        measure_index=attempt.measure_index,
+        accuracy=round(float(attempt.accuracy or 0.0), 3),
+        match=bool(attempt.match),
+        needs_replay=bool(attempt.needs_replay),
+        summary=attempt.summary or "",
+        performance_feedback=dict(attempt.performance_feedback or {}),
+    )
+
+
+def _build_measure_heatmap(attempts: list[MusicPerformanceAttempt]) -> list[MusicMeasureHeatmapCell]:
+    grouped: dict[int, list[MusicPerformanceAttempt]] = {}
+    for attempt in attempts:
+        if attempt.measure_index is None:
+            continue
+        grouped.setdefault(int(attempt.measure_index), []).append(attempt)
+
+    cells: list[MusicMeasureHeatmapCell] = []
+    for measure_index in sorted(grouped):
+        rows = grouped[measure_index]
+        attempt_count = len(rows)
+        avg_accuracy = sum(float(row.accuracy or 0.0) for row in rows) / attempt_count
+        replay_rate = sum(1 for row in rows if row.needs_replay) / attempt_count
+        mismatch_rate = sum(1 for row in rows if not row.match) / attempt_count
+        cells.append(
+            MusicMeasureHeatmapCell(
+                measure_index=measure_index,
+                attempts=attempt_count,
+                avg_accuracy=round(avg_accuracy, 3),
+                replay_rate=round(replay_rate, 3),
+                mismatch_rate=round(mismatch_rate, 3),
+            )
+        )
+    return cells
+
+
+def _build_progress_snapshot(user_id: str, profile: MusicSkillProfile | None) -> MusicProgressSnapshotResponse:
+    if profile is None:
+        return MusicProgressSnapshotResponse(
+            user_id=user_id,
+            has_profile=False,
+            sample_count=0,
+            weakest_dimension=None,
+            consistency_score=0.0,
+            practice_frequency=0.0,
+            last_improvement_trend=0.0,
+            overall_score=0.0,
+            rolling_metrics={
+                "pitchAccuracy": 0.0,
+                "rhythmAccuracy": 0.0,
+                "tempoStability": 0.0,
+                "dynamicRange": 0.0,
+                "articulationVariance": 0.0,
+            },
+        )
+
+    return MusicProgressSnapshotResponse(
+        user_id=profile.user_id,
+        has_profile=True,
+        sample_count=int(profile.sample_count or 0),
+        weakest_dimension=profile.weakest_dimension,
+        consistency_score=round(float(profile.consistency_score or 0.0), 3),
+        practice_frequency=round(float(profile.practice_frequency or 0.0), 3),
+        last_improvement_trend=round(float(profile.last_improvement_trend or 0.0), 3),
+        overall_score=round(_profile_overall_score(profile), 3),
+        rolling_metrics={k: round(v, 3) for k, v in _profile_rolling_metrics(profile).items()},
+    )
+
+
+def _record_performance_attempt(
+    *,
+    user_id: str,
+    score_id: UUID,
+    measure_index: int | None,
+    instrument_profile: str,
+    result,
+) -> MusicPerformanceAttempt:
+    return MusicPerformanceAttempt(
+        user_id=user_id,
+        score_id=score_id,
+        measure_index=measure_index,
+        instrument_profile=(instrument_profile or "AUTO").upper(),
+        accuracy=float(result.accuracy),
+        match=bool(result.match),
+        needs_replay=bool(result.needs_replay),
+        summary=result.summary,
+        performance_feedback=result.performance_feedback,
+    )
+
+
+def _teacher_uid_allowlist() -> set[str]:
+    raw = os.getenv("VISTA_TEACHER_UID_ALLOWLIST", "").strip()
+    if not raw:
+        return set()
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def _teacher_email_allowlist() -> set[str]:
+    raw = os.getenv("VISTA_TEACHER_EMAIL_ALLOWLIST", "").strip()
+    if not raw:
+        return set()
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _require_teacher_access(current_user: dict) -> None:
+    uid = str(current_user.get("uid", "")).strip()
+    email = str(current_user.get("email", "")).strip().lower()
+    allowed_uid = uid and uid in _teacher_uid_allowlist()
+    allowed_email = email and email in _teacher_email_allowlist()
+    if not (allowed_uid or allowed_email):
+        raise HTTPException(status_code=403, detail="Teacher access required.")
 
 
 def _measure_note_range(score: MusicScore, measure_index: int) -> tuple[int, int]:
@@ -401,6 +654,136 @@ async def music_runtime_status(
     )
 
 
+@router.get("/analytics/me", response_model=MusicProgressSnapshotResponse)
+async def get_music_progress_snapshot(
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicProgressSnapshotResponse:
+    """Return the current user's deterministic adaptive progress snapshot."""
+    query = await db.execute(select(MusicSkillProfile).where(MusicSkillProfile.user_id == current_user["uid"]))
+    profile = query.scalar_one_or_none()
+    return _build_progress_snapshot(current_user["uid"], profile)
+
+
+@router.get("/analytics/teacher/students", response_model=MusicTeacherStudentsResponse)
+async def list_teacher_students(
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicTeacherStudentsResponse:
+    """Return teacher dashboard roster using adaptive profile snapshots."""
+    _require_teacher_access(current_user)
+
+    query = await db.execute(
+        select(MusicSkillProfile).order_by(
+            MusicSkillProfile.sample_count.desc(),
+            MusicSkillProfile.updated_at.desc(),
+        )
+    )
+    profiles = list(query.scalars().all())
+    students = [
+        MusicTeacherStudentSummary(
+            user_id=profile.user_id,
+            sample_count=int(profile.sample_count or 0),
+            weakest_dimension=profile.weakest_dimension or "pitch",
+            consistency_score=round(float(profile.consistency_score or 0.0), 3),
+            practice_frequency=round(float(profile.practice_frequency or 0.0), 3),
+            overall_score=round(_profile_overall_score(profile), 3),
+            last_improvement_trend=round(float(profile.last_improvement_trend or 0.0), 3),
+        )
+        for profile in profiles
+    ]
+    return MusicTeacherStudentsResponse(students=students)
+
+
+@router.post("/analytics/teacher/assignments", response_model=MusicTeacherAssignmentResponse)
+async def create_teacher_assignment(
+    payload: MusicTeacherAssignmentCreateRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicTeacherAssignmentResponse:
+    """Create a teacher assignment for one student."""
+    _require_teacher_access(current_user)
+    teacher_uid = str(current_user.get("uid", "")).strip()
+    if not teacher_uid:
+        raise HTTPException(status_code=400, detail="Authenticated teacher uid is missing.")
+
+    assignment = MusicLessonAssignment(
+        teacher_user_id=teacher_uid,
+        student_user_id=payload.student_user_id,
+        score_id=payload.score_id,
+        title=payload.title.strip(),
+        instructions=(payload.instructions or "").strip(),
+        status="ASSIGNED",
+        target_measures=[int(item) for item in payload.target_measures if int(item) > 0],
+        due_at=payload.due_at,
+    )
+    db.add(assignment)
+    await db.commit()
+    await db.refresh(assignment)
+    return _assignment_to_response(assignment)
+
+
+@router.get("/analytics/teacher/assignments", response_model=MusicTeacherAssignmentsResponse)
+async def list_teacher_assignments(
+    student_user_id: str | None = None,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicTeacherAssignmentsResponse:
+    """List assignments created by the current teacher."""
+    _require_teacher_access(current_user)
+    teacher_uid = str(current_user.get("uid", "")).strip()
+
+    query = await db.execute(select(MusicLessonAssignment))
+    all_assignments = list(query.scalars().all())
+    filtered = [
+        assignment
+        for assignment in all_assignments
+        if assignment.teacher_user_id == teacher_uid
+        and (student_user_id is None or assignment.student_user_id == student_user_id)
+    ]
+    filtered.sort(key=lambda row: row.created_at or _EPOCH_UTC, reverse=True)
+    return MusicTeacherAssignmentsResponse(assignments=[_assignment_to_response(item) for item in filtered])
+
+
+@router.get("/analytics/teacher/students/{student_user_id}", response_model=MusicTeacherStudentDetailResponse)
+async def get_teacher_student_detail(
+    student_user_id: str,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicTeacherStudentDetailResponse:
+    """Return student detail payload for teacher dashboard timelines + heatmaps."""
+    _require_teacher_access(current_user)
+    teacher_uid = str(current_user.get("uid", "")).strip()
+
+    profile_query = await db.execute(select(MusicSkillProfile).where(MusicSkillProfile.user_id == student_user_id))
+    profile = profile_query.scalar_one_or_none()
+    snapshot = _build_progress_snapshot(student_user_id, profile)
+
+    attempts_query = await db.execute(select(MusicPerformanceAttempt))
+    student_attempts = [
+        row for row in attempts_query.scalars().all() if row.user_id == student_user_id
+    ]
+    student_attempts.sort(key=lambda row: row.created_at or _EPOCH_UTC, reverse=True)
+    recent_attempts = [_attempt_to_summary(row) for row in student_attempts[:30]]
+    heatmap = _build_measure_heatmap(student_attempts)
+
+    assignments_query = await db.execute(select(MusicLessonAssignment))
+    assignments = [
+        row
+        for row in assignments_query.scalars().all()
+        if row.teacher_user_id == teacher_uid and row.student_user_id == student_user_id
+    ]
+    assignments.sort(key=lambda row: row.created_at or _EPOCH_UTC, reverse=True)
+
+    return MusicTeacherStudentDetailResponse(
+        user_id=student_user_id,
+        profile=snapshot,
+        recent_attempts=recent_attempts,
+        measure_heatmap=heatmap,
+        assignments=[_assignment_to_response(item) for item in assignments],
+    )
+
+
 @router.post("/score/import", response_model=MusicScoreImportResponse)
 async def import_music_score(
     payload: MusicScoreImportRequest,
@@ -537,6 +920,15 @@ async def compare_performance_with_score(
         max_notes=payload.max_notes,
         instrument_profile=payload.instrument_profile,
     )
+    attempt = _record_performance_attempt(
+        user_id=current_user["uid"],
+        score_id=score.id,
+        measure_index=payload.measure_index,
+        instrument_profile=payload.instrument_profile,
+        result=result,
+    )
+    db.add(attempt)
+    await db.commit()
     return MusicPerformanceCompareResponse(
         score_id=score.id,
         **comparison_to_dict(result),
@@ -589,6 +981,14 @@ async def run_guided_lesson_action(
             max_notes=payload.max_notes,
             instrument_profile=payload.instrument_profile,
         )
+        attempt = _record_performance_attempt(
+            user_id=current_user["uid"],
+            score_id=score.id,
+            measure_index=payload.current_measure_index,
+            instrument_profile=payload.instrument_profile,
+            result=result,
+        )
+        db.add(attempt)
         comparison = MusicPerformanceCompareResponse(
             score_id=score.id,
             **comparison_to_dict(result),

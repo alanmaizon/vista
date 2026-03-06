@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from ...models import Base
@@ -58,3 +58,43 @@ class MusicSkillProfile(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     last_practiced_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class MusicPerformanceAttempt(Base):
+    """Captured compare-attempt summary used by analytics timelines and heatmaps."""
+
+    __tablename__ = "music_performance_attempts"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: str = Column(String, nullable=False, index=True)
+    score_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), nullable=True, index=True)
+    measure_index: Optional[int] = Column(Integer, nullable=True, index=True)
+    instrument_profile: str = Column(String(16), nullable=False, default="AUTO", server_default="AUTO")
+
+    accuracy: float = Column(Float, nullable=False)
+    match: bool = Column(Boolean, nullable=False, default=False, server_default="false")
+    needs_replay: bool = Column(Boolean, nullable=False, default=False, server_default="false")
+    summary: str = Column(Text, nullable=False)
+    performance_feedback: dict | None = Column(JSONB, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MusicLessonAssignment(Base):
+    """Teacher-assigned lesson work item for one student."""
+
+    __tablename__ = "music_lesson_assignments"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    teacher_user_id: str = Column(String, nullable=False, index=True)
+    student_user_id: str = Column(String, nullable=False, index=True)
+    score_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), nullable=True, index=True)
+
+    title: str = Column(String(160), nullable=False)
+    instructions: str = Column(Text, nullable=False, default="", server_default="")
+    status: str = Column(String(24), nullable=False, default="ASSIGNED", server_default="ASSIGNED")
+    target_measures: list[int] | None = Column(JSONB, nullable=True)
+
+    due_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

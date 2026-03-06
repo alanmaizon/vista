@@ -83,6 +83,9 @@ export default function useEurydiceApp() {
   const [lessonState, setLessonState] = useState(initialLessonState);
   const [analysis, setAnalysis] = useState(null);
   const [comparison, setComparison] = useState(null);
+  const [userSkillProfile, setUserSkillProfile] = useState(null);
+  const [nextDrills, setNextDrills] = useState([]);
+  const [tutorPrompt, setTutorPrompt] = useState("");
   const [runtimeStatus, setRuntimeStatus] = useState({
     verovioAvailable: null,
     verovioDetail: "",
@@ -113,6 +116,9 @@ export default function useEurydiceApp() {
   const resetLessonState = useCallback(() => {
     setLessonState(initialLessonState());
     setComparison(null);
+    setUserSkillProfile(null);
+    setNextDrills([]);
+    setTutorPrompt("");
   }, []);
 
   const stopCameraCapture = useCallback(() => {
@@ -409,6 +415,15 @@ export default function useEurydiceApp() {
       if (payload?.comparison) {
         applyComparisonPayload(payload.comparison);
       }
+      if (payload?.user_skill_profile) {
+        setUserSkillProfile(payload.user_skill_profile);
+      }
+      if (Array.isArray(payload?.next_drills)) {
+        setNextDrills(payload.next_drills);
+      }
+      if (typeof payload?.tutor_prompt === "string") {
+        setTutorPrompt(payload.tutor_prompt);
+      }
     },
     [
       activeScore,
@@ -702,6 +717,9 @@ export default function useEurydiceApp() {
     lessonState,
     analysis,
     comparison,
+    userSkillProfile,
+    nextDrills,
+    tutorPrompt,
     sessionId,
     liveMode,
     isBusy,

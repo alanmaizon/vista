@@ -29,6 +29,9 @@ export default function App() {
     lessonState,
     analysis,
     comparison,
+    userSkillProfile,
+    nextDrills,
+    tutorPrompt,
     sessionId,
     liveMode,
     isBusy,
@@ -146,6 +149,9 @@ export default function App() {
         lessonState,
         analysis,
         comparison,
+        userSkillProfile,
+        nextDrills,
+        tutorPrompt,
         errorMessage,
       }}
       sessionLogProps={{

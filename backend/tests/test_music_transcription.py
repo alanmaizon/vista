@@ -24,7 +24,7 @@ from app.domains.music import compare as music_compare_module
 from app.domains.music import transcription as music_transcription_module
 from app.domains.music.compare import compare_performance_against_score
 from app.domains.music.feedback import comparison_calibration_for_profile
-from app.domains.music.models import MusicScore
+from app.domains.music.models import MusicScore, MusicSkillProfile
 from app.domains.music.pitch import PitchEstimate, estimate_pitch_fastyin
 from app.domains.music.render import build_note_layout, render_music_score, score_to_musicxml
 from app.domains.music.symbolic import NoteEvent, SymbolicPhrase, import_simple_score
@@ -538,24 +538,34 @@ class FakeScalarResult:
 class FakeMusicDB:
     def __init__(self) -> None:
         self.scores = {}
+        self.profiles = {}
+        self._pending = []
 
     def add(self, instance) -> None:
         if getattr(instance, "id", None) is None:
             instance.id = uuid.uuid4()
-        self._pending = instance
+        self._pending.append(instance)
 
     async def commit(self) -> None:
-        pending = getattr(self, "_pending", None)
-        if pending is not None:
-            self.scores[pending.id] = pending
+        for pending in self._pending:
+            if isinstance(pending, MusicScore):
+                self.scores[pending.id] = pending
+            elif isinstance(pending, MusicSkillProfile):
+                self.profiles[pending.user_id] = pending
+        self._pending = []
 
     async def refresh(self, instance) -> None:
         if getattr(instance, "id", None) is None:
             instance.id = uuid.uuid4()
 
     async def execute(self, statement):
-        score_id = statement.whereclause.right.value
-        return FakeScalarResult(self.scores.get(score_id))
+        entity = None
+        if statement.column_descriptions:
+            entity = statement.column_descriptions[0].get("entity")
+        lookup_key = statement.whereclause.right.value
+        if entity is MusicSkillProfile:
+            return FakeScalarResult(self.profiles.get(lookup_key))
+        return FakeScalarResult(self.scores.get(lookup_key))
 
 
 @pytest.fixture
@@ -903,3 +913,14 @@ def test_guided_lesson_action_compares_current_bar(
     assert body["lesson"] is None
     assert body["comparison"]["score_id"] == str(stored.id)
     assert body["comparison"]["match"] is True
+    assert body["user_skill_profile"]["weakest_dimension"] in {
+        "pitch",
+        "rhythm",
+        "tempo",
+        "dynamics",
+        "articulation",
+    }
+    assert isinstance(body["next_drills"], list)
+    assert len(body["next_drills"]) >= 2
+    assert isinstance(body["tutor_prompt"], str)
+    assert "music-user" in fake_music_db.profiles

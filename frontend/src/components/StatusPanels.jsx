@@ -44,7 +44,16 @@ function FeedbackMeters({ title, feedback }) {
   );
 }
 
-export function LessonPanel({ skill, lessonState, analysis, comparison, errorMessage }) {
+export function LessonPanel({
+  skill,
+  lessonState,
+  analysis,
+  comparison,
+  userSkillProfile,
+  nextDrills,
+  tutorPrompt,
+  errorMessage,
+}) {
   return (
     <div className="glass rounded-3xl p-5">
       <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Lesson state</div>
@@ -83,6 +92,59 @@ export function LessonPanel({ skill, lessonState, analysis, comparison, errorMes
             Accuracy: {Math.round((comparison.accuracy || 0) * 100)}%
           </div>
           <FeedbackMeters title="Calibrated feedback" feedback={comparison.performance_feedback} />
+        </div>
+      ) : null}
+
+      {userSkillProfile ? (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          <div className="font-medium text-white">Adaptive profile</div>
+          <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300">
+            <div>
+              Weakest:{" "}
+              <span className="font-medium capitalize text-slate-100">
+                {String(userSkillProfile.weakest_dimension || "—")}
+              </span>
+            </div>
+            <div>
+              Consistency: {Math.round(normalizeMetricValue(userSkillProfile.consistency_score) * 100)}%
+            </div>
+            <div>
+              Practice frequency: {Math.round(normalizeMetricValue(userSkillProfile.practice_frequency) * 100)}%
+            </div>
+            <div>
+              Trend: {Math.round(Number(userSkillProfile.last_improvement_trend || 0) * 100)}
+            </div>
+          </div>
+          {userSkillProfile.rolling_metrics ? (
+            <FeedbackMeters title="Rolling metrics" feedback={userSkillProfile.rolling_metrics} />
+          ) : null}
+        </div>
+      ) : null}
+
+      {Array.isArray(nextDrills) && nextDrills.length ? (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          <div className="font-medium text-white">Recommended next drills</div>
+          <div className="mt-2 space-y-2">
+            {nextDrills.slice(0, 3).map((drill) => (
+              <div key={drill.id} className="rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2">
+                <div className="text-xs font-semibold text-slate-100">
+                  {drill.title}{" "}
+                  <span className="ml-1 rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-300">
+                    {drill.difficulty}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-slate-300">{drill.rationale}</div>
+                <div className="mt-1 text-xs text-slate-400">{drill.instructions}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {tutorPrompt ? (
+        <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-xs text-emerald-50">
+          <div className="font-semibold uppercase tracking-[0.14em] text-emerald-100">Tutor context</div>
+          <div className="mt-1">{tutorPrompt}</div>
         </div>
       ) : null}
 

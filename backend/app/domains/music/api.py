@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ... import auth as auth_utils
 from ...db import get_db
+from .adaptive import update_user_skill_profile
 from .crepe import crepe_runtime_status
 from .symbolic import import_simple_score, score_to_dict
 from .transcription import (
@@ -230,6 +231,9 @@ class MusicLessonActionResponse(BaseModel):
     score: MusicScorePrepareResponse | None = None
     lesson: MusicLessonStepResponse | None = None
     comparison: MusicPerformanceCompareResponse | None = None
+    user_skill_profile: dict[str, object] | None = None
+    next_drills: list[dict[str, object]] | None = None
+    tutor_prompt: str | None = None
 
 
 class MusicRuntimeStatusResponse(BaseModel):
@@ -589,10 +593,19 @@ async def run_guided_lesson_action(
             score_id=score.id,
             **comparison_to_dict(result),
         )
+        profile_payload, drill_payload, tutor_prompt = await update_user_skill_profile(
+            db,
+            user_id=current_user["uid"],
+            instrument_profile=payload.instrument_profile,
+            performance_feedback=result.performance_feedback,
+        )
         return MusicLessonActionResponse(
             outcome="awaiting-compare" if result.needs_replay or not result.match else "reviewed",
             score=prepared_payload,
             comparison=comparison,
+            user_skill_profile=profile_payload,
+            next_drills=drill_payload,
+            tutor_prompt=tutor_prompt,
         )
 
     lesson = _build_lesson_step_from_score(

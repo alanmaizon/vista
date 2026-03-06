@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     session_cookie_samesite: str = "lax"
     session_cookie_domain: str = ""
     session_cookie_max_age_seconds: int = 60 * 60 * 24 * 5
+    live_context_enabled: bool = True
+    live_context_max_chars: int = 2600
+    live_context_attempt_limit: int = 5
+    live_context_library_limit: int = 4
     music_system_instructions: str = DEFAULT_MUSIC_SYSTEM_INSTRUCTIONS
     project_id: str = Field(
         default_factory=lambda: (

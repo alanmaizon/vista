@@ -107,6 +107,7 @@ Use Python `3.11`, `3.12`, or `3.13` for local development. Python `3.14` is not
 3. **Configure Firebase**: Add Firebase to your project, enable authentication, and provide a service account JSON for server-side token verification. The backend expects a Firebase ID token for each HTTP/WebSocket request.
 4. **Deploy the backend**: Use the provided Dockerfile and `deploy_cloudrun.sh` script in the `infra/` directory to build and deploy the FastAPI service. The script sets environment variables needed by the application.
 5. **Install music extras** (optional): For SVG score rendering install `pip install -r backend/requirements-music.txt`. For advanced audio analysis (CREPE pitch verification) install `pip install -r backend/requirements-music-ml.txt`.
+6. **Live retrieval context** (recommended): Enable `VISTA_LIVE_CONTEXT_ENABLED=true` so live sessions receive a compact context packet built from profile, recent attempts, and relevant content library items.
 
 For more details about the product specification, refer to `docs/EURYDICE_CHALLENGE_BRIEF.md`. For deployment instructions, see `docs/DEPLOYMENT.md`.
 
@@ -149,6 +150,9 @@ For more details about the product specification, refer to `docs/EURYDICE_CHALLE
 # Backend tests
 cd backend
 pytest
+
+# Prompt quality evaluation
+python scripts/prompt_eval_music.py
 
 # Run specific test file
 pytest tests/test_music_transcription.py

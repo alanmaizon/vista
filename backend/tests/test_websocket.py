@@ -27,6 +27,7 @@ class FakeBridge:
         self.model_id = kwargs["model_id"]
         self.active_location = kwargs["location"]
         self.using_adk = False
+        self.system_prompt = kwargs["system_prompt"]
         self.sent_audio: list[bytes] = []
         self.sent_images: list[bytes] = []
         self.sent_text: list[tuple[str, str]] = []
@@ -179,3 +180,33 @@ def test_ws_live_reports_invalid_base64_payload(client: TestClient) -> None:
     assert error_payload["type"] == "error"
     assert "Invalid base64 payload" in error_payload["message"]
     assert summary_payload["type"] == "server.summary"
+
+
+def test_ws_live_injects_retrieved_context_into_system_prompt(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = uuid.uuid4()
+
+    async def fake_context(*_args, **_kwargs) -> str:
+        return "PROFILE: weakest_dimension=rhythm; samples=7"
+
+    monkeypatch.setattr(main_module, "_build_live_context_for_user", fake_context)
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "HEAR_PHRASE",
+            }
+        )
+        ws.receive_json()  # connected status
+        ws.receive_json()  # HEAR_PHRASE hint
+        ws.send_json({"type": "client.stop"})
+        ws.receive_json()  # summary
+
+    bridge = FakeBridge.created[0]
+    assert "Retrieved session context:" in bridge.system_prompt
+    assert "weakest_dimension=rhythm" in bridge.system_prompt

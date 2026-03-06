@@ -22,6 +22,7 @@ from .auth_api import router as auth_router
 from .db import AsyncSessionLocal, init_db
 from .domains import SessionRuntime, build_session_runtime
 from .domains.music.api import router as music_router
+from .domains.music.context import build_music_live_context
 from .domains.music.render import verovio_runtime_status
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
 from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_INIT, CLIENT_STOP, CLIENT_VIDEO
@@ -220,6 +221,30 @@ def _decode_b64_payload(message: dict, field_name: str = "data_b64") -> bytes:
         raise ValueError(f"Invalid base64 payload in {field_name}") from exc
 
 
+async def _build_live_context_for_user(
+    *,
+    user_id: str,
+    skill: str,
+    goal: str | None,
+) -> str:
+    if not settings.live_context_enabled:
+        return ""
+    try:
+        async with AsyncSessionLocal() as db:
+            return await build_music_live_context(
+                db,
+                user_id=user_id,
+                skill=skill,
+                goal=goal,
+                attempt_limit=settings.live_context_attempt_limit,
+                library_limit=settings.live_context_library_limit,
+                max_chars=settings.live_context_max_chars,
+            )
+    except Exception as exc:
+        logger.warning("Failed to build live context packet: %s", exc)
+        return ""
+
+
 async def _forward_bridge_events(
     ws: WebSocket,
     bridge: GeminiLiveBridge,
@@ -313,15 +338,32 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         skill=resolved_skill,
         goal=session.goal,
     )
+    base_system_prompt = runtime.system_prompt(
+        settings.system_instructions,
+        settings.music_system_instructions,
+    )
+    live_context = await _build_live_context_for_user(
+        user_id=user["uid"],
+        skill=runtime.skill,
+        goal=session.goal,
+    )
+    if live_context:
+        system_prompt = (
+            f"{base_system_prompt}\n\n"
+            "Retrieved session context:\n"
+            f"{live_context}\n\n"
+            "Use this context as supporting memory only. Prioritize current live evidence. "
+            "When uncertain or conflicting, request replay/reframing before concluding."
+        )
+    else:
+        system_prompt = base_system_prompt
+
     bridge = GeminiLiveBridge(
         model_id=settings.model_id,
         location=settings.location,
         fallback_location=settings.fallback_location,
         project_id=settings.project_id,
-        system_prompt=runtime.system_prompt(
-            settings.system_instructions,
-            settings.music_system_instructions,
-        ),
+        system_prompt=system_prompt,
         skill=runtime.skill,
         goal=session.goal,
         user_key=user["uid"],

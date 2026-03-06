@@ -25,6 +25,9 @@ from app.domains.music import transcription as music_transcription_module
 from app.domains.music.compare import compare_performance_against_score
 from app.domains.music.feedback import comparison_calibration_for_profile
 from app.domains.music.models import (
+    MusicChallengeAttempt,
+    MusicCollaborationSession,
+    MusicEngagementProfile,
     MusicLessonAssignment,
     MusicPerformanceAttempt,
     MusicScore,
@@ -555,8 +558,11 @@ class FakeMusicDB:
     def __init__(self) -> None:
         self.scores = {}
         self.profiles = {}
+        self.engagement_profiles = {}
+        self.challenge_attempts = {}
         self.attempts = {}
         self.assignments = {}
+        self.collaboration_sessions = {}
         self._pending = []
 
     def add(self, instance) -> None:
@@ -570,10 +576,16 @@ class FakeMusicDB:
                 self.scores[pending.id] = pending
             elif isinstance(pending, MusicSkillProfile):
                 self.profiles[pending.user_id] = pending
+            elif isinstance(pending, MusicEngagementProfile):
+                self.engagement_profiles[pending.user_id] = pending
+            elif isinstance(pending, MusicChallengeAttempt):
+                self.challenge_attempts[pending.id] = pending
             elif isinstance(pending, MusicPerformanceAttempt):
                 self.attempts[pending.id] = pending
             elif isinstance(pending, MusicLessonAssignment):
                 self.assignments[pending.id] = pending
+            elif isinstance(pending, MusicCollaborationSession):
+                self.collaboration_sessions[pending.id] = pending
         self._pending = []
 
     async def refresh(self, instance) -> None:
@@ -590,6 +602,14 @@ class FakeMusicDB:
             if lookup_key is None:
                 return FakeScalarResult(scalars=self.profiles.values())
             return FakeScalarResult(self.profiles.get(lookup_key))
+        if entity is MusicEngagementProfile:
+            if lookup_key is None:
+                return FakeScalarResult(scalars=self.engagement_profiles.values())
+            return FakeScalarResult(self.engagement_profiles.get(lookup_key))
+        if entity is MusicChallengeAttempt:
+            if lookup_key is None:
+                return FakeScalarResult(scalars=self.challenge_attempts.values())
+            return FakeScalarResult(self.challenge_attempts.get(lookup_key))
         if entity is MusicPerformanceAttempt:
             if lookup_key is None:
                 return FakeScalarResult(scalars=self.attempts.values())
@@ -598,6 +618,10 @@ class FakeMusicDB:
             if lookup_key is None:
                 return FakeScalarResult(scalars=self.assignments.values())
             return FakeScalarResult(self.assignments.get(lookup_key))
+        if entity is MusicCollaborationSession:
+            if lookup_key is None:
+                return FakeScalarResult(scalars=self.collaboration_sessions.values())
+            return FakeScalarResult(self.collaboration_sessions.get(lookup_key))
         if lookup_key is None:
             return FakeScalarResult(scalars=self.scores.values())
         return FakeScalarResult(self.scores.get(lookup_key))
@@ -1178,3 +1202,155 @@ def test_teacher_student_detail_returns_attempts_heatmap_and_assignments(
     assert body["recent_attempts"]
     assert body["measure_heatmap"][0]["measure_index"] == 1
     assert body["assignments"][0]["title"] == "Rhythm cleanup"
+
+
+def test_engagement_call_response_challenge_updates_streak_and_milestones(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    score = build_stored_score()
+    fake_music_db.scores[score.id] = score
+
+    response = client.post(
+        "/api/music/engagement/challenges/run",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "score_id": str(score.id),
+            "mode": "CALL_RESPONSE",
+            "audio_b64": base64.b64encode(synth_phrase([261.63, 293.66, 329.63])).decode("ascii"),
+            "mime": "audio/pcm;rate=16000",
+            "measure_index": 1,
+            "max_notes": 12,
+            "instrument_profile": "PIANO",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "CALL_RESPONSE"
+    assert body["profile"]["total_challenge_attempts"] == 1
+    assert body["profile"]["practice_streak_days"] >= 1
+    if body["completed"]:
+        assert "first-challenge-completed" in body["profile"]["milestones"]
+    assert fake_music_db.challenge_attempts
+    assert "music-user" in fake_music_db.engagement_profiles
+
+
+def test_engagement_tempo_ladder_challenge_mode_runs(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    score = build_stored_score()
+    fake_music_db.scores[score.id] = score
+
+    response = client.post(
+        "/api/music/engagement/challenges/run",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "score_id": str(score.id),
+            "mode": "TEMPO_LADDER",
+            "audio_b64": base64.b64encode(synth_phrase([261.63, 293.66, 329.63])).decode("ascii"),
+            "mime": "audio/pcm;rate=16000",
+            "measure_index": 1,
+            "max_notes": 12,
+            "target_tempo_bpm": 146,
+            "tempo_tolerance_bpm": 25,
+            "instrument_profile": "PIANO",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "TEMPO_LADDER"
+    assert body["comparison"]["score_id"] == str(score.id)
+    assert body["accuracy"] >= 0.0
+
+
+def test_engagement_telemetry_reports_completion_rates(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    score = build_stored_score()
+    fake_music_db.scores[score.id] = score
+
+    client.post(
+        "/api/music/engagement/challenges/run",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "score_id": str(score.id),
+            "mode": "CALL_RESPONSE",
+            "audio_b64": base64.b64encode(synth_phrase([261.63, 293.66, 329.63])).decode("ascii"),
+            "mime": "audio/pcm;rate=16000",
+            "measure_index": 1,
+            "max_notes": 12,
+        },
+    )
+    client.post(
+        "/api/music/engagement/challenges/run",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "score_id": str(score.id),
+            "mode": "CALL_RESPONSE",
+            "audio_b64": base64.b64encode(synth_phrase([261.63, 311.13, 329.63])).decode("ascii"),
+            "mime": "audio/pcm;rate=16000",
+            "measure_index": 1,
+            "max_notes": 12,
+        },
+    )
+
+    telemetry = client.get(
+        "/api/music/engagement/telemetry",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert telemetry.status_code == 200
+    body = telemetry.json()
+    assert body["total_attempts"] == 2
+    assert body["by_mode"]
+    call_response = next(item for item in body["by_mode"] if item["mode"] == "CALL_RESPONSE")
+    assert call_response["attempts"] == 2
+    assert 0.0 <= call_response["completion_rate"] <= 1.0
+
+
+def test_collaboration_session_syncs_active_measure_and_phrase(
+    client: TestClient,
+    fake_music_db: FakeMusicDB,
+) -> None:
+    score = build_stored_score()
+    fake_music_db.scores[score.id] = score
+
+    created = client.post(
+        "/api/music/engagement/collaboration/sessions",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "score_id": str(score.id),
+            "active_measure_index": 1,
+            "target_phrase": "C4 D4 E4",
+        },
+    )
+
+    assert created.status_code == 200
+    session_id = created.json()["session_id"]
+
+    synced = client.post(
+        f"/api/music/engagement/collaboration/sessions/{session_id}/sync",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "active_measure_index": 2,
+            "target_phrase": "G4 A4",
+            "status": "PAUSED",
+        },
+    )
+
+    assert synced.status_code == 200
+    sync_body = synced.json()
+    assert sync_body["active_measure_index"] == 2
+    assert sync_body["target_phrase"] == "G4 A4"
+    assert sync_body["status"] == "PAUSED"
+
+    fetched = client.get(
+        f"/api/music/engagement/collaboration/sessions/{session_id}",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["active_measure_index"] == 2

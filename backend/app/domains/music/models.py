@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from ...models import Base
@@ -96,5 +96,63 @@ class MusicLessonAssignment(Base):
     target_measures: list[int] | None = Column(JSONB, nullable=True)
 
     due_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class MusicEngagementProfile(Base):
+    """Persisted engagement counters and streak state per user."""
+
+    __tablename__ = "music_engagement_profiles"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: str = Column(String, nullable=False, unique=True, index=True)
+
+    practice_streak_days: int = Column(Integer, nullable=False, default=0, server_default="0")
+    longest_streak_days: int = Column(Integer, nullable=False, default=0, server_default="0")
+    total_challenge_attempts: int = Column(Integer, nullable=False, default=0, server_default="0")
+    total_challenge_completions: int = Column(Integer, nullable=False, default=0, server_default="0")
+    last_activity_date = Column(Date, nullable=True)
+    milestones: list[str] | None = Column(JSONB, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class MusicChallengeAttempt(Base):
+    """Challenge run telemetry row for completion-rate analytics."""
+
+    __tablename__ = "music_challenge_attempts"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: str = Column(String, nullable=False, index=True)
+    score_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), nullable=True, index=True)
+    measure_index: Optional[int] = Column(Integer, nullable=True, index=True)
+    mode: str = Column(String(32), nullable=False, index=True)
+    instrument_profile: str = Column(String(16), nullable=False, default="AUTO", server_default="AUTO")
+
+    target_tempo_bpm: Optional[float] = Column(Float, nullable=True)
+    played_tempo_bpm: Optional[float] = Column(Float, nullable=True)
+    accuracy: float = Column(Float, nullable=False)
+    completed: bool = Column(Boolean, nullable=False, default=False, server_default="false")
+    completion_reason: str = Column(Text, nullable=False, default="", server_default="")
+    needs_replay: bool = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MusicCollaborationSession(Base):
+    """Shared score-state sync primitives for supervised collaboration."""
+
+    __tablename__ = "music_collaboration_sessions"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_user_id: str = Column(String, nullable=False, index=True)
+    score_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), nullable=True, index=True)
+    active_measure_index: Optional[int] = Column(Integer, nullable=True)
+    target_phrase: str = Column(Text, nullable=False, default="", server_default="")
+    participants: list[str] | None = Column(JSONB, nullable=True)
+    status: str = Column(String(24), nullable=False, default="ACTIVE", server_default="ACTIVE")
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

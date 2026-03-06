@@ -37,6 +37,7 @@ jobs:
       VISTA_FALLBACK_LOCATION: ${{ vars.VISTA_FALLBACK_LOCATION }}
       VISTA_PROJECT_ID: ${{ vars.VISTA_PROJECT_ID }}
       VISTA_USE_ADK: ${{ vars.VISTA_USE_ADK }}
+      VISTA_SESSION_COOKIE_SECURE: ${{ vars.VISTA_SESSION_COOKIE_SECURE }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4

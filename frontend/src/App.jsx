@@ -7,8 +7,6 @@ export default function App() {
   const [signingIn, setSigningIn] = useState(false);
   const [isEnteringWorkspace, setIsEnteringWorkspace] = useState(false);
   const {
-    firebaseConfigText,
-    setFirebaseConfigText,
     email,
     setEmail,
     password,
@@ -50,8 +48,10 @@ export default function App() {
     }
     setSigningIn(true);
     try {
-      await handleSignIn();
-      setIsEnteringWorkspace(true);
+      const signedIn = await handleSignIn();
+      if (signedIn) {
+        setIsEnteringWorkspace(true);
+      }
     } finally {
       setSigningIn(false);
     }
@@ -67,16 +67,25 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [isAuthenticated, isEnteringWorkspace]);
 
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (isAuthenticated && path !== "/workspace") {
+      window.history.replaceState({}, "", "/workspace");
+      return;
+    }
+    if (!isAuthenticated && path === "/workspace") {
+      window.history.replaceState({}, "", "/");
+    }
+  }, [isAuthenticated]);
+
   if (!isAuthenticated || isEnteringWorkspace) {
     return (
       <LandingPage
         authStatus={authStatus}
         errorMessage={errorMessage}
         signingIn={signingIn}
-        firebaseConfigText={firebaseConfigText}
         email={email}
         password={password}
-        onFirebaseConfigChange={setFirebaseConfigText}
         onEmailChange={setEmail}
         onPasswordChange={setPassword}
         onSignIn={handleLandingSignIn}
@@ -92,7 +101,6 @@ export default function App() {
       skill={skill}
       onSkillChange={setSkill}
       authPanelProps={{
-        firebaseConfigText,
         email,
         password,
         authStatus,
@@ -105,7 +113,6 @@ export default function App() {
         skill,
         isBusy,
         primaryActionLabel,
-        onFirebaseConfigChange: setFirebaseConfigText,
         onEmailChange: setEmail,
         onPasswordChange: setPassword,
         onSignIn: handleSignIn,

@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 
 export default function AuthPanel({
-  firebaseConfigText,
   email,
   password,
   authStatus,
@@ -24,7 +23,6 @@ export default function AuthPanel({
   skill,
   isBusy,
   primaryActionLabel,
-  onFirebaseConfigChange,
   onEmailChange,
   onPasswordChange,
   onSignIn,
@@ -38,16 +36,10 @@ export default function AuthPanel({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-              Firebase config
+              Authentication
             </label>
             <div className="text-[11px] text-slate-400">{authStatus}</div>
           </div>
-          <textarea
-            value={firebaseConfigText}
-            onChange={(event) => onFirebaseConfigChange(event.target.value)}
-            rows={5}
-            className="w-full rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-3 text-xs text-slate-200 outline-none focus:border-sky-300/60"
-          />
           <div className="grid gap-3 md:grid-cols-2">
             <input
               value={email}
@@ -70,6 +62,7 @@ export default function AuthPanel({
           >
             Sign In
           </button>
+          <p className="text-xs text-slate-400">Leave email and password blank to sign in anonymously.</p>
         </div>
 
         <div className="space-y-4 rounded-3xl border border-white/10 bg-slate-950/40 p-4">

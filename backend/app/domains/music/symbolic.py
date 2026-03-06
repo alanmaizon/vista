@@ -112,6 +112,7 @@ class SymbolicPhrase:
     summary: str = ""
     warnings: tuple[str, ...] = ()
     tempo_bpm: float | None = None
+    performance_feedback: dict[str, float] | None = None
 
 
 @dataclass(frozen=True)

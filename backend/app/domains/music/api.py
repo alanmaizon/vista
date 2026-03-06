@@ -57,6 +57,7 @@ class MusicTranscriptionResponse(BaseModel):
     harmony_hint: str | None
     summary: str
     warnings: list[str]
+    performance_feedback: dict[str, float]
     notes: list[dict]
 
 
@@ -149,6 +150,7 @@ class MusicPerformanceCompareResponse(BaseModel):
     expected_notes: list[dict]
     played_phrase: dict
     comparisons: list[dict]
+    performance_feedback: dict[str, float]
 
 
 class MusicLessonStepRequest(BaseModel):

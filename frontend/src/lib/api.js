@@ -17,6 +17,7 @@ export async function readJsonResponse(response) {
 export async function apiRequest(path, { method = "GET", token = null, body = null } = {}) {
   const response = await fetch(path, {
     method,
+    credentials: "include",
     headers: {
       ...(body ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

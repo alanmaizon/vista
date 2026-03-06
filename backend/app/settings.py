@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     fallback_location: str = "us-central1"
     use_adk: bool = False
     firebase_web_config: str = ""
+    session_cookie_name: str = "eurydice_session"
+    session_cookie_secure: bool = False
+    session_cookie_samesite: str = "lax"
+    session_cookie_domain: str = ""
+    session_cookie_max_age_seconds: int = 60 * 60 * 24 * 5
     music_system_instructions: str = DEFAULT_MUSIC_SYSTEM_INSTRUCTIONS
     project_id: str = Field(
         default_factory=lambda: (

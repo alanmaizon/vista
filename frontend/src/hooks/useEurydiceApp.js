@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useLiveConnection from "./useLiveConnection";
 import { apiRequest } from "../lib/api";
 import { capturePcmClip } from "../lib/audioCapture";
-import { signInWithFirebase } from "../lib/firebaseBrowser";
 import { playPhrase } from "../lib/playback";
 
 export const SKILLS = [
@@ -25,24 +24,6 @@ export const SKILLS = [
 
 function appendTimestamped(items, role, text) {
   return [...items, { role, text, id: `${Date.now()}-${items.length}` }];
-}
-
-function normalizeFirebaseConfigText(rawValue) {
-  const trimmed = rawValue.trim();
-  if (!trimmed) {
-    throw new Error(
-      "Firebase config is missing. Paste it in, or set VISTA_FIREBASE_WEB_CONFIG on the backend.",
-    );
-  }
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Firebase config must be a JSON object.");
-    }
-    return parsed;
-  } catch {
-    throw new Error("Firebase config must be valid JSON.");
-  }
 }
 
 function scoreIsDirty(scoreLine, activeScore) {
@@ -86,11 +67,10 @@ function initialLessonState() {
 }
 
 export default function useEurydiceApp() {
-  const [firebaseConfigText, setFirebaseConfigText] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [user, setUser] = useState(null);
-  const [authStatus, setAuthStatus] = useState("Loading Firebase config...");
+  const [authStatus, setAuthStatus] = useState("Checking session...");
   const [skill, setSkill] = useState("GUIDED_LESSON");
   const [status, setStatus] = useState("Ready.");
   const [errorMessage, setErrorMessage] = useState("");
@@ -219,34 +199,26 @@ export default function useEurydiceApp() {
     [appendCaption],
   );
 
-  const getIdToken = useCallback(async () => {
-    if (!user) {
-      throw new Error("Sign in first.");
-    }
-    return user.getIdToken(true);
-  }, [user]);
-
   useEffect(() => {
     let active = true;
-    async function loadClientConfig() {
+    async function loadSessionUser() {
       try {
-        const payload = await apiRequest("/api/client-config");
-        const firebaseConfig = payload?.firebaseConfig;
-        if (active && firebaseConfig) {
-          setFirebaseConfigText(JSON.stringify(firebaseConfig, null, 2));
-          setAuthStatus("Firebase config loaded. Click Sign In.");
-        } else if (active) {
-          setAuthStatus(
-            "Firebase config is missing. Paste it in, or set VISTA_FIREBASE_WEB_CONFIG on the backend.",
-          );
+        const payload = await apiRequest("/api/auth/me");
+        if (!active) {
+          return;
         }
+        setUser(payload);
+        setAuthStatus(`Signed in as ${payload.email || payload.uid}`);
+        setStatus("Signed in.");
       } catch {
-        if (active) {
-          setAuthStatus("Unable to load Firebase config automatically. Paste it in to continue.");
+        if (!active) {
+          return;
         }
+        setUser(null);
+        setAuthStatus("Signed out. Click Sign In.");
       }
     }
-    void loadClientConfig();
+    void loadSessionUser();
     return () => {
       active = false;
     };
@@ -260,8 +232,7 @@ export default function useEurydiceApp() {
     let active = true;
     async function loadRuntime() {
       try {
-        const token = await user.getIdToken(true);
-        const payload = await apiRequest("/api/music/runtime", { token });
+        const payload = await apiRequest("/api/music/runtime");
         if (!active) {
           return;
         }
@@ -356,16 +327,23 @@ export default function useEurydiceApp() {
   const handleSignIn = useCallback(async () => {
     setErrorMessage("");
     try {
-      const config = normalizeFirebaseConfigText(firebaseConfigText);
-      const signedInUser = await signInWithFirebase(config, { email: email.trim(), password });
-      setUser(signedInUser);
-      setAuthStatus(`Signed in as ${signedInUser.email || signedInUser.uid}`);
+      const payload = await apiRequest("/api/auth/login", {
+        method: "POST",
+        body: {
+          email: email.trim() || null,
+          password: password || null,
+        },
+      });
+      setUser(payload);
+      setAuthStatus(`Signed in as ${payload.email || payload.uid}`);
       setStatus("Signed in.");
+      return true;
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Sign-in failed.");
       setStatus("Sign-in failed.");
+      return false;
     }
-  }, [email, firebaseConfigText, password]);
+  }, [email, password]);
 
   const runLessonAction = useCallback(
     async ({ sourceTextOverride = null, forcedPrepare = false } = {}) => {
@@ -374,7 +352,6 @@ export default function useEurydiceApp() {
         throw new Error("Sign in before starting the guided lesson.");
       }
 
-      const token = await getIdToken();
       const currentScoreLine = (sourceTextOverride ?? scoreLine).trim();
       const prepared = activeScore && !scoreIsDirty(currentScoreLine, activeScore);
       const awaitingCompare = prepared && lessonState.stage === "awaiting-compare" && !forcedPrepare;
@@ -416,7 +393,6 @@ export default function useEurydiceApp() {
 
       const payload = await apiRequest("/api/music/lesson-action", {
         method: "POST",
-        token,
         body,
       });
 
@@ -435,7 +411,6 @@ export default function useEurydiceApp() {
       applyComparisonPayload,
       applyLessonPayload,
       applyPreparedScorePayload,
-      getIdToken,
       lessonState.measureIndex,
       lessonState.stage,
       micEnabled,
@@ -452,13 +427,11 @@ export default function useEurydiceApp() {
     if (!micEnabled) {
       throw new Error("Turn the microphone on before capturing a phrase.");
     }
-    const token = await getIdToken();
     setStatus("Recording a short phrase...");
     const clip = await capturePcmClip({ mode: "music" });
     setStatus("Transcribing phrase...");
     const payload = await apiRequest("/api/music/transcribe", {
       method: "POST",
-      token,
       body: {
         audio_b64: clip.audioB64,
         mime: clip.mime,
@@ -472,7 +445,7 @@ export default function useEurydiceApp() {
     for (const warning of payload.warnings ?? []) {
       appendCaption("Warning", warning);
     }
-  }, [appendCaption, getIdToken, micEnabled, user]);
+  }, [appendCaption, micEnabled, user]);
 
   const startReadScoreSession = useCallback(async () => {
     setErrorMessage("");
@@ -482,11 +455,9 @@ export default function useEurydiceApp() {
     if (!cameraEnabled) {
       throw new Error("Turn the camera on before reading a score.");
     }
-    const token = await getIdToken();
     setStatus("Creating live score reader...");
     const session = await apiRequest("/api/sessions", {
       method: "POST",
-      token,
       body: {
         domain: "MUSIC",
         mode: "READ_SCORE",
@@ -497,13 +468,12 @@ export default function useEurydiceApp() {
     setLiveMode("READ_SCORE");
     setCameraCapturePending(true);
     connect({
-      token,
       sessionId: session.id,
       mode: "READ_SCORE",
     });
     setStatus("Opening live score reader...");
     appendCaption("Setup", "Keep one short bar centered and steady until Eurydice captures a NOTE_LINE.");
-  }, [appendCaption, cameraEnabled, connect, getIdToken, user]);
+  }, [appendCaption, cameraEnabled, connect, user]);
 
   const stopLiveSession = useCallback(() => {
     if (isConnected) {
@@ -704,8 +674,6 @@ export default function useEurydiceApp() {
   }, [runtimeStatus.crepeAvailable, runtimeStatus.verovioAvailable]);
 
   return {
-    firebaseConfigText,
-    setFirebaseConfigText,
     email,
     setEmail,
     password,

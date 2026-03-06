@@ -19,7 +19,7 @@ export default function useLiveConnection({ onMessage, onOpen, onClose, onError 
   }, []);
 
   const connect = useCallback(
-    ({ token, sessionId, mode = "HEAR_PHRASE" } = {}) => {
+    ({ token = "", sessionId, mode = "HEAR_PHRASE" } = {}) => {
       if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) {
         return;
       }
@@ -34,7 +34,7 @@ export default function useLiveConnection({ onMessage, onOpen, onClose, onError 
         ws.send(
           JSON.stringify({
             type: "client.init",
-            token: token ?? "",
+            token,
             session_id: sessionId ?? "",
             mode,
           }),

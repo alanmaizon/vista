@@ -17,7 +17,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
-from .auth import init_firebase, verify_firebase_token
+from .auth import init_firebase, verify_firebase_session_cookie, verify_firebase_token
+from .auth_api import router as auth_router
 from .db import AsyncSessionLocal, init_db
 from .domains import SessionRuntime, build_session_runtime
 from .domains.music.api import router as music_router
@@ -42,6 +43,7 @@ PUBLIC_FIREBASE_WEB_CONFIG_KEYS = {
 }
 
 app = FastAPI(title="Eurydice", version="0.3.0")
+app.include_router(auth_router)
 app.include_router(sessions_router)
 app.include_router(music_router)
 
@@ -101,6 +103,12 @@ async def index() -> FileResponse:
     if react_index is not None and react_index.is_file():
         return FileResponse(react_index)
     return FileResponse(STATIC_DIR / "music.html")
+
+
+@app.get("/workspace")
+async def workspace() -> FileResponse:
+    """Serve the main client app entrypoint for authenticated workspace routing."""
+    return await index()
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -242,9 +250,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     await ws.accept()
 
     token = ws.query_params.get("token", "").strip()
+    session_cookie = ws.cookies.get(settings.session_cookie_name, "").strip()
     session_id_raw = ws.query_params.get("session_id", "").strip()
     skill = ws.query_params.get("mode", "HEAR_PHRASE").strip().upper() or "HEAR_PHRASE"
-    if not token or not session_id_raw:
+    if not session_id_raw:
         try:
             init_message = await ws.receive_json()
         except WebSocketDisconnect:
@@ -268,8 +277,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         token = str(init_message.get("token", "")).strip()
         session_id_raw = str(init_message.get("session_id", "")).strip()
         skill = str(init_message.get("mode", "HEAR_PHRASE")).strip().upper() or "HEAR_PHRASE"
-        if not token or not session_id_raw:
-            await ws.send_json({"type": "error", "message": "Missing token or session_id in client.init"})
+        if not session_id_raw:
+            await ws.send_json({"type": "error", "message": "Missing session_id in client.init"})
             await ws.close(code=1008)
             return
 
@@ -281,7 +290,12 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         return
 
     try:
-        user = await asyncio.to_thread(verify_firebase_token, token)
+        if token:
+            user = await asyncio.to_thread(verify_firebase_token, token)
+        elif session_cookie:
+            user = await asyncio.to_thread(verify_firebase_session_cookie, session_cookie)
+        else:
+            raise HTTPException(status_code=401, detail="Missing token or auth session cookie")
         session = await _load_owned_session(session_id, user["uid"])
     except HTTPException as exc:
         await ws.send_json({"type": "error", "message": exc.detail})

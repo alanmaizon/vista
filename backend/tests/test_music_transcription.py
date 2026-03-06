@@ -135,6 +135,15 @@ def test_transcription_to_dict_includes_tempo() -> None:
 
     assert "tempo_bpm" in d
     assert d["tempo_bpm"] == result.tempo_bpm
+    assert "performance_feedback" in d
+    assert set(d["performance_feedback"]) == {
+        "pitchAccuracy",
+        "rhythmAccuracy",
+        "tempoStability",
+        "dynamicRange",
+        "articulationVariance",
+    }
+    assert 0.0 <= d["performance_feedback"]["pitchAccuracy"] <= 1.0
     for note_dict in d["notes"]:
         assert "beats" in note_dict
 
@@ -552,6 +561,13 @@ def test_music_transcribe_endpoint_returns_symbolic_notes(client: TestClient) ->
     body = response.json()
     assert body["kind"] == "single_note"
     assert body["notes"][0]["note_name"] == "A4"
+    assert set(body["performance_feedback"]) == {
+        "pitchAccuracy",
+        "rhythmAccuracy",
+        "tempoStability",
+        "dynamicRange",
+        "articulationVariance",
+    }
 
 
 def test_music_runtime_status_endpoint_reports_verovio_state(
@@ -690,6 +706,14 @@ def test_compare_performance_endpoint_returns_alignment_feedback(
     assert body["match"] is False
     assert body["played_phrase"]["notes"]
     assert body["mismatches"]
+    assert set(body["performance_feedback"]) == {
+        "pitchAccuracy",
+        "rhythmAccuracy",
+        "tempoStability",
+        "dynamicRange",
+        "articulationVariance",
+    }
+    assert 0.0 <= body["performance_feedback"]["pitchAccuracy"] <= 1.0
 
 
 def test_compare_performance_endpoint_can_scope_to_one_measure(

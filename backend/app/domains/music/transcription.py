@@ -11,6 +11,7 @@ import struct
 from dataclasses import asdict
 
 from .crepe import estimate_pitch_crepe
+from .feedback import feedback_from_phrase
 from .pitch import estimate_pitch_fastyin
 from .symbolic import (
     NOTE_NAMES,
@@ -412,6 +413,7 @@ def transcribe_pcm16(
         )
 
     if not events:
+        feedback = feedback_from_phrase(samples=samples, notes=(), confidence=0.0)
         return SymbolicPhrase(
             kind="unknown",
             notes=(),
@@ -419,6 +421,7 @@ def transcribe_pcm16(
             confidence=0.0,
             summary="I could not confirm a stable pitched phrase from this clip.",
             warnings=tuple(dict.fromkeys(warnings)),
+            performance_feedback=feedback.to_dict(),
         )
 
     if len(events) == 1:
@@ -432,6 +435,7 @@ def transcribe_pcm16(
         kind = "arpeggio_candidate"
 
     avg_confidence = round(sum(event.confidence for event in events) / len(events), 3)
+    feedback = feedback_from_phrase(samples=samples, notes=events, confidence=avg_confidence)
     interval_hint = _interval_hint(events)
     harmony_hint = _harmony_hint(events)
 
@@ -453,6 +457,7 @@ def transcribe_pcm16(
         summary="".join(summary_parts).strip(),
         warnings=tuple(dict.fromkeys(warnings)),
         tempo_bpm=tempo_bpm,
+        performance_feedback=feedback.to_dict(),
     )
 
 
@@ -467,5 +472,6 @@ def transcription_to_dict(result: SymbolicPhrase) -> dict:
         "summary": result.summary,
         "warnings": list(result.warnings),
         "tempo_bpm": result.tempo_bpm,
+        "performance_feedback": result.performance_feedback,
         "notes": [asdict(note) for note in result.notes],
     }

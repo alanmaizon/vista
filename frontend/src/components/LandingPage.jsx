@@ -138,10 +138,8 @@ export default function LandingPage({
   authStatus,
   errorMessage,
   signingIn,
-  firebaseConfigText,
   email,
   password,
-  onFirebaseConfigChange,
   onEmailChange,
   onPasswordChange,
   onSignIn,
@@ -223,38 +221,24 @@ export default function LandingPage({
           </button>
           <p className="mt-4 text-sm text-slate-300">{authStatus}</p>
           {errorMessage ? <p className="mt-2 text-sm text-rose-300">{errorMessage}</p> : null}
-
-          <details className="mx-auto mt-8 max-w-2xl text-left">
-            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
-              Advanced connection settings
-            </summary>
-            <div className="mt-3 rounded-2xl border border-white/15 bg-white/5 p-4">
-              <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-                Firebase config
-              </label>
-              <textarea
-                value={firebaseConfigText}
-                onChange={(event) => onFirebaseConfigChange(event.target.value)}
-                rows={5}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-slate-200 outline-none focus:border-sky-300/60"
-              />
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                <input
-                  value={email}
-                  onChange={(event) => onEmailChange(event.target.value)}
-                  placeholder="Email (optional)"
-                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-300/60"
-                />
-                <input
-                  value={password}
-                  onChange={(event) => onPasswordChange(event.target.value)}
-                  type="password"
-                  placeholder="Password (optional)"
-                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-300/60"
-                />
-              </div>
-            </div>
-          </details>
+          <div className="mx-auto mt-7 grid w-full max-w-2xl gap-2 rounded-2xl border border-white/15 bg-white/5 p-4 text-left md:grid-cols-2">
+            <input
+              value={email}
+              onChange={(event) => onEmailChange(event.target.value)}
+              placeholder="Email (optional)"
+              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-300/60"
+            />
+            <input
+              value={password}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              type="password"
+              placeholder="Password (optional)"
+              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-300/60"
+            />
+            <p className="md:col-span-2 text-xs text-slate-300">
+              Leave both blank for anonymous challenge sign-in.
+            </p>
+          </div>
         </div>
         <a
           href="#eurydice-features"

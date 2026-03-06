@@ -25,10 +25,19 @@
 - `VISTA_FALLBACK_LOCATION`
   - Defaults to `us-central1`
 - `VISTA_FIREBASE_WEB_CONFIG`
-  - Public client config, not a true secret
+  - Public client config used by the backend auth exchange and the frontend
+  - Must include `apiKey`
   - May still be stored in Secret Manager for consistency
 - `VISTA_FIREBASE_WEB_CONFIG_SECRET_NAME`
   - If set, the deploy script mounts `VISTA_FIREBASE_WEB_CONFIG` from Secret Manager
+- `VISTA_SESSION_COOKIE_NAME`
+  - Defaults to `eurydice_session`
+- `VISTA_SESSION_COOKIE_SECURE`
+  - Set this to `true` in Cloud Run / HTTPS
+- `VISTA_SESSION_COOKIE_SAMESITE`
+  - Defaults to `lax`
+- `VISTA_SESSION_COOKIE_MAX_AGE_SECONDS`
+  - Defaults to 5 days
 - `VISTA_PROJECT_ID`
   - Usually not needed if ADC already resolves the Google Cloud project id
 - `VISTA_USE_ADK`
@@ -84,13 +93,14 @@
   - `VISTA_FALLBACK_LOCATION`
   - `VISTA_PROJECT_ID`
   - `VISTA_USE_ADK`
+  - `VISTA_SESSION_COOKIE_SECURE` (`true` recommended in Cloud Run)
 - The workflow calls the same `infra/deploy_cloudrun.sh` script, so local and CI deploys stay aligned.
 
 ## Local development
 
 - Run Postgres locally and point the backend to it with `DB_HOST` and `DB_PORT`.
-- Use a Firebase dev project and paste the Firebase web config JSON into the browser client.
-- If email/password fields are blank, the browser client attempts anonymous sign-in.
+- Use a Firebase dev project and set `VISTA_FIREBASE_WEB_CONFIG` in `backend/.env`.
+- If email/password fields are blank, the backend performs anonymous sign-in and issues a session cookie.
 - For real Eurydice SVG score rendering, install the optional music stack:
   - `pip install -r backend/requirements-music.txt`
   - Without that extra dependency, Eurydice render endpoints still return MusicXML fallback payloads.

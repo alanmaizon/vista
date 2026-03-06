@@ -19,8 +19,8 @@ This is the shortest path to a working local Eurydice environment.
 
 - Create or select a Firebase project, then add a Web app.
 - Copy the Firebase Web config JSON.
-- Fastest path: set `VISTA_FIREBASE_WEB_CONFIG` in `backend/.env` to that JSON as a single-quoted string so the UI auto-loads it.
-- Fallback path: paste the same JSON into the `Firebase Config JSON` field in the browser client.
+- Set `VISTA_FIREBASE_WEB_CONFIG` in `backend/.env` to that JSON as a single-quoted string.
+- Keep `apiKey` in that JSON. The backend now uses it for server-side sign-in and session cookie issuance.
 - In Firebase Authentication, enable `Anonymous` sign-in. If you want email/password login, enable `Email/Password` too.
 - In Firebase Console, open `Project settings` > `Service accounts` and generate a JSON key for Firebase Admin SDK.
 - Put that JSON file somewhere outside the repo if possible, then set `FIREBASE_SERVICE_ACCOUNT_JSON` in `backend/.env` to that file path.

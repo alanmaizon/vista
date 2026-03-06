@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+from .feedback import PerformanceFeedback, feedback_from_comparison
 from .symbolic import note_name_to_midi
 from .transcription import transcribe_pcm16, transcription_to_dict
 from .models import MusicScore
@@ -44,6 +45,7 @@ class PerformanceComparison:
     expected_notes: tuple[dict, ...]
     played_phrase: dict
     comparisons: tuple[ComparedEvent, ...]
+    performance_feedback: dict[str, float]
 
 
 def _flatten_expected_notes(score: MusicScore) -> list[dict]:
@@ -337,6 +339,20 @@ def compare_performance_against_score(
             f"Alignment {round(accuracy * 100)}%."
         )
 
+    phrase_feedback = phrase.performance_feedback if isinstance(phrase.performance_feedback, dict) else None
+    performance_feedback = feedback_from_comparison(
+        comparisons,
+        baseline=None
+        if phrase_feedback is None
+        else PerformanceFeedback(
+            pitch_accuracy=0.0,
+            rhythm_accuracy=0.0,
+            tempo_stability=0.0,
+            dynamic_range=float(phrase_feedback.get("dynamicRange", 0.0)),
+            articulation_variance=float(phrase_feedback.get("articulationVariance", 0.0)),
+        ),
+    ).to_dict()
+
     return PerformanceComparison(
         needs_replay=needs_replay,
         match=match,
@@ -347,6 +363,7 @@ def compare_performance_against_score(
         expected_notes=tuple(expected_notes),
         played_phrase=transcription_to_dict(phrase),
         comparisons=tuple(comparisons),
+        performance_feedback=performance_feedback,
     )
 
 
@@ -362,4 +379,5 @@ def comparison_to_dict(result: PerformanceComparison) -> dict[str, object]:
         "expected_notes": list(result.expected_notes),
         "played_phrase": result.played_phrase,
         "comparisons": [asdict(item) for item in result.comparisons],
+        "performance_feedback": result.performance_feedback,
     }

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import AudioReactiveOrb from "./AudioReactiveOrb";
 import {
   BarChart3,
   BookOpenText,
@@ -183,6 +184,17 @@ export default function LandingPage({
     >
       <section className="landing-hero-gradient relative flex min-h-screen items-center justify-center overflow-hidden px-5 py-16 text-center">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.16),transparent_40%),radial-gradient(circle_at_80%_80%,rgba(99,102,241,0.14),transparent_36%)]" />
+        <div className="hero-orb-shell absolute inset-0">
+          <AudioReactiveOrb
+            active={false}
+            audioSource="microphone"
+            intensity={0.95}
+            size="hero"
+            theme="nebula"
+            className="hero-orb"
+          />
+        </div>
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(8,15,34,0),rgba(3,7,18,0.48)_58%,rgba(3,7,18,0.82)_100%)]" />
         <div className="relative z-10 mx-auto max-w-4xl">
           <div className="mb-6 inline-flex items-center rounded-full border border-white/20 bg-white/8 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-200">
             Gemini Live Agent Challenge

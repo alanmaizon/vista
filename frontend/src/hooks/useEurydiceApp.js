@@ -435,7 +435,6 @@ export default function useEurydiceApp() {
       if (Date.now() - start > 6000) {
         throw new Error("Timed out waiting for guided lesson live connection.");
       }
-      // eslint-disable-next-line no-await-in-loop
       await new Promise((resolve) => window.setTimeout(resolve, 120));
     }
   }, [connect, liveMode, sessionId, user]);

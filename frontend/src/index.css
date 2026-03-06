@@ -50,6 +50,30 @@
   }
 }
 
+@keyframes eurydice-orb-drift {
+  0% {
+    transform: translate3d(-50%, -47%, 0) scale(0.985);
+  }
+  50% {
+    transform: translate3d(-50%, -50%, 0) scale(1.015);
+  }
+  100% {
+    transform: translate3d(-50%, -47%, 0) scale(0.985);
+  }
+}
+
+@keyframes eurydice-orb-panel-drift {
+  0% {
+    transform: translate3d(0, -50%, 0) scale(0.98);
+  }
+  50% {
+    transform: translate3d(0, -52%, 0) scale(1.02);
+  }
+  100% {
+    transform: translate3d(0, -50%, 0) scale(0.98);
+  }
+}
+
 @layer components {
   .landing-hero-gradient {
     background:
@@ -58,6 +82,51 @@
       linear-gradient(132deg, #030712 0%, #0b1430 45%, #111827 100%);
     background-size: 160% 160%;
     animation: eurydice-gradient-shift 18s ease-in-out infinite;
+  }
+
+  .orb-shell {
+    isolation: isolate;
+    filter: saturate(115%);
+  }
+
+  .orb-layer canvas {
+    display: block;
+    height: 100%;
+    width: 100%;
+  }
+
+  .hero-orb-shell {
+    pointer-events: none;
+  }
+
+  .hero-orb {
+    left: 50%;
+    position: absolute;
+    top: 50%;
+    transform: translate3d(-50%, -47%, 0);
+    animation: eurydice-orb-drift 14s ease-in-out infinite;
+  }
+
+  .hero-orb::before {
+    content: "";
+    position: absolute;
+    inset: -14%;
+    border-radius: 9999px;
+    background:
+      radial-gradient(circle at 50% 50%, rgb(125 211 252 / 0.2), transparent 44%),
+      radial-gradient(circle at 50% 60%, rgb(99 102 241 / 0.18), transparent 62%);
+    filter: blur(38px);
+    z-index: -1;
+  }
+
+  .workspace-orb-panel {
+    min-height: 10rem;
+  }
+
+  .workspace-orb-shell {
+    pointer-events: none;
+    opacity: 0.92;
+    animation: eurydice-orb-panel-drift 18s ease-in-out infinite;
   }
 
   .parallax-section {
@@ -125,6 +194,15 @@
 
 @media (width <= 768px) {
   @layer components {
+    .hero-orb {
+      transform: translate3d(-50%, -41%, 0);
+    }
+
+    .workspace-orb-shell {
+      opacity: 0.58;
+      right: -5.5rem;
+    }
+
     .parallax-section {
       background-attachment: scroll;
     }
@@ -140,6 +218,11 @@
       transition: none !important;
       transform: none !important;
       opacity: 1 !important;
+    }
+
+    .hero-orb,
+    .workspace-orb-shell {
+      animation: none !important;
     }
   }
 }

@@ -103,6 +103,12 @@ export default function App() {
   return (
     <AppLayout
       authStatus={authStatus}
+      orbProps={{
+        audioSource: "microphone",
+        active: micEnabled && isConnected,
+        intensity: 0.88,
+        theme: "aurora",
+      }}
       authPanelProps={{
         email,
         password,

@@ -1,10 +1,12 @@
 import { Music4 } from "lucide-react";
+import AudioReactiveOrb from "./AudioReactiveOrb";
 import AuthPanel from "./AuthPanel";
 import ScoreWorkspace from "./ScoreWorkspace";
 import { LessonPanel, SessionLog } from "./StatusPanels";
 
 export default function AppLayout({
   authStatus,
+  orbProps,
   authPanelProps,
   scoreWorkspaceProps,
   lessonPanelProps,
@@ -13,8 +15,18 @@ export default function AppLayout({
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(96,165,250,0.2),_transparent_40%),linear-gradient(180deg,#081225_0%,#09162b_45%,#07101e_100%)] text-slate-100">
       <main className="mx-auto max-w-7xl px-4 py-6 md:px-6">
-        <header className="glass mb-6 rounded-3xl px-5 py-4">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <header className="glass workspace-orb-panel relative mb-6 overflow-hidden rounded-3xl px-5 py-4">
+          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02)_48%,rgba(56,189,248,0.05))]" />
+          <div className="workspace-orb-shell absolute right-[-3.5rem] top-1/2 -translate-y-1/2">
+            <AudioReactiveOrb
+              audioSource={orbProps.audioSource}
+              active={orbProps.active}
+              intensity={orbProps.intensity}
+              size="workspace"
+              theme={orbProps.theme}
+            />
+          </div>
+          <div className="relative z-10 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2 text-sky-300">
                 <Music4 className="h-5 w-5" />

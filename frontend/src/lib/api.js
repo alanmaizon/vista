@@ -6,7 +6,7 @@ export async function readJsonResponse(response) {
 
   try {
     return JSON.parse(raw);
-  } catch (error) {
+  } catch {
     if (!response.ok) {
       throw new Error(raw.trim() || `Request failed with ${response.status}`);
     }

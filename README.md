@@ -54,6 +54,8 @@ See the [Local Setup Guide](docs/LOCAL_SETUP.md) for detailed instructions on ru
 - WebSocket connection to Gemini Live API
 - Camera-assisted score capture for readable bar extraction
 - Deterministic lesson actions remain the source of truth for pacing and progression
+- MCP-style live tool routing (`client.tool` + `server.tool_result`) for deterministic lesson/score actions
+- Optional model-triggered `TOOL_CALL` handling with backend execution and `TOOL_RESULT` feedback
 
 ## Repository Structure
 

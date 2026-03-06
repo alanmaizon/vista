@@ -20,6 +20,7 @@ CLIENT_AUDIO = "client.audio"
 CLIENT_VIDEO = "client.video"
 CLIENT_CONFIRM = "client.confirm"
 CLIENT_STOP = "client.stop"
+CLIENT_TOOL = "client.tool"
 
 # Types of events sent by the server
 SERVER_AUDIO = "server.audio"
@@ -27,6 +28,8 @@ SERVER_TEXT = "server.text"
 SERVER_STATUS = "server.status"
 SERVER_SUMMARY = "server.summary"
 SERVER_ERROR = "server.error"
+SERVER_TOOL_CALL = "server.tool_call"
+SERVER_TOOL_RESULT = "server.tool_result"
 
 
 @dataclass

@@ -10,6 +10,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -23,9 +24,14 @@ from .db import AsyncSessionLocal, init_db
 from .domains import SessionRuntime, build_session_runtime
 from .domains.music.api import router as music_router
 from .domains.music.context import build_music_live_context
+from .domains.music.live_tools import (
+    LiveMusicToolError,
+    music_live_tool_prompt_fragment,
+    run_live_music_tool,
+)
 from .domains.music.render import verovio_runtime_status
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
-from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_INIT, CLIENT_STOP, CLIENT_VIDEO
+from .live.protocol import CLIENT_AUDIO, CLIENT_CONFIRM, CLIENT_INIT, CLIENT_STOP, CLIENT_TOOL, CLIENT_VIDEO
 from .models import Session
 from .sessions import router as sessions_router
 from .settings import settings
@@ -245,27 +251,115 @@ async def _build_live_context_for_user(
         return ""
 
 
+def _tool_result_to_model_text(tool_name: str, payload: dict[str, Any], *, max_chars: int = 2400) -> str:
+    compact = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+    if len(compact) > max_chars:
+        compact = compact[: max_chars - 3] + "..."
+    return f'TOOL_RESULT: {{"name":"{tool_name}","result":{compact}}}'
+
+
+def _tool_error_to_model_text(tool_name: str, message: str) -> str:
+    escaped = message.replace('"', "'").strip() or "Tool call failed."
+    return f'TOOL_ERROR: {{"name":"{tool_name}","message":"{escaped}"}}'
+
+
+async def _execute_live_tool_call(
+    *,
+    user_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    async with AsyncSessionLocal() as db:
+        return await run_live_music_tool(
+            db,
+            user_id=user_id,
+            tool_name=tool_name,
+            args=args,
+        )
+
+
+async def _handle_live_tool_call(
+    *,
+    ws: WebSocket,
+    bridge: GeminiLiveBridge,
+    user_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    source: str,
+    call_id: str | None = None,
+    send_to_model: bool = True,
+) -> None:
+    tool_envelope: dict[str, Any] = {
+        "type": "server.tool_result",
+        "name": tool_name,
+        "source": source,
+        "ok": False,
+    }
+    if call_id:
+        tool_envelope["call_id"] = call_id
+    try:
+        payload = await _execute_live_tool_call(
+            user_id=user_id,
+            tool_name=tool_name,
+            args=args,
+        )
+        tool_envelope["ok"] = True
+        tool_envelope["result"] = payload
+        await ws.send_json(tool_envelope)
+        if send_to_model:
+            await bridge.send_text(_tool_result_to_model_text(tool_name, payload), role="user")
+    except LiveMusicToolError as exc:
+        tool_envelope["error"] = str(exc)
+        await ws.send_json(tool_envelope)
+        if send_to_model:
+            await bridge.send_text(_tool_error_to_model_text(tool_name, str(exc)), role="user")
+    except Exception as exc:
+        logger.exception("Unexpected live tool execution failure (%s): %s", tool_name, exc)
+        tool_envelope["error"] = "Unexpected tool execution failure."
+        await ws.send_json(tool_envelope)
+        if send_to_model:
+            await bridge.send_text(
+                _tool_error_to_model_text(tool_name, "Unexpected tool execution failure."),
+                role="user",
+            )
+
+
 async def _forward_bridge_events(
     ws: WebSocket,
     bridge: GeminiLiveBridge,
     runtime: SessionRuntime,
+    *,
+    user_id: str,
 ) -> None:
     async for event in bridge.receive():
-        if event.get("type") == "server.audio":
+        event_type = event.get("type")
+        if event_type == "server.audio":
             if not runtime.allow_model_audio():
                 continue
             runtime.on_model_audio()
-        elif event.get("type") == "server.text":
+        elif event_type == "server.text":
             text = str(event.get("text", ""))
             extra_events = runtime.on_model_text(text)
             for extra_event in extra_events:
                 await ws.send_json(extra_event)
-        elif event.get("type") == "server.status":
+        elif event_type == "server.status":
             event = {
                 **event,
                 "mode": runtime.risk_mode,
                 "skill": runtime.skill,
             }
+        elif event_type == "server.tool_call":
+            await _handle_live_tool_call(
+                ws=ws,
+                bridge=bridge,
+                user_id=user_id,
+                tool_name=str(event.get("name", "")),
+                args=event.get("args") if isinstance(event.get("args"), dict) else {},
+                source="model",
+                call_id=str(event.get("call_id", "")).strip() or None,
+                send_to_model=True,
+            )
+            continue
         await ws.send_json(event)
 
 
@@ -342,6 +436,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         settings.system_instructions,
         settings.music_system_instructions,
     )
+    tool_prompt = music_live_tool_prompt_fragment()
+    if tool_prompt:
+        base_system_prompt = f"{base_system_prompt}\n\n{tool_prompt}"
     live_context = await _build_live_context_for_user(
         user_id=user["uid"],
         skill=runtime.skill,
@@ -398,7 +495,14 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             if opening_prompt:
                 await bridge.send_text(opening_prompt, role="user")
 
-        forward_task = asyncio.create_task(_forward_bridge_events(ws, bridge, runtime))
+        forward_task = asyncio.create_task(
+            _forward_bridge_events(
+                ws,
+                bridge,
+                runtime,
+                user_id=user["uid"],
+            )
+        )
         stop_requested = False
 
         while True:
@@ -434,6 +538,20 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         await ws.send_json(extra_event)
                     if confirm_prompt:
                         await bridge.send_text(confirm_prompt, role="user")
+                elif message_type == CLIENT_TOOL:
+                    tool_name = str(message.get("name", "")).strip()
+                    tool_args = message.get("args") if isinstance(message.get("args"), dict) else {}
+                    send_to_model = bool(message.get("send_to_model", False))
+                    await _handle_live_tool_call(
+                        ws=ws,
+                        bridge=bridge,
+                        user_id=user["uid"],
+                        tool_name=tool_name,
+                        args=tool_args,
+                        source="client",
+                        call_id=str(message.get("call_id", "")).strip() or None,
+                        send_to_model=send_to_model,
+                    )
                 elif message_type == CLIENT_STOP:
                     stop_requested = True
                     await ws.send_json({"type": "server.summary", **runtime.summary_payload()})

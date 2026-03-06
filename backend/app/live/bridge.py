@@ -15,6 +15,7 @@ import inspect
 import json
 import logging
 import os
+import re
 from time import monotonic
 from typing import Any, AsyncIterator
 
@@ -166,6 +167,36 @@ def _extract_live_error_message(payload: dict[str, Any]) -> str | None:
     if code:
         return str(code)
     return "Unknown Live API error"
+
+
+def _parse_text_tool_call(text: str) -> dict[str, Any] | None:
+    """Parse a model-emitted TOOL_CALL marker from plain text."""
+    if "TOOL_CALL:" not in text:
+        return None
+    match = re.search(r"TOOL_CALL:\s*(\{.*\})", text, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        payload = json.loads(match.group(1).strip())
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    name = payload.get("name")
+    args = payload.get("args") or {}
+    call_id = payload.get("id") or payload.get("call_id")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    if not isinstance(args, dict):
+        return None
+    event: dict[str, Any] = {
+        "type": "server.tool_call",
+        "name": name.strip(),
+        "args": args,
+    }
+    if isinstance(call_id, str) and call_id.strip():
+        event["call_id"] = call_id.strip()
+    return event
 
 
 def _describe_live_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -495,6 +526,10 @@ class _DirectGeminiLiveBridge:
                 continue
             text = part.get("text")
             if text:
+                tool_call_event = _parse_text_tool_call(str(text))
+                if tool_call_event is not None:
+                    await self._events.put(tool_call_event)
+                    continue
                 await self._events.put({"type": "server.text", "text": str(text)})
             inline_data = _read_field(part, "inline_data")
             if not isinstance(inline_data, dict):
@@ -795,7 +830,11 @@ class _AdkGeminiLiveBridge:
         for part in parts:
             text = getattr(part, "text", None)
             if text and not getattr(event, "partial", False):
-                await self._events.put({"type": "server.text", "text": str(text)})
+                tool_call_event = _parse_text_tool_call(str(text))
+                if tool_call_event is not None:
+                    await self._events.put(tool_call_event)
+                else:
+                    await self._events.put({"type": "server.text", "text": str(text)})
 
             inline_data = getattr(part, "inline_data", None)
             if inline_data is None:

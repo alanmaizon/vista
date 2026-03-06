@@ -210,3 +210,90 @@ def test_ws_live_injects_retrieved_context_into_system_prompt(
     bridge = FakeBridge.created[0]
     assert "Retrieved session context:" in bridge.system_prompt
     assert "weakest_dimension=rhythm" in bridge.system_prompt
+
+
+def test_ws_live_executes_client_tool_call_without_model_echo(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = uuid.uuid4()
+
+    async def fake_tool_executor(*_args, **_kwargs) -> dict:
+        return {"status": "ok", "measure_index": 2}
+
+    monkeypatch.setattr(main_module, "_execute_live_tool_call", fake_tool_executor)
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "HEAR_PHRASE",
+            }
+        )
+        ws.receive_json()  # connected
+        ws.receive_json()  # HEAR_PHRASE hint
+
+        ws.send_json(
+            {
+                "type": "client.tool",
+                "name": "lesson_step",
+                "args": {"score_id": str(uuid.uuid4())},
+            }
+        )
+        tool_payload = ws.receive_json()
+        ws.send_json({"type": "client.stop"})
+        ws.receive_json()  # summary
+
+    bridge = FakeBridge.created[0]
+    assert tool_payload["type"] == "server.tool_result"
+    assert tool_payload["name"] == "lesson_step"
+    assert tool_payload["source"] == "client"
+    assert tool_payload["ok"] is True
+    assert tool_payload["result"]["status"] == "ok"
+    assert bridge.sent_text == []
+
+
+def test_ws_live_executes_model_tool_call_and_returns_tool_result(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    FakeBridge.initial_events = [
+        {
+            "type": "server.tool_call",
+            "name": "lesson_step",
+            "args": {"score_id": str(uuid.uuid4())},
+            "call_id": "call-1",
+        }
+    ]
+    session_id = uuid.uuid4()
+
+    async def fake_tool_executor(*_args, **_kwargs) -> dict:
+        return {"lesson_stage": "awaiting-compare", "measure_index": 1}
+
+    monkeypatch.setattr(main_module, "_execute_live_tool_call", fake_tool_executor)
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "HEAR_PHRASE",
+            }
+        )
+        ws.receive_json()  # connected
+        ws.receive_json()  # HEAR_PHRASE hint
+        tool_payload = ws.receive_json()
+        ws.send_json({"type": "client.stop"})
+        ws.receive_json()  # summary
+
+    bridge = FakeBridge.created[0]
+    assert tool_payload["type"] == "server.tool_result"
+    assert tool_payload["source"] == "model"
+    assert tool_payload["name"] == "lesson_step"
+    assert tool_payload["call_id"] == "call-1"
+    assert tool_payload["ok"] is True
+    assert "TOOL_RESULT:" in bridge.sent_text[0][0]
+    assert bridge.sent_text[0][1] == "user"

@@ -78,6 +78,23 @@
   - `FRONTEND_FEATURES_URI=gs://YOUR_BUCKET/features bash infra/sync_feature_assets.sh`
   - Add `--dry-run` to preview changes first
 
+## Troubleshooting
+
+### Missing required environment variable
+
+- Local shell exports only affect your current terminal session.
+- GitHub Actions reads repository variables from `.github/workflows/deploy-cloudrun.yml`, not your local shell.
+- If `infra/deploy_cloudrun.sh` exits with `Missing required environment variable: ...`, set it either:
+  - locally with `export VARIABLE_NAME=value`
+  - or in GitHub with `gh variable set VARIABLE_NAME --body "value"`
+
+### Firebase session cookie creation failed on the backend
+
+- If Cloud Run logs show `invalid_grant: Invalid JWT Signature.`, the backend Firebase Admin credential is invalid at runtime.
+- In this repo, the secret to rotate is `vista-firebase-adminsdk`.
+- After adding a new secret version, redeploy Cloud Run so the latest secret version is mounted.
+- This is an Admin SDK secret problem, not a `VISTA_FIREBASE_WEB_CONFIG` problem.
+
 ## GitHub CI/CD
 
 - The repository includes `.github/workflows/deploy-cloudrun.yml`.

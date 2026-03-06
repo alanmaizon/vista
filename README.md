@@ -94,13 +94,30 @@ vista/
 
 ## Architecture Overview
 
-Eurydice follows a **client ↔ server ↔ AI** architecture:
+Eurydice is built as a single deployed backend with a React frontend build embedded into the container. Deterministic lesson actions, score processing, auth, and live AI streaming all pass through the same FastAPI service.
 
-1. **Browser client** (`frontend/`) — A React/Vite single-page app for the primary Eurydice experience. When the React build is unavailable, the backend falls back to the legacy static client in `backend/app/static/`.
-2. **FastAPI backend** (`backend/app/`) — Handles authentication (Firebase), session management (PostgreSQL via SQLAlchemy), music score processing (Verovio), and proxies real-time audio/video to the Gemini Live API over a WebSocket bridge.
-3. **Gemini Live API** — Provides multimodal AI responses (voice coaching, score reading, ear training) streamed back to the client in real time.
+```mermaid
+flowchart LR
+    U[Student Browser<br/>React + Vite UI] -->|HTTPS /api/*| B[FastAPI Backend<br/>Cloud Run]
+    U -->|WebSocket /ws/live| B
+    U -->|Session cookie| B
 
-Data flows in a loop: the client streams media frames to the backend, which forwards them to Gemini; Gemini's responses are relayed back through the WebSocket to the browser, where the UI updates captions, score overlays, and lesson state accordingly.
+    B -->|Serve built SPA + assets| U
+    B -->|Score import / render / compare| M[Music Domain Services<br/>transcription, comparison, rendering]
+    B -->|SQLAlchemy async| D[(Cloud SQL PostgreSQL)]
+    B -->|Verify ID token / mint session cookie| F[Firebase Auth + Admin SDK]
+    B -->|Live multimodal streaming| G[Vertex AI Gemini Live]
+    B -->|Read secrets| S[Secret Manager]
+    B -->|Optional private feature sync at build time| C[Cloud Storage]
+
+    M --> D
+```
+
+Runtime responsibilities:
+- `frontend/` is the primary product surface and is built into the backend container.
+- `backend/app/main.py` serves the SPA, API routes, and live websocket bridge.
+- `backend/app/domains/music/` holds deterministic lesson logic, notation render, transcription, comparison, adaptive recommendations, and live tool execution.
+- `backend/app/static/` remains a fallback/reference client while any remaining edge cases are retired.
 
 ## Setup overview
 
@@ -131,7 +148,7 @@ For more details about the product specification, refer to `docs/EURYDICE_CHALLE
 - **Tailwind CSS** - Styling
 - **Headless UI** - UI primitives
 - **Firebase Web SDK** - Client-side authentication
-- **WebRTC** - Audio/video capture
+- **MediaDevices / Web Audio APIs** - Audio/video capture
 - **WebSocket** - Real-time communication
 
 ### Infrastructure
@@ -142,31 +159,29 @@ For more details about the product specification, refer to `docs/EURYDICE_CHALLE
 
 ## Development
 
-### Code Quality Tools
-- **ESLint** - JavaScript linting (`.eslintrc.json`)
-- **Prettier** - Code formatting (`.prettierrc.json`)
-- **Black** - Python formatting
-- **Flake8** - Python linting
-- **pre-commit** - Git hooks for automated checks
+### Current developer tooling
+- **pytest / pytest-asyncio** - Backend tests
+- **ESLint** - Frontend linting via `frontend/package.json`
+- **Vitest** - Frontend unit tests
+- **Vite** - Frontend build and dev server
+
+The repo does not currently ship committed Black, Flake8, Prettier, or pre-commit configuration. Keep the README aligned with the actual checked-in tooling rather than an aspirational stack.
 
 ### Running Tests
 ```bash
-# Backend tests
-cd backend
-pytest
+# Backend tests from repo root
+pytest backend/tests
 
-# Prompt quality evaluation
-python scripts/prompt_eval_music.py
+# Prompt quality evaluation from repo root
+python backend/scripts/prompt_eval_music.py
 
-# Run specific test file
-pytest tests/test_music_transcription.py
+# Run one backend test module
+pytest backend/tests/test_music_transcription.py
 
-# With coverage
-pytest --cov=app --cov-report=html
-
-# Frontend tests
-cd frontend
-npm test
+# Frontend lint, tests, and build
+npm --prefix frontend run lint
+npm --prefix frontend run test
+npm --prefix frontend run build
 ```
 
 ### Music Capture Mode
@@ -194,29 +209,14 @@ const clip = await capturePcmClip({
 
 On the backend, `transcribe_pcm16` now uses frame-level pitch contour analysis (10 ms hop) for improved note segmentation. Contiguous frames with stable pitch and sufficient confidence are grouped into note events. The legacy energy-gate segmentation is used as a fallback when the contour yields no notes.
 
-### Code Style
+### Deployment-sensitive notes
+
+- Auth is frontend Firebase sign-in plus backend-issued HTTP-only Firebase session cookies.
+- The backend needs a valid Firebase Admin SDK JSON to mint session cookies. If Cloud Run logs show `invalid_grant: Invalid JWT Signature.`, rotate the `vista-firebase-adminsdk` secret and redeploy.
+- Landing-page feature art is intentionally not tracked in git. Mirror local assets into the private bucket with:
+
 ```bash
-# Format Python code
-black backend/app
-
-# Lint Python code
-flake8 backend/app --max-line-length=120
-
-# Format JavaScript
-prettier --write "backend/app/static/*.js"
-
-# Lint JavaScript
-eslint backend/app/static/*.js
-```
-
-### Pre-commit Hooks
-```bash
-# Install pre-commit hooks
-pip install pre-commit
-pre-commit install
-
-# Run manually
-pre-commit run --all-files
+FRONTEND_FEATURES_URI=gs://YOUR_BUCKET/features bash infra/sync_feature_assets.sh
 ```
 
 ## Documentation
@@ -230,11 +230,12 @@ pre-commit run --all-files
 
 ## Security & Privacy
 
-- All user authentication via Firebase ID tokens
+- All browser auth flows terminate in a backend-issued HTTP-only session cookie
 - Session ownership validation on all endpoints
 - Input sanitization for user-provided data
-- Environment variables for sensitive configuration
-- No credentials stored in source code
+- Secret Manager for runtime credentials in Cloud Run
+- Private landing-page assets can be fetched at build time from Cloud Storage instead of being committed to git
+- No production credentials should be stored in source control
 
 ## License
 

@@ -48,6 +48,14 @@ Phase 5 content ecosystem coverage has now been added in backend API and tests:
 - Guided lesson packs (`/api/music/library/packs`) can be loaded directly into guided flow (`/load` endpoint).
 - Ingestion and curation workflow is documented in `docs/CONTENT_INGESTION_AND_CURATION.md`.
 
+This audit should now be read as a historical architecture review plus active addenda, not as a literal snapshot of every current repo deficiency.
+
+Items below that are no longer current as written:
+- The repo now has an active React/Vite frontend, not just the legacy static client.
+- Frontend linting and testing infrastructure now exists in `frontend/` (`eslint`, `vitest`, `vite build`).
+- `.gitignore` and top-level onboarding docs have been materially improved since the original audit date.
+- Deployment now includes private feature-asset sync support and backend-issued Firebase session cookie auth.
+
 ---
 
 ## Executive Summary

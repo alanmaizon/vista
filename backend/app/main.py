@@ -25,11 +25,7 @@ from .db import AsyncSessionLocal, init_db
 from .domains import SessionRuntime, build_session_runtime
 from .domains.music.api import router as music_router
 from .domains.music.context import build_music_live_context
-from .domains.music.live_tools import (
-    LiveMusicToolError,
-    music_live_tool_prompt_fragment,
-    run_live_music_tool,
-)
+from .domains.music.live_tools import register_music_tools
 from .domains.music.models import MusicLiveToolCall
 from .domains.music.render import verovio_runtime_status
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
@@ -42,7 +38,9 @@ from .live.protocol import (
     CLIENT_TOOL,
     CLIENT_VIDEO,
 )
+from .conversation_manager import ConversationManager
 from .prompts import PromptComposer
+from .tools import ToolError, tool_registry
 from .models import Session
 from .sessions import router as sessions_router
 from .settings import settings
@@ -104,6 +102,7 @@ async def startup_event() -> None:
     """Initialise Firebase and create the sessions table if needed."""
     init_firebase()
     await init_db()
+    register_music_tools()
     adk_available, adk_detail = adk_runtime_status()
     verovio_available, verovio_detail = verovio_runtime_status()
     logger.info(
@@ -320,7 +319,7 @@ async def _execute_live_tool_call(
     args: dict[str, Any],
 ) -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
-        return await run_live_music_tool(
+        return await tool_registry.run_tool(
             db,
             user_id=user_id,
             tool_name=tool_name,
@@ -362,6 +361,7 @@ async def _handle_live_tool_call(
     *,
     ws: WebSocket,
     bridge: GeminiLiveBridge,
+    conversation_manager: ConversationManager,
     user_id: str,
     session_id: UUID | None,
     tool_name: str,
@@ -387,6 +387,7 @@ async def _handle_live_tool_call(
         )
         tool_envelope["ok"] = True
         tool_envelope["result"] = payload
+        conversation_manager.add_tool_result(name=tool_name, result=payload, call_id=call_id)
         await ws.send_json(tool_envelope)
         if send_to_model:
             await bridge.send_text(_tool_result_to_model_text(tool_name, payload), role="user")
@@ -399,8 +400,9 @@ async def _handle_live_tool_call(
             latency_ms=int((monotonic() - started_at) * 1000),
             error_kind=None,
         )
-    except LiveMusicToolError as exc:
+    except ToolError as exc:
         tool_envelope["error"] = str(exc)
+        conversation_manager.add_tool_result(name=tool_name, result=None, error=str(exc), call_id=call_id)
         await ws.send_json(tool_envelope)
         if send_to_model:
             await bridge.send_text(_tool_error_to_model_text(tool_name, str(exc)), role="user")
@@ -418,6 +420,9 @@ async def _handle_live_tool_call(
     except Exception as exc:
         logger.exception("Unexpected live tool execution failure (%s): %s", tool_name, exc)
         tool_envelope["error"] = "Unexpected tool execution failure."
+        conversation_manager.add_tool_result(
+            name=tool_name, result=None, error="Unexpected tool execution failure.", call_id=call_id
+        )
         await ws.send_json(tool_envelope)
         if send_to_model:
             await bridge.send_text(
@@ -440,6 +445,7 @@ async def _forward_bridge_events(
     ws: WebSocket,
     bridge: GeminiLiveBridge,
     runtime: SessionRuntime,
+    conversation_manager: ConversationManager,
     *,
     user_id: str,
     session_id: UUID,
@@ -452,6 +458,8 @@ async def _forward_bridge_events(
             runtime.on_model_audio()
         elif event_type == "server.text":
             text = str(event.get("text", ""))
+            if not event.get("partial"):
+                conversation_manager.add_assistant_turn(text)
             extra_events = runtime.on_model_text(text)
             for extra_event in extra_events:
                 await ws.send_json(extra_event)
@@ -462,13 +470,19 @@ async def _forward_bridge_events(
                 "skill": runtime.skill,
             }
         elif event_type == "server.tool_call":
+            tool_name = str(event.get("name", ""))
+            args = event.get("args") if isinstance(event.get("args"), dict) else {}
+            conversation_manager.add_tool_call(name=tool_name, args=args, call_id=str(event.get("call_id", "")))
             await _handle_live_tool_call(
                 ws=ws,
                 bridge=bridge,
+                conversation_manager=conversation_manager,
                 user_id=user_id,
                 session_id=session_id,
                 tool_name=str(event.get("name", "")),
                 args=event.get("args") if isinstance(event.get("args"), dict) else {},
+                tool_name=tool_name,
+                args=args,
                 source="model",
                 call_id=str(event.get("call_id", "")).strip() or None,
                 send_to_model=True,
@@ -546,6 +560,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         skill=resolved_skill,
         goal=session.goal,
     )
+    conversation_manager = ConversationManager(session_id=session_id, user_id=user["uid"])
+
     live_context = await _build_live_context_for_user(
         user_id=user["uid"],
         skill=runtime.skill,
@@ -598,6 +614,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 ws,
                 bridge,
                 runtime,
+                conversation_manager,
                 user_id=user["uid"],
                 session_id=session_id,
             )
@@ -641,21 +658,26 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     tool_name = str(message.get("name", "")).strip()
                     tool_args = message.get("args") if isinstance(message.get("args"), dict) else {}
                     send_to_model = bool(message.get("send_to_model", False))
+                    call_id = str(message.get("call_id", "")).strip() or None
+                    conversation_manager.add_tool_call(name=tool_name, args=tool_args, call_id=call_id)
                     await _handle_live_tool_call(
                         ws=ws,
                         bridge=bridge,
+                        conversation_manager=conversation_manager,
                         user_id=user["uid"],
                         session_id=session_id,
                         tool_name=tool_name,
                         args=tool_args,
                         source="client",
                         call_id=str(message.get("call_id", "")).strip() or None,
+                        call_id=call_id,
                         send_to_model=send_to_model,
                     )
                 elif message_type == CLIENT_TEXT:
                     text = str(message.get("text", "")).strip()
                     if not text:
                         raise ValueError("client.text requires a non-empty text field")
+                    conversation_manager.add_user_turn(text)
                     await bridge.send_text(text, role="user")
                 elif message_type == CLIENT_STOP:
                     stop_requested = True

@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { useLoader, useThree } from "@react-three/fiber";
-import { useMemo } from "react";
 
 type MarbleSphereProps = {
   className?: string;
@@ -35,27 +33,25 @@ export default function MarbleSphere({ className = "" }: MarbleSphereProps) {
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       host.appendChild(renderer.domElement);
 
-      const texture = useLoader(THREE.TextureLoader, "/marble-pattern.png");
-      const { gl } = useThree();
+      const texture = new THREE.TextureLoader().load("/marble-pattern.png");
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      texture.needsUpdate = true;
 
-      useMemo(() => {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.wrapS = THREE.RepeatWrapping;
-        texture.wrapT = THREE.ClampToEdgeWrapping;
-        texture.minFilter = THREE.LinearMipmapLinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.anisotropy = gl.capabilities.getMaxAnisotropy();
-        texture.needsUpdate = true;
-      }, [texture, gl]);
-
-      const geometry = new THREE.SphereGeometry(1.45, 72, 72);
+      const geometry = new THREE.SphereGeometry(1.45, 128, 128);
       const material = new THREE.MeshStandardMaterial({
         map: texture,
         roughness: 0.84,
         metalness: 0.03,
       });
+
       const sphere = new THREE.Mesh(geometry, material);
       sphere.rotation.x = 0.12;
+      sphere.rotation.y = Math.PI;
       sphere.rotation.z = -0.08;
       scene.add(sphere);
 
@@ -77,7 +73,7 @@ export default function MarbleSphere({ className = "" }: MarbleSphereProps) {
       };
 
       resize();
-      resizeObserver = new ResizeObserver(() => resize());
+      resizeObserver = new ResizeObserver(resize);
       resizeObserver.observe(host);
 
       const render = () => {

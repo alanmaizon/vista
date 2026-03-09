@@ -92,6 +92,11 @@ def _find_logo_file() -> Path | None:
         return ROOT_LOGO
     return None
 
+def _find_frontend_file(file_name: str) -> Path | None:
+    if FRONTEND_DIST is None:
+        return None
+    asset_path = FRONTEND_DIST / file_name
+    return asset_path if asset_path.is_file() else None
 
 @app.on_event("startup")
 async def startup_event() -> None:
@@ -127,6 +132,12 @@ async def workspace() -> FileResponse:
     """Serve the main client app entrypoint for authenticated workspace routing."""
     return await index()
 
+@app.get("/marble-pattern.png", include_in_schema=False)
+async def marble_pattern() -> FileResponse:
+    asset_path = _find_frontend_file("marble-pattern.png")
+    if asset_path is None:
+        raise HTTPException(status_code=404, detail="marble-pattern.png not found")
+    return FileResponse(asset_path, media_type="image/png")
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon() -> FileResponse:

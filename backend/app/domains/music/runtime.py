@@ -145,47 +145,47 @@ class MusicRuntime(SessionRuntime):
 
     def opening_prompt(self) -> str:
         goal_fragment = (
-            f"My music goal is: {self.goal}. "
+            f"My music goal is: {self.goal}. Please greet me and let's get started."
             if self.goal
-            else "Ask one short question to confirm the music task. "
+            else "Please greet me and ask what I'd like to work on today."
         )
+        return goal_fragment
+
+    def skill_instructions(self) -> str:
+        """Return skill-specific instructions for the system prompt."""
         frame_fragment = (
-            f"{self.skill_spec.capture_prompt} "
+            f"{self.skill_spec.capture_prompt}"
             if self.skill_spec.frame_first and self.skill_spec.capture_prompt
             else ""
         )
         live_phrase_fragment = (
             "For HEAR_PHRASE, do not guess interval, chord, or arpeggio identities from the raw live stream alone. "
-            "Wait for the user to confirm the replay, then keep your verbal response brief because a server-side phrase analysis may follow. "
+            "Wait for the user to confirm the replay, then keep your verbal response brief because a server-side phrase analysis may follow."
             if self.skill == "HEAR_PHRASE"
             else ""
         )
         guided_lesson_fragment = (
             "For GUIDED_LESSON, greet the user first, ask one short question about what they want to practice, "
             "and keep the exchange conversational. When the user plays music, treat it as evidence for the lesson. "
-            "If deterministic comparison or score tools are available, reference them briefly instead of overwhelming the user with controls. "
+            "If deterministic comparison or score tools are available, reference them briefly instead of overwhelming the user with controls."
             if self.skill == "GUIDED_LESSON"
             else ""
         )
         read_score_fragment = (
             "For READ_SCORE, once one short bar is clearly readable, give a short musical description and, when you are confident, "
             "include a second sentence that starts exactly with NOTE_LINE: followed by a simple token sequence like C4/q D4/q E4/h. "
-            "If the score is still unclear, say SCORE_UNCLEAR and request a tighter frame instead of inventing notes. "
+            "If the score is still unclear, say SCORE_UNCLEAR and request a tighter frame instead of inventing notes."
             if self.skill == "READ_SCORE"
             else ""
         )
         return (
-            f"I am starting a {self.skill} music tutoring session. "
+            f"Current music skill: {self.skill}. "
             f"Skill objective: {self.skill_spec.anchor} "
-            f"Completion condition: {self.skill_spec.done_when} "
-            f"{goal_fragment}"
-            f"{frame_fragment}"
-            f"{live_phrase_fragment}"
-            f"{guided_lesson_fragment}"
-            f"{read_score_fragment}"
+            f"Completion condition: {self.skill_spec.done_when}. "
+            f"{frame_fragment} {live_phrase_fragment} {guided_lesson_fragment} {read_score_fragment} "
             "Never guess musical details. If the score view or the performance is unclear, "
             "ask for one narrower replay or one clearer frame before you analyze."
-        )
+        ).strip()
 
     def on_client_video(self) -> None:
         self.saw_video = True

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { useLoader, useThree } from "@react-three/fiber";
+import { useMemo } from "react";
 
 type MarbleSphereProps = {
   className?: string;
@@ -33,16 +35,22 @@ export default function MarbleSphere({ className = "" }: MarbleSphereProps) {
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       host.appendChild(renderer.domElement);
 
-      const loader = new THREE.TextureLoader();
-      const marbleTexture = loader.load("/marble-pattern.png");
-      marbleTexture.colorSpace = THREE.SRGBColorSpace;
-      marbleTexture.wrapS = THREE.RepeatWrapping;
-      marbleTexture.wrapT = THREE.RepeatWrapping;
-      marbleTexture.repeat.set(1.1, 1.1);
+      const texture = useLoader(THREE.TextureLoader, "/marble-pattern.png");
+      const { gl } = useThree();
+
+      useMemo(() => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.anisotropy = gl.capabilities.getMaxAnisotropy();
+        texture.needsUpdate = true;
+      }, [texture, gl]);
 
       const geometry = new THREE.SphereGeometry(1.45, 72, 72);
       const material = new THREE.MeshStandardMaterial({
-        map: marbleTexture,
+        map: texture,
         roughness: 0.84,
         metalness: 0.03,
       });
@@ -93,7 +101,7 @@ export default function MarbleSphere({ className = "" }: MarbleSphereProps) {
         resizeObserver?.disconnect();
         geometry.dispose();
         material.dispose();
-        marbleTexture.dispose();
+        texture.dispose();
         renderer.dispose();
         renderer.domElement.remove();
       };

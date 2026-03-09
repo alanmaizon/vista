@@ -42,6 +42,7 @@ from .live.protocol import (
     CLIENT_TOOL,
     CLIENT_VIDEO,
 )
+from .prompts import PromptComposer
 from .models import Session
 from .sessions import router as sessions_router
 from .settings import settings
@@ -545,28 +546,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         skill=resolved_skill,
         goal=session.goal,
     )
-    base_system_prompt = runtime.system_prompt(
-        settings.system_instructions,
-        settings.music_system_instructions,
-    )
-    tool_prompt = music_live_tool_prompt_fragment()
-    if tool_prompt:
-        base_system_prompt = f"{base_system_prompt}\n\n{tool_prompt}"
     live_context = await _build_live_context_for_user(
         user_id=user["uid"],
         skill=runtime.skill,
         goal=session.goal,
     )
-    if live_context:
-        system_prompt = (
-            f"{base_system_prompt}\n\n"
-            "Retrieved session context:\n"
-            f"{live_context}\n\n"
-            "Use this context as supporting memory only. Prioritize current live evidence. "
-            "When uncertain or conflicting, request replay/reframing before concluding."
-        )
-    else:
-        system_prompt = base_system_prompt
+    composer = PromptComposer(runtime, live_context)
+    system_prompt = composer.get_system_prompt()
 
     bridge = GeminiLiveBridge(
         model_id=settings.model_id,
@@ -603,10 +589,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         )
         for event in runtime.on_connect_events():
             await ws.send_json(event)
-        if runtime.uses_model_opening_prompt():
-            opening_prompt = runtime.opening_prompt()
-            if opening_prompt:
-                await bridge.send_text(opening_prompt, role="user")
+        opening_prompt = composer.get_opening_user_prompt()
+        if opening_prompt:
+            await bridge.send_text(opening_prompt, role="user")
 
         forward_task = asyncio.create_task(
             _forward_bridge_events(

@@ -23,6 +23,9 @@ from .vector_store import VectorStore
 
 logger = logging.getLogger("eurydice.memory")
 
+# Maximum characters shown per memory in the context preview.
+_MAX_CONTENT_PREVIEW_LENGTH = 200
+
 
 class MemoryService:
     """Orchestrates memory storage and retrieval for a music tutor."""
@@ -47,7 +50,8 @@ class MemoryService:
     ) -> MusicalMemory:
         """Embed *content* and persist it as a new memory."""
         embedding = await self.embeddings.embed_single(content)
-        meta = MusicalMemoryMetadata(**(metadata or {}))
+        meta_kwargs = {k: v for k, v in (metadata or {}).items() if k in MusicalMemoryMetadata.model_fields}
+        meta = MusicalMemoryMetadata(**meta_kwargs)
         memory = MusicalMemory(
             user_id=user_id,
             memory_type=memory_type,
@@ -143,9 +147,9 @@ class MemoryService:
         total_len = len(lines[0])
         for result in results:
             mem = result.memory
-            content_preview = mem.content[:200].strip()
-            if len(content_preview) >= 200:
-                content_preview = content_preview[:197] + "..."
+            content_preview = mem.content[:_MAX_CONTENT_PREVIEW_LENGTH].strip()
+            if len(content_preview) >= _MAX_CONTENT_PREVIEW_LENGTH:
+                content_preview = content_preview[:_MAX_CONTENT_PREVIEW_LENGTH - 3] + "..."
             line = (
                 f"- [{mem.memory_type.value}] "
                 f"(relevance={result.score:.2f}) "

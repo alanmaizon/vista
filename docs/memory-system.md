@@ -175,7 +175,7 @@ Expected output:
 |---------------------|---------|-------------|
 | `MEMORY_STORE_PATH` | `memory_store.jsonl` | File path for persisting the vector store |
 
-The embedding model defaults to `gemini-embedding-exp-03-07`. When the Gemini API is unavailable (e.g., in tests), the client gracefully degrades to zero vectors.
+The embedding model defaults to `gemini-embedding-exp-03-07` (a preview model). In production, update `DEFAULT_EMBEDDING_MODEL` in `embeddings.py` to the latest stable Gemini embedding model. When the Gemini API is unavailable (e.g., in tests), the client gracefully degrades to zero vectors.
 
 ## Testing
 

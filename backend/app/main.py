@@ -72,6 +72,9 @@ PUBLIC_FIREBASE_WEB_CONFIG_KEYS = {
     "databaseURL",
 }
 
+# Minimum length for a user message to be stored as a memory.
+_MIN_STORABLE_MESSAGE_LENGTH = 10
+
 # Global memory service instance (shared across sessions).
 _memory_service = MemoryService(
     embedding_client=EmbeddingClient(),
@@ -766,7 +769,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         raise ValueError("client.text requires a non-empty text field")
                     conversation_manager.add_user_turn(text)
                     # Store substantive user messages as memories (fire-and-forget).
-                    if len(text) > 10:
+                    if len(text) > _MIN_STORABLE_MESSAGE_LENGTH:
                         asyncio.create_task(
                             _memory_service.store_memory(
                                 user_id=user["uid"],

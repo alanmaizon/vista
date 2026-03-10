@@ -123,7 +123,7 @@ class VectorStore:
         candidates.sort(key=lambda pair: pair[0], reverse=True)
         return [
             MemorySearchResult(memory=mem, score=max(0.0, min(1.0, score)))
-            for score, mem in candidates[: max(1, top_k)]
+            for score, mem in candidates[:top_k]
         ]
 
     def get_recent(
@@ -136,7 +136,7 @@ class VectorStore:
         with self._lock:
             filtered = [m for m in self._memories if not user_id or m.user_id == user_id]
         filtered.sort(key=lambda m: m.timestamp, reverse=True)
-        return filtered[: max(1, limit)]
+        return filtered[:limit]
 
     def count(self, *, user_id: Optional[str] = None) -> int:
         """Return the total number of stored memories."""

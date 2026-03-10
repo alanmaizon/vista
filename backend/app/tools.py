@@ -7,8 +7,11 @@ deterministic tools that can be called by the language model or the client.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
-from typing import Any, Callable, Coroutine
+from collections import deque
+from typing import Any, Callable, Coroutine, Deque
 
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +34,7 @@ class ToolSpec:
     args_schema: type[BaseModel]
     # The executor takes (db, user_id, args) and returns a dict
     executor: Callable[[AsyncSession, str, BaseModel], Coroutine[Any, Any, dict[str, Any]]]
+    is_cacheable: bool = False
 
 
 class ToolRegistry:
@@ -38,6 +42,8 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolSpec] = {}
+        self._cache: dict[str, dict[str, Any]] = {}
+        self._cache_keys: Deque[str] = deque(maxlen=100)
 
     def register(self, tool: ToolSpec) -> None:
         """Register a new tool."""
@@ -59,6 +65,13 @@ class ToolRegistry:
             f"{tool_descriptions}\n"
             "Do not include extra prose in a TOOL_CALL line."
         )
+
+    def _get_cache_key(self, tool_name: str, args: dict[str, Any]) -> str:
+        """Create a stable hash key for caching tool results."""
+        # Create a stable string from args by sorting keys
+        stable_args = json.dumps(args, sort_keys=True, separators=(",", ":"))
+        key_string = f"{tool_name}:{stable_args}"
+        return hashlib.sha256(key_string.encode("utf-8")).hexdigest()
 
     async def run_tool(
         self,
@@ -85,7 +98,24 @@ class ToolRegistry:
             error_msg = exc.errors()[0].get("msg", "Invalid tool arguments.")
             raise ToolError(error_msg) from exc
 
-        return await spec.executor(db, user_id, validated_args)
+        if not spec.is_cacheable:
+            return await spec.executor(db, user_id, validated_args)
+
+        # Handle caching for cacheable tools
+        cache_key = self._get_cache_key(normalized_name, validated_args.model_dump(mode="json"))
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        result = await spec.executor(db, user_id, validated_args)
+
+        if len(self._cache) >= (self._cache_keys.maxlen or 100):
+            oldest_key = self._cache_keys.popleft()
+            if oldest_key in self._cache:
+                del self._cache[oldest_key]
+
+        self._cache[cache_key] = result
+        self._cache_keys.append(cache_key)
+        return result
 
 
 # Global registry instance

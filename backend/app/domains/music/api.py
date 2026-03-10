@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime, timezone
 from uuid import UUID
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -17,12 +17,6 @@ from ...db import get_db
 from .adaptive import update_user_skill_profile
 from .crepe import crepe_runtime_status
 from .symbolic import import_simple_score, score_to_dict
-from .transcription import (
-    decode_audio_b64,
-    parse_pcm_mime,
-    transcribe_pcm16,
-    transcription_to_dict,
-)
 from .compare import compare_performance_against_score, comparison_to_dict
 from .models import (
     MusicChallengeAttempt,
@@ -44,43 +38,6 @@ from .render import render_music_score, verovio_runtime_status
 router = APIRouter(prefix="/api/music", tags=["music"])
 InstrumentProfileLiteral = Literal["AUTO", "VOICE", "PIANO", "GUITAR", "STRINGS", "WINDS", "PERCUSSION"]
 _EPOCH_UTC = datetime(1970, 1, 1, tzinfo=timezone.utc)
-
-
-class MusicTranscriptionRequest(BaseModel):
-    """Request body for one-shot phrase transcription."""
-
-    audio_b64: str = Field(..., description="Base64-encoded mono PCM16 audio clip.")
-    mime: str = Field("audio/pcm;rate=16000", description="PCM mime type, e.g. audio/pcm;rate=16000")
-    expected: Literal["AUTO", "NOTE", "INTERVAL", "ARPEGGIO", "CHORD", "PHRASE"] = Field(
-        "AUTO",
-        description="What the user expects to have played. Used to shape warnings only.",
-    )
-    max_notes: int = Field(8, ge=1, le=12, description="Maximum note events to return.")
-    instrument_profile: InstrumentProfileLiteral = Field(
-        "AUTO",
-        description="Calibration profile for pitch/rhythm scoring strictness.",
-    )
-
-    @field_validator("audio_b64")
-    @classmethod
-    def validate_audio_b64(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("audio_b64 is required.")
-        return value
-
-
-class MusicTranscriptionResponse(BaseModel):
-    """Transcription result for a short phrase."""
-
-    kind: str
-    duration_ms: int
-    confidence: float
-    interval_hint: str | None
-    harmony_hint: str | None
-    summary: str
-    warnings: list[str]
-    performance_feedback: dict[str, float]
-    notes: list[dict]
 
 
 class MusicScoreImportRequest(BaseModel):
@@ -139,29 +96,6 @@ class MusicScorePrepareResponse(MusicScoreImportResponse):
     note_layout: list[dict]
 
 
-class MusicPerformanceCompareRequest(BaseModel):
-    """Request body for comparing a played phrase against a stored score."""
-
-    audio_b64: str = Field(..., description="Base64-encoded mono PCM16 audio clip.")
-    mime: str = Field("audio/pcm;rate=16000", description="PCM mime type, e.g. audio/pcm;rate=16000")
-    max_notes: int = Field(12, ge=1, le=12, description="Maximum note events to evaluate from the performance.")
-    measure_index: int | None = Field(
-        None,
-        ge=1,
-        description="Optional 1-based measure index to compare instead of the entire stored score.",
-    )
-    instrument_profile: InstrumentProfileLiteral = Field(
-        "AUTO",
-        description="Calibration profile for expected-vs-played matching strictness.",
-    )
-
-    @field_validator("audio_b64")
-    @classmethod
-    def validate_audio_b64(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("audio_b64 is required.")
-        return value
-
 
 class MusicPerformanceCompareResponse(BaseModel):
     """Comparison result between a target phrase and the performed phrase."""
@@ -175,7 +109,7 @@ class MusicPerformanceCompareResponse(BaseModel):
     mismatches: list[str]
     expected_notes: list[dict]
     played_phrase: dict
-    comparisons: list[dict]
+    comparisons: list[dict[str, Any]]
     performance_feedback: dict[str, float]
 
 
@@ -1176,26 +1110,6 @@ def _build_compare_score(score: MusicScore, measure_index: int | None) -> MusicS
     )
 
 
-@router.post("/transcribe", response_model=MusicTranscriptionResponse)
-async def transcribe_music(
-    payload: MusicTranscriptionRequest,
-    current_user: dict = Depends(auth_utils.get_current_user),
-) -> MusicTranscriptionResponse:
-    """Transcribe a short monophonic phrase into a symbolic note sequence."""
-    del current_user
-
-    sample_rate = parse_pcm_mime(payload.mime)
-    audio_bytes = decode_audio_b64(payload.audio_b64)
-    result = transcribe_pcm16(
-        audio_bytes,
-        sample_rate=sample_rate,
-        expected=payload.expected,
-        max_notes=payload.max_notes,
-        instrument_profile=payload.instrument_profile,
-    )
-    return MusicTranscriptionResponse(**transcription_to_dict(result))
-
-
 @router.get("/runtime", response_model=MusicRuntimeStatusResponse)
 async def music_runtime_status(
     current_user: dict = Depends(auth_utils.get_current_user),
@@ -2184,40 +2098,6 @@ async def next_guided_lesson_step(
     """Return the next guided-lesson step for a stored score."""
     score = await _get_owned_score(db, score_id, current_user["uid"])
     return _build_lesson_step_from_score(score, payload)
-
-
-@router.post("/score/{score_id}/compare", response_model=MusicPerformanceCompareResponse)
-async def compare_performance_with_score(
-    score_id: UUID,
-    payload: MusicPerformanceCompareRequest,
-    current_user: dict = Depends(auth_utils.get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> MusicPerformanceCompareResponse:
-    """Compare a short played phrase against a stored symbolic score."""
-    score = await _get_owned_score(db, score_id, current_user["uid"])
-    compare_score = _build_compare_score(score, payload.measure_index)
-    sample_rate = parse_pcm_mime(payload.mime)
-    audio_bytes = decode_audio_b64(payload.audio_b64)
-    result = compare_performance_against_score(
-        compare_score,
-        audio_bytes=audio_bytes,
-        sample_rate=sample_rate,
-        max_notes=payload.max_notes,
-        instrument_profile=payload.instrument_profile,
-    )
-    attempt = _record_performance_attempt(
-        user_id=current_user["uid"],
-        score_id=score.id,
-        measure_index=payload.measure_index,
-        instrument_profile=payload.instrument_profile,
-        result=result,
-    )
-    db.add(attempt)
-    await db.commit()
-    return MusicPerformanceCompareResponse(
-        score_id=score.id,
-        **comparison_to_dict(result),
-    )
 
 
 @router.post("/lesson-action", response_model=MusicLessonActionResponse)

@@ -7,6 +7,12 @@ from dataclasses import dataclass, field
 from typing import Deque
 
 from ..base import MUSIC_DOMAIN, SessionRuntime
+from ...live.events import (
+    LiveEvent,
+    ServerScoreCaptureEvent,
+    ServerScoreUnclearEvent,
+    ServerTextEvent,
+)
 from .transcription import MusicTranscriptionError, transcribe_pcm16
 
 
@@ -85,7 +91,7 @@ class MusicRuntime(SessionRuntime):
     last_assistant_text: str | None = None
     notes: Deque[str] = field(default_factory=lambda: deque(maxlen=8))
     recent_audio_bytes: bytearray = field(default_factory=bytearray)
-    pending_client_events: Deque[dict[str, str]] = field(default_factory=deque)
+    pending_client_events: Deque[LiveEvent] = field(default_factory=deque)
     read_score_buffer: str = ""
     skill_spec: MusicSkillSpec = field(init=False)
 
@@ -192,7 +198,7 @@ class MusicRuntime(SessionRuntime):
         if self.skill_spec.frame_first and not self.frame_ready:
             self.phase = "FRAME"
 
-    def on_client_audio(self, audio_bytes: bytes, mime: str | None = None) -> list[dict[str, str]]:
+    def on_client_audio(self, audio_bytes: bytes, mime: str | None = None) -> list[LiveEvent]:
         del mime
         if not audio_bytes:
             return []
@@ -226,14 +232,14 @@ class MusicRuntime(SessionRuntime):
             "then give exactly one next correction or one next exercise."
         )
 
-    def on_client_confirm_events(self) -> list[dict[str, str]]:
+    def on_client_confirm_events(self) -> list[LiveEvent]:
         if not self.pending_client_events:
             return []
         events = list(self.pending_client_events)
         self.pending_client_events.clear()
         return events
 
-    def on_model_text(self, text: str) -> list[dict[str, str]]:
+    def on_model_text(self, text: str) -> list[LiveEvent]:
         clean = " ".join(text.split())
         if not clean:
             return []
@@ -316,7 +322,7 @@ class MusicRuntime(SessionRuntime):
             return "PHRASE"
         return "AUTO"
 
-    def _handle_read_score_text(self, text: str) -> list[dict[str, str]]:
+    def _handle_read_score_text(self, text: str) -> list[LiveEvent]:
         self.read_score_buffer = f"{self.read_score_buffer} {text}".strip()
         upper_buffer = self.read_score_buffer.upper()
         note_line = self._parse_buffered_note_line()
@@ -325,13 +331,13 @@ class MusicRuntime(SessionRuntime):
             self.frame_ready = True
             self.phase = "GUIDE"
             self.awaiting_confirmation = True
-            return [{"type": "server.score_capture", "note_line": note_line}]
+            return [ServerScoreCaptureEvent(payload={"note_line": note_line})]
         if "SCORE_UNCLEAR" in upper_buffer:
             self.read_score_buffer = ""
             self.frame_ready = False
             self.phase = "FRAME"
             self.awaiting_confirmation = True
-            return [{"type": "server.score_unclear"}]
+            return [ServerScoreUnclearEvent()]
         return []
 
     def _parse_buffered_note_line(self) -> str | None:
@@ -343,7 +349,7 @@ class MusicRuntime(SessionRuntime):
         note_line = self.read_score_buffer[marker_index + len(marker) :].strip()
         return note_line or None
 
-    def _build_hear_phrase_events(self) -> list[dict[str, str]]:
+    def _build_hear_phrase_events(self) -> list[LiveEvent]:
         clip = bytes(self.recent_audio_bytes)
         self.recent_audio_bytes.clear()
         self.confirmations += 1
@@ -351,13 +357,14 @@ class MusicRuntime(SessionRuntime):
             self.phase = "VERIFY"
             self.completed = False
             return [
-                {
-                    "type": "server.text",
-                    "text": (
-                        "I need one clear replay of the phrase before I can analyse it. "
-                        "Play the full phrase once, then press confirm again."
-                    ),
-                }
+                ServerTextEvent(
+                    payload={
+                        "text": (
+                            "I need one clear replay of the phrase before I can analyse it. "
+                            "Play the full phrase once, then press confirm again."
+                        )
+                    }
+                )
             ]
 
         expected = self._expected_phrase_kind()
@@ -366,13 +373,13 @@ class MusicRuntime(SessionRuntime):
         except MusicTranscriptionError as exc:
             self.phase = "VERIFY"
             self.completed = False
-            return [{"type": "server.text", "text": str(exc)}]
+            return [ServerTextEvent(payload={"text": str(exc)})]
 
         analysis = self._format_live_phrase_analysis(phrase, expected)
         needs_replay = phrase.confidence < 0.68 or not phrase.notes
         self.phase = "VERIFY" if needs_replay else "COMPLETE"
         self.completed = not needs_replay
-        return [{"type": "server.text", "text": analysis}]
+        return [ServerTextEvent(payload={"text": analysis})]
 
     def _format_live_phrase_analysis(self, phrase, expected: str) -> str:
         if not phrase.notes:

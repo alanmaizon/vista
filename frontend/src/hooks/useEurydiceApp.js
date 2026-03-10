@@ -902,15 +902,12 @@ export default function useEurydiceApp() {
     setStatus("Recording a short phrase...");
     const clip = await captureFocusedMusicClipRef.current({ mode: "music" });
     setStatus("Transcribing phrase...");
-    const payload = await apiRequest("/api/music/transcribe", {
-      method: "POST",
-      body: {
-        audio_b64: clip.audioB64,
-        mime: clip.mime,
-        expected: "AUTO",
-        max_notes: 8,
-        instrument_profile: instrumentProfile,
-      },
+    const payload = await invokeLiveTool("transcribe", {
+      audio_b64: clip.audioB64,
+      mime: clip.mime,
+      expected: "AUTO",
+      max_notes: 8,
+      instrument_profile: instrumentProfile,
     });
     setAnalysis(payload);
     setStatus("Transcription ready.");
@@ -921,7 +918,14 @@ export default function useEurydiceApp() {
     for (const warning of payload.warnings ?? []) {
       appendCaption("Warning", warning);
     }
-  }, [appendCaption, appendConversationMessage, instrumentProfile, micEnabled, user]);
+  }, [
+    appendCaption,
+    appendConversationMessage,
+    instrumentProfile,
+    invokeLiveTool,
+    micEnabled,
+    user,
+  ]);
 
   const startReadScoreSession = useCallback(async () => {
     setErrorMessage("");

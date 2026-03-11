@@ -51,6 +51,8 @@ from .live.events import (
     ServerTranscriptEvent,
 )
 from .conversation_manager import ConversationManager
+from .memory import MemoryService, MemoryType, SessionSummary, VectorStore
+from .memory.embeddings import EmbeddingClient
 from .prompts import PromptComposer
 from .tools import ToolError, tool_registry
 from .models import Session
@@ -69,6 +71,15 @@ PUBLIC_FIREBASE_WEB_CONFIG_KEYS = {
     "measurementId",
     "databaseURL",
 }
+
+# Minimum length for a user message to be stored as a memory.
+_MIN_STORABLE_MESSAGE_LENGTH = 10
+
+# Global memory service instance (shared across sessions).
+_memory_service = MemoryService(
+    embedding_client=EmbeddingClient(),
+    vector_store=VectorStore(),
+)
 
 app = FastAPI(title="Eurydice", version="0.3.0")
 app.include_router(auth_router)
@@ -282,6 +293,49 @@ async def _build_live_context_for_user(
     except Exception as exc:
         logger.warning("Failed to build live context packet: %s", exc)
         return ""
+
+
+async def _build_memory_context_for_user(
+    *,
+    user_id: str,
+    goal: str | None,
+) -> str:
+    """Retrieve relevant musical memories to enrich the session prompt."""
+    query = goal or "music practice session"
+    try:
+        return await _memory_service.build_memory_context(
+            query=query,
+            user_id=user_id,
+            top_k=3,
+            max_chars=1200,
+        )
+    except Exception as exc:
+        logger.warning("Failed to build memory context: %s", exc)
+        return ""
+
+
+async def _store_session_memory_summary(
+    *,
+    session_id: UUID,
+    user_id: str,
+    runtime: SessionRuntime,
+) -> None:
+    """Generate and store a session summary as a musical memory."""
+    try:
+        summary_payload = runtime.summary_payload()
+        summary = SessionSummary(
+            session_id=str(session_id),
+            user_id=user_id,
+            session_skill=runtime.skill,
+            raw_summary=json.dumps(summary_payload) if summary_payload else "",
+        )
+        await _memory_service.store_session_summary(
+            session_id=str(session_id),
+            user_id=user_id,
+            summary=summary,
+        )
+    except Exception as exc:
+        logger.warning("Failed to store session memory summary: %s", exc)
 
 
 def _tool_result_to_model_text(tool_name: str, payload: dict[str, Any], *, max_chars: int = 2400) -> str:
@@ -516,8 +570,6 @@ async def _forward_bridge_events(
                 conversation_manager=conversation_manager,
                 user_id=user_id,
                 session_id=session_id,
-                tool_name=str(event.get("name", "")),
-                args=event.get("args") if isinstance(event.get("args"), dict) else {},
                 tool_name=tool_name,
                 args=args,
                 source="model",
@@ -601,7 +653,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         skill=runtime.skill,
         goal=session.goal,
     )
-    composer = PromptComposer(runtime, live_context)
+    memory_context = await _build_memory_context_for_user(
+        user_id=user["uid"],
+        goal=session.goal,
+    )
+    composer = PromptComposer(runtime, live_context, memory_context=memory_context)
     system_prompt = composer.get_system_prompt()
 
     bridge = GeminiLiveBridge(
@@ -712,6 +768,16 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     if not text:
                         raise ValueError("client.text requires a non-empty text field")
                     conversation_manager.add_user_turn(text)
+                    # Store substantive user messages as memories (fire-and-forget).
+                    if len(text) > _MIN_STORABLE_MESSAGE_LENGTH:
+                        asyncio.create_task(
+                            _memory_service.store_memory(
+                                user_id=user["uid"],
+                                content=text,
+                                memory_type=MemoryType.USER_QUESTION,
+                                metadata={"session_skill": runtime.skill},
+                            )
+                        )
                     await bridge.send_text(text, role="user")
                 elif message_type == CLIENT_STOP:
                     stop_requested = True
@@ -739,6 +805,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         await ws.send_json(ErrorEvent.from_message(f"Live session error: {exc}").model_dump(mode="json"))
     finally:
         await _persist_session_completion(session_id, runtime=runtime, bridge=bridge)
+        await _store_session_memory_summary(
+            session_id=session_id,
+            user_id=user["uid"],
+            runtime=runtime,
+        )
         await bridge.close()
         with contextlib.suppress(RuntimeError):
             await ws.close()

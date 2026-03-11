@@ -31,6 +31,9 @@ dist/
 build/
 *.egg-info/
 
+# Memory store data
+memory_store.jsonl
+
 # Private frontend assets fetched during CI/build
 frontend/public/features/*
 !frontend/public/features/.gitkeep

@@ -16,6 +16,7 @@ from .api import (
     render_stored_music_score,
     run_guided_lesson_action,
 )
+from ...tools import ToolError, ToolSpec, tool_registry
 
 
 LIVE_MUSIC_TOOL_SPECS: tuple[dict[str, str], ...] = (
@@ -127,3 +128,80 @@ async def run_live_music_tool(
 
     available = ", ".join(spec["name"] for spec in LIVE_MUSIC_TOOL_SPECS)
     raise LiveMusicToolError(f"Unsupported tool '{normalized_name}'. Supported tools: {available}.")
+
+
+def register_music_tools() -> None:
+    """Register all music tools into the global tool_registry."""
+
+    async def _execute_lesson_action(
+        db: AsyncSession, user_id: str, args: _LessonActionToolArgs
+    ) -> dict[str, Any]:
+        current_user = {"uid": user_id}
+        try:
+            result = await run_guided_lesson_action(args, current_user=current_user, db=db)
+            return result.model_dump(mode="json")
+        except HTTPException as exc:
+            raise ToolError(str(exc.detail), status_code=exc.status_code) from exc
+
+    async def _execute_lesson_step(
+        db: AsyncSession, user_id: str, args: _LessonStepToolArgs
+    ) -> dict[str, Any]:
+        current_user = {"uid": user_id}
+        step_request = MusicLessonStepRequest.model_validate(
+            {
+                "current_measure_index": args.current_measure_index,
+                "lesson_stage": args.lesson_stage,
+            }
+        )
+        try:
+            result = await next_guided_lesson_step(
+                args.score_id,
+                step_request,
+                current_user=current_user,
+                db=db,
+            )
+            return result.model_dump(mode="json")
+        except HTTPException as exc:
+            raise ToolError(str(exc.detail), status_code=exc.status_code) from exc
+
+    async def _execute_render_score(
+        db: AsyncSession, user_id: str, args: _RenderScoreToolArgs
+    ) -> dict[str, Any]:
+        current_user = {"uid": user_id}
+        try:
+            result = await render_stored_music_score(
+                args.score_id,
+                current_user=current_user,
+                db=db,
+            )
+            return result.model_dump(mode="json")
+        except HTTPException as exc:
+            raise ToolError(str(exc.detail), status_code=exc.status_code) from exc
+
+    tool_registry.register(
+        ToolSpec(
+            name="lesson_action",
+            description=(
+                "Unified guided lesson action. Use this to prepare a score, advance a bar, or compare a take."
+            ),
+            args_schema=_LessonActionToolArgs,
+            executor=_execute_lesson_action,
+        )
+    )
+    tool_registry.register(
+        ToolSpec(
+            name="lesson_step",
+            description="Return the next guided lesson step for a prepared score.",
+            args_schema=_LessonStepToolArgs,
+            executor=_execute_lesson_step,
+        )
+    )
+    tool_registry.register(
+        ToolSpec(
+            name="render_score",
+            description="Return notation render payload for a prepared score.",
+            args_schema=_RenderScoreToolArgs,
+            executor=_execute_render_score,
+            is_cacheable=True,
+        )
+    )

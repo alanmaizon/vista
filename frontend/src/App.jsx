@@ -26,6 +26,7 @@ export default function App() {
     setScoreLine,
     activeScore,
     lessonState,
+    lessonFlow,
     analysis,
     comparison,
     userSkillProfile,
@@ -58,6 +59,7 @@ export default function App() {
     stopLiveSession,
     handlePrimaryAction,
     handleCapturePhraseAction,
+    runRecommendedLessonAction,
     handleToggleScoreReader,
     handlePlayAnalysis,
     handlePlayScore,
@@ -123,6 +125,7 @@ export default function App() {
         status,
         runtimeSummary,
         lessonState,
+        lessonFlow,
         isConnected,
         micEnabled,
         cameraEnabled,
@@ -150,6 +153,7 @@ export default function App() {
         isBusy,
         isSessionStarting,
         primaryActionLabel,
+        lessonFlow,
         onToggleMic: () => setMicEnabled((value) => !value),
         onToggleCamera: () => setCameraEnabled((value) => !value),
         onInstrumentProfileChange: setInstrumentProfile,
@@ -165,12 +169,16 @@ export default function App() {
         onCapturePhrase: () => {
           void handleCapturePhraseAction();
         },
+        onRunRecommendedAction: (action) => {
+          void runRecommendedLessonAction(action);
+        },
         onToggleScoreReader: () => {
           void handleToggleScoreReader();
         },
       }}
       conversationProps={{
         messages: conversationMessages,
+        lessonFlow,
         liveAudioMode,
         liveAudioLevels,
         recentMusicEvents,
@@ -210,6 +218,7 @@ export default function App() {
       }}
       lessonPanelProps={{
         lessonState,
+        lessonFlow,
         analysis,
         comparison,
         userSkillProfile,

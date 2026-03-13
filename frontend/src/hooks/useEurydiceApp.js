@@ -45,6 +45,19 @@ function initialLessonState() {
   };
 }
 
+function initialLessonFlow() {
+  return {
+    phase: "idle",
+    previousPhase: null,
+    reason: "session_not_started",
+    status: "Start Session to begin a guided lesson.",
+    suggestedActions: [],
+    transitionId: 0,
+    capturedGoal: "",
+    feedbackCard: null,
+  };
+}
+
 function generateToolCallId() {
   if (window?.crypto?.randomUUID) {
     return window.crypto.randomUUID();
@@ -108,6 +121,7 @@ export default function useEurydiceApp() {
   const [scoreLine, setScoreLine] = useState("C4/q D4/q D4/q");
   const [activeScore, setActiveScore] = useState(null);
   const [lessonState, setLessonState] = useState(initialLessonState);
+  const [lessonFlow, setLessonFlow] = useState(initialLessonFlow);
   const [analysis, setAnalysis] = useState(null);
   const [comparison, setComparison] = useState(null);
   const [userSkillProfile, setUserSkillProfile] = useState(null);
@@ -184,6 +198,8 @@ export default function useEurydiceApp() {
   const sessionIdRef = useRef(null);
   const musicAnalysisInFlightRef = useRef(false);
   const captureFocusedMusicClipRef = useRef((options) => capturePcmClip(options));
+  const runRecommendedLessonActionRef = useRef(async () => {});
+  const handledLessonActionRefs = useRef(new Set());
 
   const appendCaption = useCallback((role, text) => {
     if (!text) {
@@ -296,6 +312,11 @@ export default function useEurydiceApp() {
     setTutorPrompt("");
   }, []);
 
+  const resetLessonFlow = useCallback(() => {
+    handledLessonActionRefs.current.clear();
+    setLessonFlow(initialLessonFlow());
+  }, []);
+
   const stopCameraCapture = useCallback(() => {
     if (frameTimerRef.current) {
       window.clearInterval(frameTimerRef.current);
@@ -348,12 +369,14 @@ export default function useEurydiceApp() {
         lastDetectedAt: null,
         lastFlushedAt: null,
       });
+      resetLessonFlow();
       setStatus("Live session closed.");
     },
     onError: () => {
       rejectPendingToolCalls("Live connection error before tool response.");
       sessionStartPromiseRef.current = null;
       setIsSessionStarting(false);
+      resetLessonFlow();
       setStatus("Live connection error.");
     },
   });
@@ -403,7 +426,7 @@ export default function useEurydiceApp() {
         noteStartIndex: payload.note_start_index,
         noteEndIndex: payload.note_end_index,
         prompt: payload.prompt,
-      });
+  });
       setStatus(payload.status);
       appendCaption("Lesson", payload.prompt);
       appendConversationMessage("system", payload.prompt, { kind: "lesson" });
@@ -464,6 +487,7 @@ export default function useEurydiceApp() {
           lastDetectedAt: null,
           lastFlushedAt: null,
         });
+        resetLessonFlow();
         setAuthStatus("Signed out. Click Sign In.");
       }
     }
@@ -471,7 +495,7 @@ export default function useEurydiceApp() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [resetLessonFlow]);
 
   useEffect(() => {
     if (!user) {
@@ -603,6 +627,7 @@ export default function useEurydiceApp() {
         lastDetectedAt: null,
         lastFlushedAt: null,
       });
+      resetLessonFlow();
       setAuthStatus(`Signed in as ${payload.email || payload.uid}`);
       setStatus("Signed in. Start a session when ready.");
       return true;
@@ -611,7 +636,7 @@ export default function useEurydiceApp() {
       setStatus("Sign-in failed.");
       return false;
     }
-  }, [email, password]);
+  }, [email, password, resetLessonFlow]);
 
   const loadLiveToolMetrics = useCallback(async () => {
     if (!user) {
@@ -803,8 +828,9 @@ export default function useEurydiceApp() {
 
   const startTutorSession = useCallback(async () => {
     setErrorMessage("");
+    resetLessonFlow();
     await ensureGuidedLessonSession();
-  }, [ensureGuidedLessonSession]);
+  }, [ensureGuidedLessonSession, resetLessonFlow]);
 
   const runLessonAction = useCallback(
     async ({ sourceTextOverride = null, forcedPrepare = false } = {}) => {
@@ -941,6 +967,7 @@ export default function useEurydiceApp() {
       setLiveMode(null);
       setSessionId(null);
       stopCameraCapture();
+      resetLessonFlow();
     }
     setStatus("Creating live score reader...");
     const session = await apiRequest("/api/sessions", {
@@ -967,6 +994,7 @@ export default function useEurydiceApp() {
     disconnect,
     isConnected,
     rejectPendingToolCalls,
+    resetLessonFlow,
     stopCameraCapture,
     user,
   ]);
@@ -1000,19 +1028,30 @@ export default function useEurydiceApp() {
       lastDetectedAt: null,
       lastFlushedAt: null,
     });
+    resetLessonFlow();
     setStatus("Live session stopped.");
-  }, [disconnect, isConnected, rejectPendingToolCalls, send, stopCameraCapture]);
+  }, [disconnect, isConnected, rejectPendingToolCalls, resetLessonFlow, send, stopCameraCapture]);
 
   const sendLiveText = useCallback(
-    (text) => {
+    (text, { eventType = null, eventPayload = null } = {}) => {
       const trimmed = text?.trim();
-      if (!trimmed || !isConnectedRef.current || liveModeRef.current !== "GUIDED_LESSON") {
+      const normalizedEventType = typeof eventType === "string" ? eventType.trim() : "";
+      if ((!trimmed && !normalizedEventType) || !isConnectedRef.current || liveModeRef.current !== "GUIDED_LESSON") {
         return;
       }
-      send({
+      const payload = {
         type: "client.text",
-        text: trimmed,
-      });
+      };
+      if (trimmed) {
+        payload.text = trimmed;
+      }
+      if (normalizedEventType) {
+        payload.event_type = normalizedEventType;
+      }
+      if (eventPayload && typeof eventPayload === "object") {
+        payload.event_payload = eventPayload;
+      }
+      send(payload);
     },
     [send],
   );
@@ -1031,13 +1070,18 @@ export default function useEurydiceApp() {
       pendingSummary: pending.summary,
       lastFlushedAt: Date.now(),
     }));
-    sendLiveText(pending.text);
+    sendLiveText(pending.type ? "" : pending.text || "", {
+      eventType: pending.type || null,
+      eventPayload: pending.payload || null,
+    });
   }, [sendLiveText]);
 
   const queueMusicInterrupt = useCallback(
-    ({ text, type, summary }) => {
+    ({ text, type, summary, payload = null }) => {
       if (!text) {
-        return;
+        if (!type) {
+          return;
+        }
       }
       const now = Date.now();
       const queuedCount = pendingMusicInterruptRef.current
@@ -1047,6 +1091,7 @@ export default function useEurydiceApp() {
         text,
         type,
         summary,
+        payload,
         count: queuedCount,
         queuedAt: now,
       };
@@ -1088,6 +1133,10 @@ export default function useEurydiceApp() {
           )}%. Respond briefly once your current sentence ends.`,
           type: event.type,
           summary: `Note ${event.pitch}`,
+          payload: {
+            pitch: event.pitch || null,
+            confidence: Number(event.confidence || 0),
+          },
         });
         return;
       }
@@ -1105,6 +1154,11 @@ export default function useEurydiceApp() {
           ) ? event.pattern.join("-") : "unknown"}. Give one short coaching response.`,
           type: event.type,
           summary: `Rhythm ${event.tempo || "?"} BPM`,
+          payload: {
+            tempo: event.tempo || null,
+            pattern: Array.isArray(event.pattern) ? event.pattern : [],
+            confidence: Number(event.confidence || 0),
+          },
         });
         return;
       }
@@ -1123,22 +1177,30 @@ export default function useEurydiceApp() {
           text: `A phrase interrupt just occurred: PHRASE_PLAYED notes=${event.notes.join(",")}. Acknowledge it briefly and continue the lesson.`,
           type: event.type,
           summary: `Phrase ${event.notes.join(" · ")}`,
+          payload: {
+            notes: Array.isArray(event.notes) ? event.notes : [],
+            confidence: Number(event.confidence || 0),
+          },
         });
         return;
       }
 
       musicAnalysisInFlightRef.current = true;
       try {
-        const payload = await apiRequest("/api/music/transcribe", {
-          method: "POST",
-          body: {
-            audio_b64: event.audioB64,
-            mime: event.mime,
-            expected: "AUTO",
-            max_notes: 8,
-            instrument_profile: instrumentProfile,
-          },
-        });
+        const transcribeArgs = {
+          audio_b64: event.audioB64,
+          mime: event.mime,
+          expected: "AUTO",
+          max_notes: 8,
+          instrument_profile: instrumentProfile,
+        };
+        const payload =
+          liveModeRef.current === "GUIDED_LESSON" && isConnectedRef.current
+            ? await invokeLiveTool("transcribe", transcribeArgs, { sendToModel: false })
+            : await apiRequest("/api/music/transcribe", {
+                method: "POST",
+                body: transcribeArgs,
+              });
         setAnalysis(payload);
         setStatus("Live phrase analysed.");
         appendConversationMessage("assistant", payload.summary || "Phrase analysed.", {
@@ -1160,6 +1222,11 @@ export default function useEurydiceApp() {
           } Respond briefly using that evidence.`,
           type: event.type,
           summary: payload.summary || `Phrase ${event.notes.join(" · ")}`,
+          payload: {
+            notes: Array.isArray(event.notes) ? event.notes : [],
+            summary: payload.summary || "",
+            confidence: Number(payload.confidence || 0),
+          },
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unable to analyse live phrase.";
@@ -1172,6 +1239,7 @@ export default function useEurydiceApp() {
       appendCaption,
       appendConversationMessage,
       instrumentProfile,
+      invokeLiveTool,
       queueMusicInterrupt,
       reportLiveAudioTrace,
       user,
@@ -1311,6 +1379,60 @@ export default function useEurydiceApp() {
   const handleLiveMessage = useCallback(
     async (data) => {
       switch (data.type) {
+        case "server.lesson_state": {
+          const transitionId = Number(data.transition_id || 0);
+          setLessonFlow((current) => {
+            if (transitionId && transitionId === current.transitionId) {
+              return current;
+            }
+            return {
+              phase: typeof data.phase === "string" ? data.phase : current.phase,
+              previousPhase:
+                typeof data.previous_phase === "string" || data.previous_phase === null
+                  ? data.previous_phase
+                  : current.previousPhase,
+              reason: typeof data.reason === "string" ? data.reason : current.reason,
+              status: typeof data.status === "string" && data.status.trim() ? data.status : current.status,
+              suggestedActions: Array.isArray(data.suggested_actions)
+                ? data.suggested_actions.filter(Boolean)
+                : current.suggestedActions,
+              transitionId: transitionId || current.transitionId,
+              capturedGoal:
+                typeof data.captured_goal === "string" ? data.captured_goal : current.capturedGoal,
+              feedbackCard:
+                data.feedback_card && typeof data.feedback_card === "object"
+                  ? data.feedback_card
+                  : current.feedbackCard,
+            };
+          });
+          if (typeof data.status === "string" && data.status.trim()) {
+            appendConversationMessage("system", data.status, { kind: "lesson" });
+          }
+          break;
+        }
+        case "server.feedback_card":
+          if (data.card && typeof data.card === "object") {
+            setLessonFlow((current) => ({
+              ...current,
+              feedbackCard: data.card,
+            }));
+            if (typeof data.card.summary === "string" && data.card.summary.trim()) {
+              appendConversationMessage("assistant", data.card.summary, { kind: "analysis" });
+            }
+          }
+          break;
+        case "server.lesson_action": {
+          const actionId = `${data.transition_id || "na"}:${data.action || "unknown"}`;
+          if (handledLessonActionRefs.current.has(actionId)) {
+            break;
+          }
+          handledLessonActionRefs.current.add(actionId);
+          appendCaption("Lesson action", data.action_label || data.action || "Action suggested.");
+          if (data.auto === true && data.action === "capture_phrase") {
+            void runRecommendedLessonActionRef.current("capture_phrase");
+          }
+          break;
+        }
         case "server.tool_result": {
           const callId = typeof data.call_id === "string" ? data.call_id : "";
           if (callId && pendingToolCallsRef.current.has(callId)) {
@@ -1550,6 +1672,43 @@ export default function useEurydiceApp() {
     }
   }, [handleHearPhrase, isBusy]);
 
+  const runRecommendedLessonAction = useCallback(
+    async (action) => {
+      const normalized = typeof action === "string" ? action.trim().toLowerCase() : "";
+      if (!normalized || isBusy) {
+        return;
+      }
+      if (normalized === "capture_phrase") {
+        setIsBusy(true);
+        try {
+          await handleHearPhrase();
+        } catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : "Phrase capture failed.");
+          setStatus("Phrase capture failed.");
+        } finally {
+          setIsBusy(false);
+        }
+        return;
+      }
+      if (normalized === "prepare_lesson" || normalized === "next_exercise" || normalized === "replay_phrase") {
+        setIsBusy(true);
+        try {
+          await runLessonAction({ forcedPrepare: normalized === "prepare_lesson" });
+        } catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : "Lesson action failed.");
+          setStatus("Lesson action failed.");
+        } finally {
+          setIsBusy(false);
+        }
+      }
+    },
+    [handleHearPhrase, isBusy, runLessonAction],
+  );
+
+  useEffect(() => {
+    runRecommendedLessonActionRef.current = runRecommendedLessonAction;
+  }, [runRecommendedLessonAction]);
+
   const handleToggleScoreReader = useCallback(async () => {
     if (isBusy) {
       return;
@@ -1635,6 +1794,7 @@ export default function useEurydiceApp() {
     setScoreLine,
     activeScore,
     lessonState,
+    lessonFlow,
     analysis,
     comparison,
     userSkillProfile,
@@ -1668,6 +1828,7 @@ export default function useEurydiceApp() {
     stopLiveSession,
     handlePrimaryAction,
     handleCapturePhraseAction,
+    runRecommendedLessonAction,
     handleToggleScoreReader,
     handlePlayAnalysis,
     handlePlayScore,

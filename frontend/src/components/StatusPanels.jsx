@@ -87,6 +87,7 @@ function FeedbackMeters({ title, feedback }) {
 
 export function LessonPanel({
   lessonState,
+  lessonFlow,
   analysis,
   comparison,
   userSkillProfile,
@@ -114,7 +115,7 @@ export function LessonPanel({
           </div>
         </div>
         <div className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-          {lessonState.stage}
+          {lessonFlow?.phase || lessonState.stage}
         </div>
       </div>
 
@@ -136,6 +137,18 @@ export function LessonPanel({
       {lessonState.prompt ? (
         <div className="mt-4 rounded-[1.6rem] border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800">
           {lessonState.prompt}
+        </div>
+      ) : null}
+
+      {lessonFlow?.feedbackCard ? (
+        <div className="mt-4 rounded-[1.6rem] border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
+          <div className="font-semibold">{lessonFlow.feedbackCard.title || "Lesson feedback"}</div>
+          <div className="mt-1">{lessonFlow.feedbackCard.summary || ""}</div>
+          {Array.isArray(lessonFlow.feedbackCard.notes) && lessonFlow.feedbackCard.notes.length ? (
+            <div className="mt-2 text-xs text-emerald-800">
+              {lessonFlow.feedbackCard.notes.join(" · ")}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

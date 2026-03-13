@@ -15,6 +15,49 @@ Eurydice is live-first: the primary experience is a guided real-time tutoring se
 5. Backend connects `GeminiLiveBridge` (ADK preferred, direct Live API fallback).
 6. Messages are exchanged as normalized events internally and flattened on the wire.
 
+## Lesson Orchestrator
+
+`backend/app/domains/music/lesson_orchestrator.py` sits above the Live stream and deterministic tools.
+
+### Intent/Event Router
+
+`backend/app/domains/music/lesson_intents.py` now classifies user and session signals into typed events before phase transitions.
+
+- Why this replaced keyword routing:
+  - single-keyword matching was brittle for ambiguous follow-ups (`again`, `was that right?`, `what now?`),
+  - phrasing variation caused inconsistent phase jumps.
+- Current hybrid routing stack:
+  - deterministic rules first for clear intents (stop/feedback/phrase/confusion/next-step),
+  - phase-aware heuristics for short ambiguous turns,
+  - lightweight fallback classifier for low-signal turns.
+- Typed output contract:
+  - `intent`, `confidence`, `source`, `current_phase`, `recommended_transition`, `entities`.
+- Deterministic authority remains unchanged:
+  - musical correctness still comes from deterministic tools (`transcribe`, `lesson_action`, `lesson_step`, `render_score`), not LLM guesswork.
+
+- Maintains explicit lesson phases:
+  - `idle`
+  - `intro`
+  - `goal_capture`
+  - `exercise_selection`
+  - `listening`
+  - `analysis`
+  - `feedback`
+  - `next_step`
+  - `session_complete`
+- Accepts orchestration inputs:
+  - user text,
+  - assistant text,
+  - deterministic tool results,
+  - session stop events.
+- Emits orchestration outputs:
+  - `server.lesson_state` (phase/status/suggested actions),
+  - `server.lesson_action` (phase-aware suggested action, optional auto trigger),
+  - `server.feedback_card` (compact deterministic feedback card),
+  - bounded `LESSON_CONTEXT` model notes for Gemini Live.
+
+This keeps the product flow conversation-first while preserving deterministic musical truth.
+
 ## Wire Event Contract
 
 - Internal shape: `{type, payload, metadata}`.
@@ -63,6 +106,7 @@ This reduces duplicate tool execution during stream retries or reconnect jitter.
 - Live transcripts (`server.transcript`) are incremental.
 - Final assistant text (`server.text`) closes streaming turns.
 - Frontend normalizes both envelope and flat message forms for robustness.
+- Lesson-phase updates stream in-band as semantic events (`server.lesson_state`), so UI flow follows pedagogy state rather than tool-panel state.
 
 ## Session Lifecycle
 
@@ -83,9 +127,26 @@ This reduces duplicate tool execution during stream retries or reconnect jitter.
 
 Scenarios include:
 
-- explaining a scale,
-- beginner exercise guidance,
-- played phrase reaction,
-- corrective feedback,
-- follow-up continuity,
+- beginner asks for help with a scale,
+- user plays a phrase and asks whether it was correct,
+- tutor explains a concept then adapts after user struggle,
+- tutor proposes a next exercise based on prior deterministic result,
 - clean stop/start recovery.
+
+## Replay Regression Validation
+
+`backend/app/domains/music/lesson_replay.py` replays sanitized trace events against the orchestrator:
+
+- accepted replay inputs:
+  - transcript chunks (partial/final),
+  - final user/assistant messages,
+  - music phrase events,
+  - deterministic tool results,
+  - session start/stop events.
+- regression checks:
+  - stable phase traces,
+  - no duplicate transitions,
+  - no duplicate feedback cards,
+  - stable behavior across stop/start and ambiguous follow-ups.
+
+Use replay traces when changing prompts, intent routing, or phase logic to verify behavior stays stable before merge.

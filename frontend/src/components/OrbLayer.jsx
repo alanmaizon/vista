@@ -39,6 +39,7 @@ export default function OrbLayer({
   status,
   runtimeSummary,
   lessonState,
+  lessonFlow,
   isConnected,
   micEnabled,
   cameraEnabled,
@@ -51,8 +52,9 @@ export default function OrbLayer({
   interruptState,
 }) {
   const captureMode = resolveCaptureMode({ isReadingScore, isPlaying, micEnabled });
-  const stageLabel = lessonState?.stage ? lessonState.stage.replaceAll("-", " ") : "idle";
-  const prompt = lessonState?.prompt || status;
+  const phaseLabel = lessonFlow?.phase || lessonState?.stage || "idle";
+  const stageLabel = phaseLabel.replaceAll("-", " ").replaceAll("_", " ");
+  const prompt = lessonFlow?.status || lessonState?.prompt || status;
   const sessionLabel = isSessionStarting ? "Starting" : isConnected ? "Live" : "Closed";
 
   return (

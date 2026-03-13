@@ -21,6 +21,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.conversation_manager import ConversationManager
 from app.domains import build_session_runtime
+from app.domains.music.lesson_orchestrator import LessonOrchestrator
 from app.domains.music.live_tools import music_live_tool_prompt_fragment, register_music_tools
 from app.prompts import PromptComposer
 
@@ -37,6 +38,11 @@ class EvalScenario:
     expected_latency_ms: int = 280
     requires_streaming: bool = True
     requires_continuity: bool = True
+    expected_phase_markers: tuple[str, ...] = ("intro", "goal_capture", "exercise_selection")
+    simulate_phrase_tool: bool = False
+    includes_follow_up: bool = False
+    includes_repeat_request: bool = False
+    includes_silence_resume: bool = False
 
 
 @dataclass(frozen=True)
@@ -74,54 +80,64 @@ PROMPT_PEDAGOGY_MARKERS = (
 
 SCENARIOS: tuple[EvalScenario, ...] = (
     EvalScenario(
-        key="explain_scale",
-        title="Explain a scale clearly",
+        key="ambiguous_clarification_requests",
+        title="Ambiguous clarification requests",
         skill="GUIDED_LESSON",
-        goal="Explain the D major scale to a beginner and then check understanding.",
-        user_turns=("Can you explain the D major scale?", "Why are there two sharps?"),
+        goal="Help me understand a scale slowly when I ask short ambiguous follow-ups.",
+        user_turns=("Help me with A major scale.", "again", "can you slow down?"),
+        expected_phase_markers=("intro", "goal_capture", "exercise_selection", "listening", "feedback"),
+        includes_follow_up=True,
+        includes_repeat_request=True,
         required_prompt_markers=("Never guess", "Current music skill:", "Tool policy:"),
     ),
     EvalScenario(
-        key="guide_beginner_exercise",
-        title="Guide a beginner exercise",
+        key="repeated_exercise_requests",
+        title="Repeated exercise requests",
         skill="GUIDED_LESSON",
-        goal="Teach a beginner one short call-and-response warmup.",
-        user_turns=("I am new to this. What should I play first?",),
-        expected_tools=("lesson_action",),
-    ),
-    EvalScenario(
-        key="react_to_played_phrase",
-        title="React to a played phrase",
-        skill="HEAR_PHRASE",
-        goal="Listen to my short phrase and provide grounded feedback.",
-        user_turns=("I just played a phrase.",),
-        expected_tools=("transcribe",),
-        required_prompt_markers=("Never guess musical details",),
-    ),
-    EvalScenario(
-        key="corrective_feedback",
-        title="Provide corrective feedback",
-        skill="COMPARE_PERFORMANCE",
-        goal="Compare my take and tell me one correction to fix first.",
-        user_turns=("I think I rushed the second note.",),
-        expected_tools=("lesson_action", "lesson_step"),
-    ),
-    EvalScenario(
-        key="follow_up_same_lesson",
-        title="Handle follow-up in same lesson",
-        skill="GUIDED_LESSON",
-        goal="Continue same lesson after a follow-up clarification.",
-        user_turns=("How did I do on that bar?", "Can you explain that correction differently?"),
+        goal="Ask for another exercise multiple times and keep flow stable.",
+        user_turns=("Help me with rhythm.", "Give me another exercise.", "one more exercise please"),
         expected_tools=("lesson_step",),
+        expected_phase_markers=("intro", "goal_capture", "exercise_selection"),
     ),
     EvalScenario(
-        key="recover_after_restart",
-        title="Recover cleanly after stop/start",
+        key="feedback_after_played_phrase",
+        title="User asks feedback after playing a phrase",
         skill="GUIDED_LESSON",
-        goal="Restart the lesson and continue without duplicate tool actions.",
-        user_turns=("Stop for a moment.", "Start again from bar one."),
-        expected_tools=("lesson_action",),
-        requires_continuity=True,
+        goal="I play a phrase and ask if it was correct.",
+        user_turns=("Help me with C major.", "let me try", "was that right?"),
+        expected_tools=("transcribe",),
+        expected_phase_markers=("intro", "goal_capture", "exercise_selection", "listening", "analysis", "feedback"),
+        simulate_phrase_tool=True,
+    ),
+    EvalScenario(
+        key="interrupt_explanation_follow_up",
+        title="User interrupts explanation with follow-up",
+        skill="GUIDED_LESSON",
+        goal="Tutor explains then user asks a clarifying interruption.",
+        user_turns=("Explain harmonic minor briefly.", "why is that?", "I still struggle with this."),
+        expected_tools=("transcribe",),
+        expected_phase_markers=("intro", "goal_capture", "exercise_selection", "feedback"),
+        simulate_phrase_tool=True,
+        includes_follow_up=True,
+    ),
+    EvalScenario(
+        key="resume_after_silence",
+        title="User resumes after silence",
+        skill="GUIDED_LESSON",
+        goal="Recover from silence timeout and continue practice.",
+        user_turns=("Help me with arpeggios.",),
+        expected_phase_markers=("intro", "goal_capture", "exercise_selection", "next_step", "listening"),
+        includes_silence_resume=True,
+    ),
+    EvalScenario(
+        key="ask_what_next",
+        title='User asks "what should I do next?"',
+        skill="GUIDED_LESSON",
+        goal="User asks for the next step after phrase analysis.",
+        user_turns=("I want to improve rhythm.", "I played a phrase, was that correct?", "what should I do next?"),
+        expected_tools=("transcribe", "lesson_step"),
+        expected_phase_markers=("intro", "goal_capture", "exercise_selection", "listening", "analysis", "feedback", "next_step"),
+        simulate_phrase_tool=True,
     ),
 )
 
@@ -183,14 +199,77 @@ def _simulate_continuity_contract(scenario: EvalScenario) -> float:
     history = manager.get_full_history()
     if len(history) < len(scenario.user_turns) * 2:
         return 0.0
-    # Recovery scenario: ensure new manager starts clean without carrying
+    # Resume scenario: ensure a restarted manager starts clean without carrying
     # duplicate pending tool call state.
-    if scenario.key == "recover_after_restart":
+    if scenario.key == "resume_after_silence":
         restarted = ConversationManager(session_id=uuid.uuid4(), user_id="eval-user")
-        _, accepted = restarted.register_tool_call("lesson_action", {"restart": True}, call_id="restart-1")
+        _, accepted = restarted.register_tool_call("lesson_action", {"resume": True}, call_id="resume-1")
         if not accepted:
             return 0.0
     return 1.0
+
+
+def _ordered_phase_coverage(phases: list[str], expected: tuple[str, ...]) -> float:
+    if not expected:
+        return 1.0
+    cursor = 0
+    for phase in phases:
+        if phase == expected[cursor]:
+            cursor += 1
+            if cursor >= len(expected):
+                break
+    return round(cursor / len(expected), 3)
+
+
+def _simulate_orchestrator_contract(scenario: EvalScenario) -> tuple[float, dict[str, Any]]:
+    orchestrator = LessonOrchestrator(skill=scenario.skill, goal=scenario.goal)
+    phase_trace: list[str] = []
+
+    def _capture(directive) -> None:
+        for event in directive.events:
+            if event.get("type") == "server.lesson_state":
+                phase = str(event.get("phase", "")).strip()
+                if phase:
+                    phase_trace.append(phase)
+
+    _capture(orchestrator.start_session())
+    for turn in scenario.user_turns:
+        _capture(orchestrator.on_user_text(turn))
+
+    if scenario.simulate_phrase_tool:
+        _capture(
+            orchestrator.on_tool_result(
+                tool_name="transcribe",
+                ok=True,
+                result={
+                    "summary": "Deterministic phrase result is available.",
+                    "confidence": 0.82,
+                    "notes": [{"note_name": "C4"}, {"note_name": "E4"}],
+                },
+            )
+        )
+        _capture(orchestrator.on_assistant_text("Thanks, here's one correction and one next step."))
+
+    if scenario.includes_follow_up:
+        _capture(orchestrator.on_user_text("Can you explain that again? I am still struggling."))
+
+    if scenario.includes_repeat_request:
+        _capture(orchestrator.on_user_text("one more time"))
+
+    if scenario.includes_silence_resume:
+        _capture(orchestrator.on_music_phrase_event(event_type="SILENCE_TIMEOUT", payload={"timeout_seconds": 12}))
+        _capture(orchestrator.on_user_text("let me try"))
+
+    expected_score = _ordered_phase_coverage(phase_trace, scenario.expected_phase_markers)
+    adjacent_duplicates = sum(1 for index in range(1, len(phase_trace)) if phase_trace[index] == phase_trace[index - 1])
+    dedupe_score = 1.0 if not phase_trace else round(max(0.0, 1 - (adjacent_duplicates / len(phase_trace))), 3)
+    score = round((expected_score * 0.8) + (dedupe_score * 0.2), 3)
+    return score, {
+        "phase_trace": phase_trace,
+        "expected_phase_markers": list(scenario.expected_phase_markers),
+        "phase_coverage": expected_score,
+        "dedupe_score": dedupe_score,
+    }
 
 
 def _grade_scenario(scenario: EvalScenario) -> tuple[ScenarioGrade, dict[str, Any]]:
@@ -205,20 +284,22 @@ def _grade_scenario(scenario: EvalScenario) -> tuple[ScenarioGrade, dict[str, An
     tool_score = _simulate_tool_contract(scenario)
     streaming = _simulate_stream_contract() if scenario.requires_streaming else 1.0
     continuity = _simulate_continuity_contract(scenario)
+    orchestrator_score, orchestrator_detail = _simulate_orchestrator_contract(scenario)
     latency = 1.0 if scenario.expected_latency_ms <= 350 else max(0.0, 350 / scenario.expected_latency_ms)
 
     grade = ScenarioGrade(
         factual_correctness=factual,
-        pedagogical_usefulness=pedagogy,
+        pedagogical_usefulness=round((pedagogy + orchestrator_score) / 2, 3),
         tool_call_correctness=tool_score,
         streaming_behavior=round(streaming, 3),
         latency_responsiveness=round(latency, 3),
-        continuity_across_turns=round(continuity, 3),
+        continuity_across_turns=round((continuity + orchestrator_score) / 2, 3),
     )
     detail = {
         "scenario": asdict(scenario),
         "opening_prompt": opening_prompt,
         "system_prompt_chars": len(system_prompt),
+        "orchestrator": orchestrator_detail,
         "grade": asdict(grade) | {"overall": grade.overall},
     }
     return grade, detail

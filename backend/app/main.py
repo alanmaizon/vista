@@ -25,6 +25,7 @@ from .db import AsyncSessionLocal, init_db
 from .domains import SessionRuntime, build_session_runtime
 from .domains.music.api import router as music_router
 from .domains.music.context import build_music_live_context
+from .domains.music.lesson_orchestrator import LessonDirective, LessonOrchestrator
 from .domains.music.live_tools import register_music_tools
 from .domains.music.models import MusicLiveToolCall
 from .domains.music.render import verovio_runtime_status
@@ -415,6 +416,25 @@ async def _send_live_event(ws: WebSocket, event: LiveEvent | dict[str, Any]) -> 
     await ws.send_json(_live_event_to_wire(event))
 
 
+async def _apply_lesson_directive(
+    *,
+    ws: WebSocket,
+    bridge: GeminiLiveBridge,
+    directive: LessonDirective | None,
+    send_model_context: bool = True,
+) -> None:
+    if directive is None:
+        return
+    for event in directive.events:
+        await _send_live_event(ws, event)
+    if not send_model_context:
+        return
+    for message in directive.model_context_messages:
+        text = str(message).strip()
+        if text:
+            await bridge.send_text(text, role="user")
+
+
 async def _execute_live_tool_call(
     *,
     user_id: str,
@@ -472,6 +492,7 @@ async def _handle_live_tool_call(
     source: str,
     call_id: str | None = None,
     send_to_model: bool = True,
+    lesson_orchestrator: LessonOrchestrator | None = None,
 ) -> None:
     started_at = monotonic()
     try:
@@ -491,6 +512,16 @@ async def _handle_live_tool_call(
         )
         conversation_manager.add_tool_result(name=tool_name, result=payload, call_id=call_id)
         await _send_live_event(ws, event)
+        if lesson_orchestrator:
+            await _apply_lesson_directive(
+                ws=ws,
+                bridge=bridge,
+                directive=lesson_orchestrator.on_tool_result(
+                    tool_name=tool_name,
+                    ok=True,
+                    result=payload,
+                ),
+            )
         if send_to_model:
             await bridge.send_text(_tool_result_to_model_text(tool_name, payload), role="user")
         await _record_live_tool_call(
@@ -514,6 +545,17 @@ async def _handle_live_tool_call(
         )
         conversation_manager.add_tool_result(name=tool_name, result=None, error=str(exc), call_id=call_id)
         await _send_live_event(ws, event)
+        if lesson_orchestrator:
+            await _apply_lesson_directive(
+                ws=ws,
+                bridge=bridge,
+                directive=lesson_orchestrator.on_tool_result(
+                    tool_name=tool_name,
+                    ok=False,
+                    result=None,
+                    error=str(exc),
+                ),
+            )
         if send_to_model:
             await bridge.send_text(_tool_error_to_model_text(tool_name, str(exc)), role="user")
         error_kind = _classify_tool_error(str(exc), status_code=exc.status_code)
@@ -542,6 +584,17 @@ async def _handle_live_tool_call(
             name=tool_name, result=None, error="Unexpected tool execution failure.", call_id=call_id
         )
         await _send_live_event(ws, event)
+        if lesson_orchestrator:
+            await _apply_lesson_directive(
+                ws=ws,
+                bridge=bridge,
+                directive=lesson_orchestrator.on_tool_result(
+                    tool_name=tool_name,
+                    ok=False,
+                    result=None,
+                    error="Unexpected tool execution failure.",
+                ),
+            )
         if send_to_model:
             await bridge.send_text(
                 _tool_error_to_model_text(tool_name, "Unexpected tool execution failure."),
@@ -567,6 +620,7 @@ async def _forward_bridge_events(
     *,
     user_id: str,
     session_id: UUID,
+    lesson_orchestrator: LessonOrchestrator | None = None,
 ) -> None:
     async for event in bridge.receive():
         normalized_event: LiveEvent | None = None
@@ -583,6 +637,13 @@ async def _forward_bridge_events(
             extra_events = runtime.on_model_text(text)
             for extra_event in extra_events:
                 await _send_live_event(ws, extra_event)
+            if lesson_orchestrator:
+                await _apply_lesson_directive(
+                    ws=ws,
+                    bridge=bridge,
+                    directive=lesson_orchestrator.on_assistant_text(text),
+                    send_model_context=False,
+                )
             normalized_event = ServerTextEvent(payload={k: v for k, v in event.items() if k != "type"})
         elif event_type == "server.transcript":
             normalized_event = ServerTranscriptEvent(payload={k: v for k, v in event.items() if k != "type"})
@@ -629,6 +690,7 @@ async def _forward_bridge_events(
                 source="model",
                 call_id=resolved_call_id,
                 send_to_model=True,
+                lesson_orchestrator=lesson_orchestrator,
             )
             continue
         if normalized_event:
@@ -700,6 +762,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         skill=resolved_skill,
         goal=session.goal,
     )
+    lesson_orchestrator = (
+        LessonOrchestrator(skill=runtime.skill, goal=session.goal)
+        if runtime.skill == "GUIDED_LESSON"
+        else None
+    )
     conversation_manager = ConversationManager(session_id=session_id, user_id=user["uid"])
 
     live_context = await _build_live_context_for_user(
@@ -749,6 +816,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 }
             ),
         )
+        if lesson_orchestrator:
+            await _apply_lesson_directive(
+                ws=ws,
+                bridge=bridge,
+                directive=lesson_orchestrator.start_session(),
+                send_model_context=False,
+            )
         connect_events = runtime.on_connect_events()
         if runtime.skill == "GUIDED_LESSON":
             connect_events = []
@@ -768,6 +842,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 conversation_manager,
                 user_id=user["uid"],
                 session_id=session_id,
+                lesson_orchestrator=lesson_orchestrator,
             )
         )
         stop_requested = False
@@ -834,25 +909,52 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         source="client",
                         call_id=resolved_call_id,
                         send_to_model=send_to_model,
+                        lesson_orchestrator=lesson_orchestrator,
                     )
                 elif message_type == CLIENT_TEXT:
                     text = str(message.get("text", "")).strip()
-                    if not text:
+                    event_type = str(message.get("event_type", "")).strip()
+                    event_payload = message.get("event_payload") if isinstance(message.get("event_payload"), dict) else None
+                    if not text and not event_type:
                         raise ValueError("client.text requires a non-empty text field")
-                    conversation_manager.add_user_turn(text)
-                    # Store substantive user messages as memories (fire-and-forget).
-                    if len(text) > _MIN_STORABLE_MESSAGE_LENGTH:
-                        asyncio.create_task(
-                            _memory_service.store_memory(
-                                user_id=user["uid"],
-                                content=text,
-                                memory_type=MemoryType.USER_QUESTION,
-                                metadata={"session_skill": runtime.skill},
+                    if lesson_orchestrator:
+                        if event_type:
+                            await _apply_lesson_directive(
+                                ws=ws,
+                                bridge=bridge,
+                                directive=lesson_orchestrator.on_music_phrase_event(
+                                    event_type=event_type,
+                                    payload=event_payload,
+                                ),
                             )
-                        )
-                    await bridge.send_text(text, role="user")
+                        if text:
+                            await _apply_lesson_directive(
+                                ws=ws,
+                                bridge=bridge,
+                                directive=lesson_orchestrator.on_user_text(text),
+                            )
+                    if text:
+                        conversation_manager.add_user_turn(text)
+                        # Store substantive user messages as memories (fire-and-forget).
+                        if len(text) > _MIN_STORABLE_MESSAGE_LENGTH:
+                            asyncio.create_task(
+                                _memory_service.store_memory(
+                                    user_id=user["uid"],
+                                    content=text,
+                                    memory_type=MemoryType.USER_QUESTION,
+                                    metadata={"session_skill": runtime.skill},
+                                )
+                            )
+                        await bridge.send_text(text, role="user")
                 elif message_type == CLIENT_STOP:
                     stop_requested = True
+                    if lesson_orchestrator:
+                        await _apply_lesson_directive(
+                            ws=ws,
+                            bridge=bridge,
+                            directive=lesson_orchestrator.on_session_stopped(),
+                            send_model_context=False,
+                        )
                     await _send_live_event(ws, ServerSummaryEvent(payload=runtime.summary_payload()))
                     break
                 else:

@@ -277,14 +277,23 @@ def test_ws_live_forwards_client_text_to_bridge(
             }
         )
         status_payload = ws.receive_json()
+        intro_state = ws.receive_json()
 
         ws.send_json({"type": "client.text", "text": "Can we work on D minor?"})
+        goal_state = ws.receive_json()
+        exercise_state = ws.receive_json()
         ws.send_json({"type": "client.stop"})
+        complete_state = ws.receive_json()
         summary_payload = ws.receive_json()
 
     bridge = FakeBridge.created[0]
     assert status_payload["type"] == "server.status"
     assert status_payload["skill"] == "GUIDED_LESSON"
+    assert intro_state["type"] == "server.lesson_state"
+    assert intro_state["phase"] == "intro"
+    assert goal_state["phase"] == "goal_capture"
+    assert exercise_state["phase"] == "exercise_selection"
+    assert complete_state["phase"] == "session_complete"
     assert summary_payload["type"] == "server.summary"
     assert "I am starting a GUIDED_LESSON music tutoring session." in bridge.sent_text[0][0]
     assert bridge.sent_text[0][1] == "user"
@@ -327,14 +336,19 @@ def test_ws_live_emits_transcript_events_progressively(
             }
         )
         status_payload = ws.receive_json()
+        intro_state = ws.receive_json()
         assistant_partial = ws.receive_json()
         user_transcript = ws.receive_json()
+        goal_capture_state = ws.receive_json()
         assistant_text = ws.receive_json()
         ws.send_json({"type": "client.stop"})
+        complete_state = ws.receive_json()
         summary_payload = ws.receive_json()
 
     bridge = FakeBridge.created[0]
     assert status_payload["type"] == "server.status"
+    assert intro_state["type"] == "server.lesson_state"
+    assert intro_state["phase"] == "intro"
     assert "I am starting a GUIDED_LESSON music tutoring session." in bridge.sent_text[0][0]
     assert assistant_partial == {
         "type": "server.transcript",
@@ -352,7 +366,249 @@ def test_ws_live_emits_transcript_events_progressively(
         "type": "server.text",
         "text": "Let's begin with a D minor arpeggio.",
     }
+    assert goal_capture_state["type"] == "server.lesson_state"
+    assert goal_capture_state["phase"] == "goal_capture"
+    assert complete_state["type"] == "server.lesson_state"
+    assert complete_state["phase"] == "session_complete"
     assert summary_payload["type"] == "server.summary"
+
+
+def test_ws_guided_session_starts_in_intro_phase(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = uuid.uuid4()
+
+    async def fake_guided_session(*_args, **_kwargs):
+        return SimpleNamespace(goal=None, domain="MUSIC", mode="GUIDED_LESSON")
+
+    monkeypatch.setattr(main_module, "_load_owned_session", fake_guided_session)
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "GUIDED_LESSON",
+            }
+        )
+        ws.receive_json()  # status
+        intro_state = ws.receive_json()
+        ws.send_json({"type": "client.stop"})
+        ws.receive_json()  # session_complete lesson state
+        ws.receive_json()  # summary
+
+    assert intro_state["type"] == "server.lesson_state"
+    assert intro_state["phase"] == "intro"
+
+
+def test_ws_guided_goal_capture_transitions_to_exercise_selection(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = uuid.uuid4()
+
+    async def fake_guided_session(*_args, **_kwargs):
+        return SimpleNamespace(goal=None, domain="MUSIC", mode="GUIDED_LESSON")
+
+    monkeypatch.setattr(main_module, "_load_owned_session", fake_guided_session)
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "GUIDED_LESSON",
+            }
+        )
+        ws.receive_json()  # status
+        ws.receive_json()  # intro
+        ws.send_json({"type": "client.text", "text": "Help me with G major scale."})
+        goal_capture = ws.receive_json()
+        exercise_selection = ws.receive_json()
+        ws.send_json({"type": "client.stop"})
+        ws.receive_json()  # session_complete
+        ws.receive_json()  # summary
+
+    assert goal_capture["phase"] == "goal_capture"
+    assert exercise_selection["phase"] == "exercise_selection"
+    assert exercise_selection["captured_goal"] == "Help me with G major scale."
+
+
+def test_ws_guided_music_analysis_emits_feedback_and_follow_up_transition(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = uuid.uuid4()
+
+    async def fake_guided_session(*_args, **_kwargs):
+        return SimpleNamespace(goal=None, domain="MUSIC", mode="GUIDED_LESSON")
+
+    async def fake_tool_executor(*_args, **kwargs) -> dict:
+        if kwargs.get("tool_name") == "transcribe":
+            return {
+                "summary": "You rushed the second note; try again with steadier spacing.",
+                "confidence": 0.84,
+                "notes": [{"note_name": "C4"}, {"note_name": "E4"}, {"note_name": "G4"}],
+            }
+        return {"ok": True}
+
+    monkeypatch.setattr(main_module, "_load_owned_session", fake_guided_session)
+    monkeypatch.setattr(main_module, "_execute_live_tool_call", fake_tool_executor)
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "GUIDED_LESSON",
+            }
+        )
+        ws.receive_json()  # status
+        ws.receive_json()  # intro
+        ws.send_json({"type": "client.text", "text": "Help me with C major scale."})
+        ws.receive_json()  # goal_capture
+        ws.receive_json()  # exercise_selection
+        ws.send_json({"type": "client.text", "text": "I played a phrase, was that correct?"})
+        listening_state = ws.receive_json()
+        lesson_action = ws.receive_json()
+        ws.send_json(
+            {
+                "type": "client.tool",
+                "call_id": "transcribe-call",
+                "name": "transcribe",
+                "args": {"audio_b64": "AA==", "mime": "audio/pcm;rate=16000"},
+            }
+        )
+        tool_result = ws.receive_json()
+        analysis_state = ws.receive_json()
+        feedback_state = ws.receive_json()
+        feedback_card = ws.receive_json()
+        ws.send_json({"type": "client.text", "text": "Can you explain that again? I am struggling."})
+        follow_up_state = ws.receive_json()
+        ws.send_json({"type": "client.stop"})
+        ws.receive_json()  # session_complete
+        ws.receive_json()  # summary
+
+    assert listening_state["phase"] == "listening"
+    assert lesson_action["type"] == "server.lesson_action"
+    assert lesson_action["action"] == "capture_phrase"
+    assert tool_result["type"] == "server.tool_result"
+    assert tool_result["name"] == "transcribe"
+    assert analysis_state["phase"] == "analysis"
+    assert feedback_state["phase"] == "feedback"
+    assert feedback_card["type"] == "server.feedback_card"
+    assert "rushed the second note" in feedback_card["card"]["summary"]
+    assert follow_up_state["phase"] == "feedback"
+    assert follow_up_state["reason"] == "follow_up_question"
+
+
+def test_ws_guided_music_event_routes_without_duplicate_transition(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = uuid.uuid4()
+
+    async def fake_guided_session(*_args, **_kwargs):
+        return SimpleNamespace(goal=None, domain="MUSIC", mode="GUIDED_LESSON")
+
+    monkeypatch.setattr(main_module, "_load_owned_session", fake_guided_session)
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "GUIDED_LESSON",
+            }
+        )
+        ws.receive_json()  # status
+        ws.receive_json()  # intro
+        ws.send_json({"type": "client.text", "text": "Help me with C major."})
+        ws.receive_json()  # goal_capture
+        ws.receive_json()  # exercise_selection
+
+        ws.send_json(
+            {
+                "type": "client.text",
+                "event_type": "PHRASE_PLAYED",
+                "event_payload": {"notes": ["C4", "E4", "G4"]},
+            }
+        )
+        listening_state = ws.receive_json()
+        lesson_action = ws.receive_json()
+
+        ws.send_json(
+            {
+                "type": "client.text",
+                "event_type": "PHRASE_PLAYED",
+                "event_payload": {"notes": ["C4", "E4", "G4"]},
+            }
+        )
+        ws.send_json({"type": "client.stop"})
+        complete_state = ws.receive_json()
+        summary = ws.receive_json()
+
+    assert listening_state["type"] == "server.lesson_state"
+    assert listening_state["phase"] == "listening"
+    assert lesson_action["type"] == "server.lesson_action"
+    assert lesson_action["action"] == "capture_phrase"
+    assert complete_state["type"] == "server.lesson_state"
+    assert complete_state["phase"] == "session_complete"
+    assert summary["type"] == "server.summary"
+
+
+def test_ws_guided_stop_start_recovery_has_single_intro_transition(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_guided_session(*_args, **_kwargs):
+        return SimpleNamespace(goal=None, domain="MUSIC", mode="GUIDED_LESSON")
+
+    monkeypatch.setattr(main_module, "_load_owned_session", fake_guided_session)
+
+    first_session = uuid.uuid4()
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(first_session),
+                "mode": "GUIDED_LESSON",
+            }
+        )
+        ws.receive_json()  # status
+        first_intro = ws.receive_json()
+        ws.send_json({"type": "client.stop"})
+        first_complete = ws.receive_json()
+        ws.receive_json()  # summary
+
+    second_session = uuid.uuid4()
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(second_session),
+                "mode": "GUIDED_LESSON",
+            }
+        )
+        ws.receive_json()  # status
+        second_intro = ws.receive_json()
+        ws.send_json({"type": "client.stop"})
+        second_complete = ws.receive_json()
+        ws.receive_json()  # summary
+
+    assert first_intro["phase"] == "intro"
+    assert first_intro["transition_id"] == 1
+    assert first_complete["phase"] == "session_complete"
+    assert second_intro["phase"] == "intro"
+    assert second_intro["transition_id"] == 1
+    assert second_complete["phase"] == "session_complete"
 
 
 def test_ws_live_executes_model_tool_call_and_returns_tool_result(

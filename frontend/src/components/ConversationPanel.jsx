@@ -57,6 +57,7 @@ function SignalMeter({ label, value }) {
 
 export default function ConversationPanel({
   messages,
+  lessonFlow,
   liveAudioMode,
   liveAudioLevels,
   recentMusicEvents,
@@ -77,6 +78,12 @@ export default function ConversationPanel({
             Conversation streams here once you start the tutor. Speech and music interrupts stay
             visible without pushing the workspace into a chat-heavy layout.
           </p>
+          {lessonFlow?.phase ? (
+            <div className="mt-2 text-xs text-slate-500">
+              Lesson phase: <span className="font-medium text-slate-700">{lessonFlow.phase}</span>
+              {lessonFlow?.status ? ` · ${lessonFlow.status}` : ""}
+            </div>
+          ) : null}
         </div>
         <div className="grid grid-cols-3 gap-2 text-center">
           <SignalMeter label="Speech" value={liveAudioLevels.speechConfidence} />

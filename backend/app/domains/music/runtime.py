@@ -176,7 +176,9 @@ class MusicRuntime(SessionRuntime):
         )
         guided_lesson_fragment = (
             "For GUIDED_LESSON, greet the user first, ask one short question about what they want to practice, "
-            "and keep the exchange conversational. When the user plays music, treat it as evidence for the lesson. "
+            "and keep the exchange conversational. Follow the lesson phases signaled by LESSON_CONTEXT updates "
+            "(intro, goal_capture, exercise_selection, listening, analysis, feedback, next_step). "
+            "When the user plays music, wait for deterministic analysis before claiming correctness. "
             "If deterministic comparison or score tools are available, reference them briefly instead of overwhelming the user with controls."
             if self.skill == "GUIDED_LESSON"
             else ""

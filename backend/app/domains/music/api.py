@@ -18,6 +18,13 @@ from .adaptive import update_user_skill_profile
 from .crepe import crepe_runtime_status
 from .symbolic import import_simple_score, score_to_dict
 from .compare import compare_performance_against_score, comparison_to_dict
+from .transcription import (
+    MusicTranscriptionError,
+    decode_audio_b64,
+    parse_pcm_mime,
+    transcribe_pcm16,
+    transcription_to_dict,
+)
 from .models import (
     MusicChallengeAttempt,
     MusicCollaborationSession,
@@ -111,6 +118,55 @@ class MusicPerformanceCompareResponse(BaseModel):
     played_phrase: dict
     comparisons: list[dict[str, Any]]
     performance_feedback: dict[str, float]
+
+
+class MusicTranscribeRequest(BaseModel):
+    """Request body for deterministic phrase transcription."""
+
+    audio_b64: str = Field(..., description="Base64-encoded mono PCM16 audio clip.")
+    mime: str = Field("audio/pcm;rate=16000")
+    expected: Literal["AUTO", "NOTE", "INTERVAL", "CHORD", "ARPEGGIO", "PHRASE"] = "AUTO"
+    max_notes: int = Field(8, ge=1, le=12)
+    instrument_profile: InstrumentProfileLiteral = Field("AUTO")
+
+    @field_validator("audio_b64")
+    @classmethod
+    def validate_audio_b64(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("audio_b64 is required.")
+        return value
+
+
+class MusicTranscribeResponse(BaseModel):
+    """Structured transcription payload from deterministic phrase analysis."""
+
+    kind: str
+    duration_ms: int
+    confidence: float
+    interval_hint: str | None = None
+    harmony_hint: str | None = None
+    summary: str
+    warnings: list[str] = Field(default_factory=list)
+    tempo_bpm: float | None = None
+    performance_feedback: dict[str, float] | None = None
+    notes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MusicPerformanceCompareRequest(BaseModel):
+    """Request body for deterministic score-to-performance comparison."""
+
+    audio_b64: str = Field(..., description="Base64-encoded mono PCM16 audio clip.")
+    mime: str = Field("audio/pcm;rate=16000")
+    max_notes: int = Field(12, ge=1, le=12)
+    measure_index: int | None = Field(None, ge=1)
+    instrument_profile: InstrumentProfileLiteral = Field("AUTO")
+
+    @field_validator("audio_b64")
+    @classmethod
+    def validate_audio_b64(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("audio_b64 is required.")
+        return value
 
 
 class MusicLessonStepRequest(BaseModel):
@@ -231,50 +287,6 @@ class MusicLiveToolMetricsResponse(BaseModel):
     failure_kinds: dict[str, int]
     metrics: list[MusicLiveToolMetric]
     recent_calls: list[MusicLiveToolCallSummary]
-
-
-class MusicLiveAudioTraceRequest(BaseModel):
-    """Frontend debug trace payload for live audio routing decisions."""
-
-    session_id: UUID | None = None
-    event_type: Literal["NOTE_PLAYED", "PHRASE_PLAYED", "RHYTHM_PATTERN", "ROUTER_MISMATCH"] = "NOTE_PLAYED"
-    router_mode: Literal["SILENCE", "SPEECH", "MUSIC"] = "SILENCE"
-    speech_active: bool = False
-    speech_confidence: float | None = Field(None, ge=0, le=1)
-    music_confidence: float | None = Field(None, ge=0, le=1)
-    pitch_hz: float | None = Field(None, ge=0)
-    pitch_confidence: float | None = Field(None, ge=0, le=1)
-    router_summary: dict[str, object] | None = None
-    deterministic_summary: dict[str, object] | None = None
-    mismatch: bool = False
-    mismatch_reason: str | None = None
-
-
-class MusicLiveAudioTraceSummary(BaseModel):
-    """One recent live audio trace row."""
-
-    event_type: str
-    router_mode: str
-    speech_active: bool
-    speech_confidence: float | None
-    music_confidence: float | None
-    pitch_hz: float | None
-    pitch_confidence: float | None
-    router_summary: dict[str, object] | None
-    deterministic_summary: dict[str, object] | None
-    mismatch: bool
-    mismatch_reason: str | None
-    created_at: str | None
-
-
-class MusicLiveAudioTraceResponse(BaseModel):
-    """Recent rolling trace summary for live audio routing diagnostics."""
-
-    total_traces: int
-    mismatch_count: int
-    mismatch_rate: float
-    by_event_type: dict[str, int]
-    recent_traces: list[MusicLiveAudioTraceSummary]
 
 
 class MusicLiveAudioTraceRequest(BaseModel):
@@ -1107,6 +1119,67 @@ def _build_compare_score(score: MusicScore, measure_index: int | None) -> MusicS
         summary=score.summary,
         warnings=list(score.warnings or []),
         measures=[selected_measure],
+    )
+
+
+@router.post("/transcribe", response_model=MusicTranscribeResponse)
+async def transcribe_music_phrase(
+    payload: MusicTranscribeRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+) -> MusicTranscribeResponse:
+    """Transcribe one short clip into deterministic symbolic note events."""
+    del current_user
+    try:
+        sample_rate = parse_pcm_mime(payload.mime)
+        audio_bytes = decode_audio_b64(payload.audio_b64)
+        phrase = transcribe_pcm16(
+            audio_bytes,
+            sample_rate=sample_rate,
+            expected=payload.expected,
+            max_notes=payload.max_notes,
+            instrument_profile=payload.instrument_profile,
+        )
+        return MusicTranscribeResponse(**transcription_to_dict(phrase))
+    except MusicTranscriptionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/score/{score_id}/compare", response_model=MusicPerformanceCompareResponse)
+async def compare_music_performance(
+    score_id: UUID,
+    payload: MusicPerformanceCompareRequest,
+    current_user: dict = Depends(auth_utils.get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MusicPerformanceCompareResponse:
+    """Compare a played phrase against a stored score or one selected measure."""
+    score = await _get_owned_score(db, score_id, current_user["uid"])
+    compare_score = _build_compare_score(score, payload.measure_index)
+    try:
+        sample_rate = parse_pcm_mime(payload.mime)
+        audio_bytes = decode_audio_b64(payload.audio_b64)
+    except MusicTranscriptionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    result = compare_performance_against_score(
+        compare_score,
+        audio_bytes=audio_bytes,
+        sample_rate=sample_rate,
+        max_notes=payload.max_notes,
+        instrument_profile=payload.instrument_profile,
+    )
+    attempt = _record_performance_attempt(
+        user_id=current_user["uid"],
+        score_id=score.id,
+        measure_index=payload.measure_index,
+        instrument_profile=payload.instrument_profile,
+        result=result,
+    )
+    db.add(attempt)
+    await db.commit()
+
+    return MusicPerformanceCompareResponse(
+        score_id=score.id,
+        **comparison_to_dict(result),
     )
 
 

@@ -5,6 +5,7 @@ import uuid
 import pytest
 
 from app.domains.music import live_tools
+from app.domains.music.symbolic import SymbolicPhrase
 
 
 @pytest.mark.asyncio
@@ -55,3 +56,42 @@ async def test_render_score_tool_returns_model_dump(monkeypatch: pytest.MonkeyPa
         args={"score_id": str(score_id)},
     )
     assert payload == {"score_id": str(score_id), "render_backend": "VEROVIO"}
+
+
+@pytest.mark.asyncio
+async def test_transcribe_tool_returns_phrase_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    phrase = SymbolicPhrase(
+        kind="single_note",
+        notes=(),
+        duration_ms=400,
+        confidence=0.91,
+        summary="Detected A4.",
+    )
+
+    monkeypatch.setattr(live_tools, "parse_pcm_mime", lambda _mime: 16000)
+    monkeypatch.setattr(live_tools, "decode_audio_b64", lambda _audio_b64: b"\x00\x00")
+    monkeypatch.setattr(live_tools, "transcribe_pcm16", lambda *_args, **_kwargs: phrase)
+    monkeypatch.setattr(
+        live_tools,
+        "transcription_to_dict",
+        lambda result: {"kind": result.kind, "summary": result.summary, "confidence": result.confidence},
+    )
+
+    payload = await live_tools.run_live_music_tool(
+        None,  # type: ignore[arg-type]
+        user_id="user-1",
+        tool_name="transcribe",
+        args={
+            "audio_b64": "AA==",
+            "mime": "audio/pcm;rate=16000",
+            "expected": "AUTO",
+            "max_notes": 8,
+        },
+    )
+    assert payload["kind"] == "single_note"
+    assert payload["summary"] == "Detected A4."
+
+
+def test_register_music_tools_is_idempotent() -> None:
+    live_tools.register_music_tools()
+    live_tools.register_music_tools()

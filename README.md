@@ -175,6 +175,9 @@ pytest backend/tests
 # Prompt quality evaluation from repo root
 python backend/scripts/prompt_eval_music.py
 
+# Live tutor architecture eval (scenario + rubric)
+python backend/app/eval_live_tutor.py
+
 # Run one backend test module
 pytest backend/tests/test_music_transcription.py
 
@@ -183,6 +186,8 @@ npm --prefix frontend run lint
 npm --prefix frontend run test
 npm --prefix frontend run build
 ```
+
+Architecture notes for the live tutor are documented in [`docs/live-tutor-architecture.md`](docs/live-tutor-architecture.md).
 
 ### Music Capture Mode
 

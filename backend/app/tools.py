@@ -45,11 +45,33 @@ class ToolRegistry:
         self._cache: dict[str, dict[str, Any]] = {}
         self._cache_keys: Deque[str] = deque(maxlen=100)
 
-    def register(self, tool: ToolSpec) -> None:
-        """Register a new tool."""
-        if tool.name in self._tools:
-            raise ValueError(f"Tool '{tool.name}' is already registered.")
-        self._tools[tool.name] = tool
+    def register(self, tool: ToolSpec, *, overwrite: bool = False) -> bool:
+        """Register a new tool.
+
+        Returns ``True`` when a tool is newly added or overwritten, and
+        ``False`` when the same name already exists and ``overwrite`` is
+        ``False``.
+        """
+        normalized_name = (tool.name or "").strip().lower()
+        if not normalized_name:
+            raise ValueError("Tool name is required.")
+        if normalized_name in self._tools and not overwrite:
+            return False
+        if normalized_name != tool.name:
+            tool = ToolSpec(
+                name=normalized_name,
+                description=tool.description,
+                args_schema=tool.args_schema,
+                executor=tool.executor,
+                is_cacheable=tool.is_cacheable,
+            )
+        self._tools[normalized_name] = tool
+        return True
+
+    def has_tool(self, tool_name: str) -> bool:
+        """Return whether a tool name is already registered."""
+        normalized_name = (tool_name or "").strip().lower()
+        return normalized_name in self._tools
 
     def get_tool_prompt(self) -> str:
         """Generate a prompt fragment describing all registered tools."""
@@ -66,11 +88,11 @@ class ToolRegistry:
             "Do not include extra prose in a TOOL_CALL line."
         )
 
-    def _get_cache_key(self, tool_name: str, args: dict[str, Any]) -> str:
+    def _get_cache_key(self, user_id: str, tool_name: str, args: dict[str, Any]) -> str:
         """Create a stable hash key for caching tool results."""
         # Create a stable string from args by sorting keys
         stable_args = json.dumps(args, sort_keys=True, separators=(",", ":"))
-        key_string = f"{tool_name}:{stable_args}"
+        key_string = f"{user_id}:{tool_name}:{stable_args}"
         return hashlib.sha256(key_string.encode("utf-8")).hexdigest()
 
     async def run_tool(
@@ -102,7 +124,11 @@ class ToolRegistry:
             return await spec.executor(db, user_id, validated_args)
 
         # Handle caching for cacheable tools
-        cache_key = self._get_cache_key(normalized_name, validated_args.model_dump(mode="json"))
+        cache_key = self._get_cache_key(
+            user_id,
+            normalized_name,
+            validated_args.model_dump(mode="json"),
+        )
         if cache_key in self._cache:
             return self._cache[cache_key]
 

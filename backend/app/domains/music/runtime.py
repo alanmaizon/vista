@@ -9,9 +9,6 @@ from typing import Deque
 from ..base import MUSIC_DOMAIN, SessionRuntime
 from ...live.events import (
     LiveEvent,
-    ServerScoreCaptureEvent,
-    ServerScoreUnclearEvent,
-    ServerTextEvent,
 )
 from .transcription import MusicTranscriptionError, transcribe_pcm16
 
@@ -118,7 +115,14 @@ class MusicRuntime(SessionRuntime):
                 }
             ]
         if self.skill == "GUIDED_LESSON":
-            return []
+            return [
+                {
+                    "type": "server.text",
+                    "text": (
+                        "Guided mode is text-first: lesson flow is driven by the score and deterministic comparison results."
+                    ),
+                }
+            ]
         if self.skill == "COMPARE_PERFORMANCE":
             return [
                 {
@@ -146,16 +150,16 @@ class MusicRuntime(SessionRuntime):
             "SHEET_FRAME_COACH",
             "EAR_TRAIN",
             "GENERATE_EXAMPLE",
-            "GUIDED_LESSON",
         }
 
     def opening_prompt(self) -> str:
+        session_intro = f"I am starting a {self.skill} music tutoring session."
         goal_fragment = (
             f"My music goal is: {self.goal}. Please greet me and let's get started."
             if self.goal
             else "Please greet me and ask what I'd like to work on today."
         )
-        return goal_fragment
+        return f"{session_intro} {goal_fragment}"
 
     def skill_instructions(self) -> str:
         """Return skill-specific instructions for the system prompt."""
@@ -281,7 +285,7 @@ class MusicRuntime(SessionRuntime):
         self.saw_assistant_audio = True
 
     def allow_model_audio(self) -> bool:
-        return self.skill in {"EAR_TRAIN", "GENERATE_EXAMPLE", "GUIDED_LESSON", "HEAR_PHRASE"}
+        return self.skill in {"EAR_TRAIN", "GENERATE_EXAMPLE"}
 
     def summary_payload(self) -> dict[str, list[str]]:
         bullets = [
@@ -331,13 +335,13 @@ class MusicRuntime(SessionRuntime):
             self.frame_ready = True
             self.phase = "GUIDE"
             self.awaiting_confirmation = True
-            return [ServerScoreCaptureEvent(payload={"note_line": note_line})]
+            return [{"type": "server.score_capture", "note_line": note_line}]
         if "SCORE_UNCLEAR" in upper_buffer:
             self.read_score_buffer = ""
             self.frame_ready = False
             self.phase = "FRAME"
             self.awaiting_confirmation = True
-            return [ServerScoreUnclearEvent()]
+            return [{"type": "server.score_unclear"}]
         return []
 
     def _parse_buffered_note_line(self) -> str | None:
@@ -357,14 +361,13 @@ class MusicRuntime(SessionRuntime):
             self.phase = "VERIFY"
             self.completed = False
             return [
-                ServerTextEvent(
-                    payload={
-                        "text": (
-                            "I need one clear replay of the phrase before I can analyse it. "
-                            "Play the full phrase once, then press confirm again."
-                        )
-                    }
-                )
+                {
+                    "type": "server.text",
+                    "text": (
+                        "I need one clear replay of the phrase before I can analyse it. "
+                        "Play the full phrase once, then press confirm again."
+                    ),
+                }
             ]
 
         expected = self._expected_phrase_kind()
@@ -373,13 +376,13 @@ class MusicRuntime(SessionRuntime):
         except MusicTranscriptionError as exc:
             self.phase = "VERIFY"
             self.completed = False
-            return [ServerTextEvent(payload={"text": str(exc)})]
+            return [{"type": "server.text", "text": str(exc)}]
 
         analysis = self._format_live_phrase_analysis(phrase, expected)
         needs_replay = phrase.confidence < 0.68 or not phrase.notes
         self.phase = "VERIFY" if needs_replay else "COMPLETE"
         self.completed = not needs_replay
-        return [ServerTextEvent(payload={"text": analysis})]
+        return [{"type": "server.text", "text": analysis}]
 
     def _format_live_phrase_analysis(self, phrase, expected: str) -> str:
         if not phrase.notes:

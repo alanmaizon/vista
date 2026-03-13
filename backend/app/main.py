@@ -378,6 +378,43 @@ def _classify_tool_error(message: str, *, status_code: int | None = None, unexpe
     return "TOOL_ERROR"
 
 
+def _flatten_live_event_envelope(event: dict[str, Any]) -> dict[str, Any]:
+    """Flatten a LiveEvent envelope into the public websocket wire shape.
+
+    Internal normalized events use ``{type, payload, metadata}`` while the
+    frontend contract expects flat event fields (for example ``text`` at the
+    top level). This helper keeps the internal representation while preserving
+    backward-compatible wire semantics.
+    """
+    flattened: dict[str, Any] = {"type": str(event.get("type", ""))}
+    payload = event.get("payload")
+    if isinstance(payload, dict):
+        flattened.update(payload)
+    metadata = event.get("metadata")
+    if isinstance(metadata, dict):
+        flattened.update(metadata)
+    for key, value in event.items():
+        if key in {"type", "payload", "metadata"}:
+            continue
+        if key not in flattened:
+            flattened[key] = value
+    return flattened
+
+
+def _live_event_to_wire(event: LiveEvent | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(event, LiveEvent):
+        return _flatten_live_event_envelope(event.model_dump(mode="json"))
+    if isinstance(event, dict):
+        if "payload" in event or "metadata" in event:
+            return _flatten_live_event_envelope(event)
+        return event
+    return {"type": "error", "message": "Invalid live event payload."}
+
+
+async def _send_live_event(ws: WebSocket, event: LiveEvent | dict[str, Any]) -> None:
+    await ws.send_json(_live_event_to_wire(event))
+
+
 async def _execute_live_tool_call(
     *,
     user_id: str,
@@ -453,7 +490,7 @@ async def _handle_live_tool_call(
             metadata={"call_id": call_id} if call_id else {},
         )
         conversation_manager.add_tool_result(name=tool_name, result=payload, call_id=call_id)
-        await ws.send_json(event.model_dump(mode="json"))
+        await _send_live_event(ws, event)
         if send_to_model:
             await bridge.send_text(_tool_result_to_model_text(tool_name, payload), role="user")
         await _record_live_tool_call(
@@ -476,7 +513,7 @@ async def _handle_live_tool_call(
             metadata={"call_id": call_id} if call_id else {},
         )
         conversation_manager.add_tool_result(name=tool_name, result=None, error=str(exc), call_id=call_id)
-        await ws.send_json(event.model_dump(mode="json"))
+        await _send_live_event(ws, event)
         if send_to_model:
             await bridge.send_text(_tool_error_to_model_text(tool_name, str(exc)), role="user")
         error_kind = _classify_tool_error(str(exc), status_code=exc.status_code)
@@ -504,7 +541,7 @@ async def _handle_live_tool_call(
         conversation_manager.add_tool_result(
             name=tool_name, result=None, error="Unexpected tool execution failure.", call_id=call_id
         )
-        await ws.send_json(event.model_dump(mode="json"))
+        await _send_live_event(ws, event)
         if send_to_model:
             await bridge.send_text(
                 _tool_error_to_model_text(tool_name, "Unexpected tool execution failure."),
@@ -545,7 +582,7 @@ async def _forward_bridge_events(
                 conversation_manager.add_assistant_turn(text)
             extra_events = runtime.on_model_text(text)
             for extra_event in extra_events:
-                await ws.send_json(extra_event.model_dump(mode="json"))
+                await _send_live_event(ws, extra_event)
             normalized_event = ServerTextEvent(payload={k: v for k, v in event.items() if k != "type"})
         elif event_type == "server.transcript":
             normalized_event = ServerTranscriptEvent(payload={k: v for k, v in event.items() if k != "type"})
@@ -563,7 +600,24 @@ async def _forward_bridge_events(
         elif event_type == "server.tool_call":
             tool_name = str(event.get("name", ""))
             args = event.get("args") if isinstance(event.get("args"), dict) else {}
-            conversation_manager.add_tool_call(name=tool_name, args=args, call_id=str(event.get("call_id", "")))
+            call_id = str(event.get("call_id", "")).strip() or None
+            try:
+                resolved_call_id, accepted = conversation_manager.register_tool_call(
+                    name=tool_name,
+                    args=args,
+                    call_id=call_id,
+                )
+            except ValueError as exc:
+                logger.warning("Ignoring invalid model tool call payload: %s", exc)
+                await _send_live_event(ws, ErrorEvent.from_message(str(exc)))
+                continue
+            if not accepted:
+                logger.info(
+                    "Skipping duplicate model tool call: name=%s call_id=%s",
+                    tool_name,
+                    resolved_call_id,
+                )
+                continue
             await _handle_live_tool_call(
                 ws=ws,
                 bridge=bridge,
@@ -573,12 +627,12 @@ async def _forward_bridge_events(
                 tool_name=tool_name,
                 args=args,
                 source="model",
-                call_id=str(event.get("call_id", "")).strip() or None,
+                call_id=resolved_call_id,
                 send_to_model=True,
             )
             continue
         if normalized_event:
-            await ws.send_json(normalized_event.model_dump(mode="json"))
+            await _send_live_event(ws, normalized_event)
 
 
 @app.websocket("/ws/live")
@@ -591,18 +645,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         return
     except (ValueError, TypeError):
-        await ws.send_json(ErrorEvent.from_message("Malformed websocket init message").model_dump(mode="json"))
+        await _send_live_event(ws, ErrorEvent.from_message("Malformed websocket init message"))
         await ws.close(code=1008)
         return
 
     if not isinstance(init_message, dict):
-        await ws.send_json(ErrorEvent.from_message("The first websocket message must be a JSON object").model_dump(mode="json"))
+        await _send_live_event(ws, ErrorEvent.from_message("The first websocket message must be a JSON object"))
         await ws.close(code=1008)
         return
 
     message_type = str(init_message.get("type", "")).strip()
     if message_type != CLIENT_INIT:
-        await ws.send_json(ErrorEvent.from_message("The first websocket message must be client.init").model_dump(mode="json"))
+        await _send_live_event(ws, ErrorEvent.from_message("The first websocket message must be client.init"))
         await ws.close(code=1008)
         return
 
@@ -610,14 +664,14 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     session_id_raw = str(init_message.get("session_id", "")).strip()
     skill = str(init_message.get("mode", "HEAR_PHRASE")).strip().upper() or "HEAR_PHRASE"
     if not session_id_raw:
-        await ws.send_json(ErrorEvent.from_message("Missing session_id in client.init").model_dump(mode="json"))
+        await _send_live_event(ws, ErrorEvent.from_message("Missing session_id in client.init"))
         await ws.close(code=1008)
         return
 
     try:
         session_id = UUID(session_id_raw)
     except ValueError:
-        await ws.send_json(ErrorEvent.from_message("session_id must be a valid UUID").model_dump(mode="json"))
+        await _send_live_event(ws, ErrorEvent.from_message("session_id must be a valid UUID"))
         await ws.close(code=1008)
         return
 
@@ -631,12 +685,12 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             raise HTTPException(status_code=401, detail="Missing token or auth session cookie")
         session = await _load_owned_session(session_id, user["uid"])
     except HTTPException as exc:
-        await ws.send_json(ErrorEvent.from_message(exc.detail).model_dump(mode="json"))
+        await _send_live_event(ws, ErrorEvent.from_message(exc.detail))
         await ws.close(code=1008)
         return
     except Exception as exc:
         logger.exception("Failed to validate websocket session: %s", exc)
-        await ws.send_json(ErrorEvent.from_message("Unable to validate the live session").model_dump(mode="json"))
+        await _send_live_event(ws, ErrorEvent.from_message("Unable to validate the live session"))
         await ws.close(code=1011)
         return
 
@@ -685,20 +739,26 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             model_id=bridge.model_id,
             region=bridge.active_location,
         )
-        await ws.send_json(
+        await _send_live_event(
+            ws,
             ServerStatusEvent(
                 payload={
                     "state": "connected",
                     "mode": runtime.risk_mode,
                     "skill": runtime.skill,
                 }
-            ).model_dump(mode="json")
+            ),
         )
-        for event in runtime.on_connect_events():
-            await ws.send_json(event.model_dump(mode="json"))
+        connect_events = runtime.on_connect_events()
+        if runtime.skill == "GUIDED_LESSON":
+            connect_events = []
+        for event in connect_events:
+            await _send_live_event(ws, event)
         opening_prompt = composer.get_opening_user_prompt()
         if opening_prompt:
             await bridge.send_text(opening_prompt, role="user")
+        elif runtime.skill == "GUIDED_LESSON":
+            await bridge.send_text(runtime.opening_prompt(), role="user")
 
         forward_task = asyncio.create_task(
             _forward_bridge_events(
@@ -718,11 +778,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             except WebSocketDisconnect:
                 break
             except (ValueError, TypeError):
-                await ws.send_json(ErrorEvent.from_message("Malformed JSON message").model_dump(mode="json"))
+                await _send_live_event(ws, ErrorEvent.from_message("Malformed JSON message"))
                 continue
 
             if not isinstance(message, dict):
-                await ws.send_json(ErrorEvent.from_message("Messages must be JSON objects").model_dump(mode="json"))
+                await _send_live_event(ws, ErrorEvent.from_message("Messages must be JSON objects"))
                 continue
 
             message_type = str(message.get("type", "")).strip()
@@ -731,7 +791,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     audio_bytes = _decode_b64_payload(message)
                     await bridge.send_audio(audio_bytes)
                     for extra_event in runtime.on_client_audio(audio_bytes, str(message.get("mime", ""))):
-                        await ws.send_json(extra_event.model_dump(mode="json"))
+                        await _send_live_event(ws, extra_event)
                 elif message_type == CLIENT_VIDEO:
                     runtime.on_client_video()
                     await bridge.send_image_jpeg(_decode_b64_payload(message))
@@ -739,10 +799,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     if "data_b64" in message:
                         audio_bytes = _decode_b64_payload(message)
                         for extra_event in runtime.on_client_audio(audio_bytes, str(message.get("mime", ""))):
-                            await ws.send_json(extra_event.model_dump(mode="json"))
+                            await _send_live_event(ws, extra_event)
                     confirm_prompt = runtime.on_client_confirm()
                     for extra_event in runtime.on_client_confirm_events():
-                        await ws.send_json(extra_event.model_dump(mode="json"))
+                        await _send_live_event(ws, extra_event)
                     if confirm_prompt:
                         await bridge.send_text(confirm_prompt, role="user")
                 elif message_type == CLIENT_TOOL:
@@ -750,7 +810,19 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     tool_args = message.get("args") if isinstance(message.get("args"), dict) else {}
                     send_to_model = bool(message.get("send_to_model", False))
                     call_id = str(message.get("call_id", "")).strip() or None
-                    conversation_manager.add_tool_call(name=tool_name, args=tool_args, call_id=call_id)
+                    resolved_call_id, accepted = conversation_manager.register_tool_call(
+                        name=tool_name,
+                        args=tool_args,
+                        call_id=call_id,
+                    )
+                    if not accepted:
+                        await _send_live_event(
+                            ws,
+                            ErrorEvent.from_message(
+                                f"Duplicate tool call ignored for '{tool_name}' ({resolved_call_id})."
+                            ),
+                        )
+                        continue
                     await _handle_live_tool_call(
                         ws=ws,
                         bridge=bridge,
@@ -760,7 +832,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         tool_name=tool_name,
                         args=tool_args,
                         source="client",
-                        call_id=call_id,
+                        call_id=resolved_call_id,
                         send_to_model=send_to_model,
                     )
                 elif message_type == CLIENT_TEXT:
@@ -781,19 +853,19 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     await bridge.send_text(text, role="user")
                 elif message_type == CLIENT_STOP:
                     stop_requested = True
-                    await ws.send_json(ServerSummaryEvent(payload=runtime.summary_payload()).model_dump(mode="json"))
+                    await _send_live_event(ws, ServerSummaryEvent(payload=runtime.summary_payload()))
                     break
                 else:
-                    await ws.send_json(ErrorEvent.from_message(f"Unsupported message type: {message_type}").model_dump(mode="json"))
+                    await _send_live_event(ws, ErrorEvent.from_message(f"Unsupported message type: {message_type}"))
             except ValueError as exc:
-                await ws.send_json(ErrorEvent.from_message(str(exc)).model_dump(mode="json"))
+                await _send_live_event(ws, ErrorEvent.from_message(str(exc)))
             except Exception as exc:
                 logger.exception("Live websocket message handling failed: %s", exc)
-                await ws.send_json(ErrorEvent.from_message("Failed to process live message").model_dump(mode="json"))
+                await _send_live_event(ws, ErrorEvent.from_message("Failed to process live message"))
                 break
 
         if not stop_requested and ws.client_state.name == "CONNECTED":
-            await ws.send_json(ServerSummaryEvent(payload=runtime.summary_payload()).model_dump(mode="json"))
+            await _send_live_event(ws, ServerSummaryEvent(payload=runtime.summary_payload()))
 
         forward_task.cancel()
         try:
@@ -802,7 +874,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             pass
     except Exception as exc:
         logger.exception("Unexpected error in /ws/live: %s", exc)
-        await ws.send_json(ErrorEvent.from_message(f"Live session error: {exc}").model_dump(mode="json"))
+        await _send_live_event(ws, ErrorEvent.from_message(f"Live session error: {exc}"))
     finally:
         await _persist_session_completion(session_id, runtime=runtime, bridge=bridge)
         await _store_session_memory_summary(

@@ -1,5 +1,28 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 
+function normalizeServerMessage(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return data;
+  }
+  const { type, payload, metadata, ...rest } = data;
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return {
+      type,
+      ...payload,
+      ...(metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {}),
+      ...rest,
+    };
+  }
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    return {
+      type,
+      ...metadata,
+      ...rest,
+    };
+  }
+  return data;
+}
+
 /**
  * Custom hook that manages the WebSocket lifecycle with the /ws/live endpoint.
  *
@@ -45,7 +68,7 @@ export default function useLiveConnection({ onMessage, onOpen, onClose, onError 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          onMessage?.(data);
+          onMessage?.(normalizeServerMessage(data));
         } catch {
           /* ignore non-JSON frames */
         }

@@ -16,6 +16,13 @@ from .api import (
     render_stored_music_score,
     run_guided_lesson_action,
 )
+from .transcription import (
+    MusicTranscriptionError,
+    decode_audio_b64,
+    parse_pcm_mime,
+    transcribe_pcm16,
+    transcription_to_dict,
+)
 from ...tools import ToolError, ToolSpec, tool_registry
 
 
@@ -33,6 +40,10 @@ LIVE_MUSIC_TOOL_SPECS: tuple[dict[str, str], ...] = (
     {
         "name": "render_score",
         "description": "Return notation render payload for a prepared score.",
+    },
+    {
+        "name": "transcribe",
+        "description": "Run deterministic phrase transcription on a short PCM clip.",
     },
 )
 
@@ -63,12 +74,22 @@ class _RenderScoreToolArgs(BaseModel):
     score_id: UUID
 
 
+class _TranscribeToolArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    audio_b64: str
+    mime: str = "audio/pcm;rate=16000"
+    expected: str = "AUTO"
+    max_notes: int = 8
+    instrument_profile: str = "AUTO"
+
+
 def music_live_tool_prompt_fragment() -> str:
     """Prompt fragment instructing Gemini how to request deterministic tools."""
     return (
         "If you need deterministic score/lesson data, request a tool call by emitting exactly one line:\n"
         'TOOL_CALL: {"name":"lesson_action","args":{...}}\n'
-        "Supported tool names: lesson_action, lesson_step, render_score.\n"
+        "Supported tool names: lesson_action, lesson_step, render_score, transcribe.\n"
         "Do not include extra prose in a TOOL_CALL line."
     )
 
@@ -121,10 +142,24 @@ async def run_live_music_tool(
                 db=db,
             )
             return result.model_dump(mode="json")
+        if normalized_name == "transcribe":
+            request = _TranscribeToolArgs.model_validate(payload)
+            sample_rate = parse_pcm_mime(request.mime)
+            audio_bytes = decode_audio_b64(request.audio_b64)
+            phrase = transcribe_pcm16(
+                audio_bytes,
+                sample_rate=sample_rate,
+                expected=request.expected,
+                max_notes=request.max_notes,
+                instrument_profile=request.instrument_profile,
+            )
+            return transcription_to_dict(phrase)
     except ValidationError as exc:
         raise LiveMusicToolError(exc.errors()[0].get("msg", "Invalid tool arguments.")) from exc
     except HTTPException as exc:
         raise LiveMusicToolError(str(exc.detail), status_code=exc.status_code) from exc
+    except MusicTranscriptionError as exc:
+        raise LiveMusicToolError(str(exc)) from exc
 
     available = ", ".join(spec["name"] for spec in LIVE_MUSIC_TOOL_SPECS)
     raise LiveMusicToolError(f"Unsupported tool '{normalized_name}'. Supported tools: {available}.")
@@ -178,30 +213,62 @@ def register_music_tools() -> None:
         except HTTPException as exc:
             raise ToolError(str(exc.detail), status_code=exc.status_code) from exc
 
-    tool_registry.register(
-        ToolSpec(
-            name="lesson_action",
-            description=(
-                "Unified guided lesson action. Use this to prepare a score, advance a bar, or compare a take."
-            ),
-            args_schema=_LessonActionToolArgs,
-            executor=_execute_lesson_action,
+    async def _execute_transcribe(
+        db: AsyncSession,
+        user_id: str,
+        args: _TranscribeToolArgs,
+    ) -> dict[str, Any]:
+        del db, user_id
+        try:
+            sample_rate = parse_pcm_mime(args.mime)
+            audio_bytes = decode_audio_b64(args.audio_b64)
+            phrase = transcribe_pcm16(
+                audio_bytes,
+                sample_rate=sample_rate,
+                expected=args.expected,
+                max_notes=args.max_notes,
+                instrument_profile=args.instrument_profile,
+            )
+            return transcription_to_dict(phrase)
+        except MusicTranscriptionError as exc:
+            raise ToolError(str(exc), status_code=400) from exc
+
+    if not tool_registry.has_tool("lesson_action"):
+        tool_registry.register(
+            ToolSpec(
+                name="lesson_action",
+                description=(
+                    "Unified guided lesson action. Use this to prepare a score, advance a bar, or compare a take."
+                ),
+                args_schema=_LessonActionToolArgs,
+                executor=_execute_lesson_action,
+            )
         )
-    )
-    tool_registry.register(
-        ToolSpec(
-            name="lesson_step",
-            description="Return the next guided lesson step for a prepared score.",
-            args_schema=_LessonStepToolArgs,
-            executor=_execute_lesson_step,
+    if not tool_registry.has_tool("lesson_step"):
+        tool_registry.register(
+            ToolSpec(
+                name="lesson_step",
+                description="Return the next guided lesson step for a prepared score.",
+                args_schema=_LessonStepToolArgs,
+                executor=_execute_lesson_step,
+            )
         )
-    )
-    tool_registry.register(
-        ToolSpec(
-            name="render_score",
-            description="Return notation render payload for a prepared score.",
-            args_schema=_RenderScoreToolArgs,
-            executor=_execute_render_score,
-            is_cacheable=True,
+    if not tool_registry.has_tool("render_score"):
+        tool_registry.register(
+            ToolSpec(
+                name="render_score",
+                description="Return notation render payload for a prepared score.",
+                args_schema=_RenderScoreToolArgs,
+                executor=_execute_render_score,
+                is_cacheable=True,
+            )
         )
-    )
+    if not tool_registry.has_tool("transcribe"):
+        tool_registry.register(
+            ToolSpec(
+                name="transcribe",
+                description="Run deterministic phrase transcription on a short PCM clip.",
+                args_schema=_TranscribeToolArgs,
+                executor=_execute_transcribe,
+            )
+        )

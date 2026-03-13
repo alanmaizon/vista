@@ -40,12 +40,17 @@ async def test_init_db_sets_domain_default(monkeypatch: pytest.MonkeyPatch) -> N
     await db_module.init_db()
 
     assert len(fake_engine.connection.run_sync_calls) == 1
-    assert len(fake_engine.connection.executed) == 2
+    assert len(fake_engine.connection.executed) == 3
 
     add_stmt, add_params = fake_engine.connection.executed[0]
     alter_stmt, alter_params = fake_engine.connection.executed[1]
+    live_tool_stmt, live_tool_params = fake_engine.connection.executed[2]
 
     assert "ADD COLUMN IF NOT EXISTS domain" in add_stmt
-    assert add_params.get("default_domain") == DEFAULT_DOMAIN
+    assert DEFAULT_DOMAIN in add_stmt
+    assert add_params == {}
     assert "ALTER COLUMN domain SET DEFAULT" in alter_stmt
-    assert alter_params.get("default_domain") == DEFAULT_DOMAIN
+    assert DEFAULT_DOMAIN in alter_stmt
+    assert alter_params == {}
+    assert "ALTER TABLE music_live_tool_calls ADD COLUMN IF NOT EXISTS error_kind" in live_tool_stmt
+    assert live_tool_params == {}

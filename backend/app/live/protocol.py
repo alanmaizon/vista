@@ -37,11 +37,12 @@ SERVER_TOOL_RESULT = "server.tool_result"
 
 @dataclass
 class ClientInit:
-    """Represents the initial websocket auth + session bootstrap message."""
+    """Represents the initial websocket bootstrap message."""
 
-    token: str
-    session_id: str
-    mode: str
+    mode: str = "music_tutor"
+    instrument: str = ""
+    piece: str = ""
+    goal: str = ""
 
 
 @dataclass

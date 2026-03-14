@@ -14,6 +14,8 @@ pytest.importorskip("asyncpg")
 pytest.importorskip("firebase_admin")
 pytest.importorskip("websockets")
 
+pytestmark = pytest.mark.skip(reason="Legacy music HTTP backend retired in the live-agent reset.")
+
 from fastapi.testclient import TestClient
 
 from app import auth as auth_module

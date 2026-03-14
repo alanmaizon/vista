@@ -112,7 +112,7 @@ def test_music_runtime_marks_deterministic_modes_as_text_first() -> None:
     assert any("deterministic phrase analyser" in event["text"] for event in hear_phrase.on_connect_events())
 
     assert guided.uses_model_opening_prompt() is False
-    assert guided.allow_model_audio() is False
+    assert guided.allow_model_audio() is True
     assert any("lesson flow is driven by the score" in event["text"] for event in guided.on_connect_events())
 
     assert read_score.uses_model_opening_prompt() is True

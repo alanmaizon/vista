@@ -1,12 +1,9 @@
 import {
-  Activity,
   Camera,
   CameraOff,
   LoaderCircle,
   Mic,
   MicOff,
-  PlayCircle,
-  Radio,
   RefreshCw,
   Send,
   Square,
@@ -14,13 +11,6 @@ import {
   Waves,
 } from "lucide-react";
 import MarbleSphere from "./MarbleSphere";
-
-const MODE_OPTIONS = [
-  { value: "music_tutor", label: "Music tutor" },
-  { value: "sight_reading", label: "Sight reading" },
-  { value: "technique_practice", label: "Technique" },
-  { value: "ear_training", label: "Ear training" },
-];
 
 function Panel({ title, eyebrow, children, aside = null }) {
   return (
@@ -41,17 +31,15 @@ function Panel({ title, eyebrow, children, aside = null }) {
   );
 }
 
-function Chip({ label, active = false, tone = "slate" }) {
-  const activeTone =
-    tone === "emerald"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-      : tone === "graphite"
-        ? "border-slate-500 bg-slate-900 text-white"
+function Chip({ label, tone = "default" }) {
+  const toneClass =
+    tone === "dark"
+      ? "border-slate-500 bg-slate-900 text-white"
+      : tone === "live"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
         : "border-slate-300 bg-white text-slate-700";
-  const idleTone = "border-slate-300 bg-white/80 text-slate-500";
-
   return (
-    <div className={`border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${active ? activeTone : idleTone}`}>
+    <div className={`border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${toneClass}`}>
       {label}
     </div>
   );
@@ -96,12 +84,25 @@ function MessageCard({ message }) {
   );
 }
 
-function formatAssistantState(state, isConnecting, isConnected) {
-  if (isConnecting) {
-    return "Connecting";
-  }
+function ToggleButton({ active, onClick, ActiveIcon, IdleIcon, activeLabel, idleLabel }) {
+  const Icon = active ? ActiveIcon : IdleIcon;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-h-12 items-center justify-center gap-2 border px-3 py-3 text-sm font-medium shadow-[6px_6px_0_rgba(184,189,197,0.24)] transition ${
+        active ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700"
+      }`}
+    >
+      <Icon className="h-4 w-4" />
+      {active ? activeLabel : idleLabel}
+    </button>
+  );
+}
+
+function formatAssistantState(state, isConnected) {
   if (!isConnected) {
-    return "Idle";
+    return "Closing";
   }
   if (state === "speaking") {
     return "Speaking";
@@ -109,9 +110,11 @@ function formatAssistantState(state, isConnecting, isConnected) {
   return "Listening";
 }
 
+function formatMode(mode) {
+  return typeof mode === "string" ? mode.replaceAll("_", " ") : "General";
+}
+
 export default function LiveAgentWorkspace({
-  profileDraft,
-  setProfileDraft,
   sessionProfile,
   runtimeInfo,
   runtimeDebug,
@@ -120,7 +123,6 @@ export default function LiveAgentWorkspace({
   connectionError,
   conversationInput,
   setConversationInput,
-  isConnecting,
   isConnected,
   assistantState,
   micEnabled,
@@ -130,188 +132,115 @@ export default function LiveAgentWorkspace({
   connectionMeta,
   videoRef,
   refreshRuntime,
-  startSession,
   stopSession,
   sendText,
   toggleMic,
   toggleCamera,
 }) {
   const activeDebugSession = runtimeDebug?.active_sessions?.[0] || null;
-  const recentSession = runtimeDebug?.recent_sessions?.[0] || null;
-  const modeLabel = formatAssistantState(assistantState, isConnecting, isConnected);
+  const modeLabel = formatAssistantState(assistantState, isConnected);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(184,189,197,0.26),transparent_34%),linear-gradient(180deg,#f8f9fb_0%,#eef1f4_50%,#e7eaee_100%)] text-slate-900">
-      <main className="mx-auto w-full max-w-[1680px] px-4 py-4 md:px-6 xl:px-8">
-        <header className="border border-slate-300 bg-white/82 px-4 py-4 shadow-[0_18px_40px_rgba(47,52,58,0.05)]">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(184,189,197,0.26),transparent_32%),linear-gradient(180deg,#f8f9fb_0%,#eef1f4_50%,#e7eaee_100%)] text-slate-900">
+      <main className="mx-auto w-full max-w-[1460px] px-4 py-4 md:px-6 xl:px-8">
+        <header className="glass border border-slate-300/90 px-4 py-4 shadow-[0_20px_42px_rgba(47,52,58,0.06)]">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
-                Eurydice Live
+              <div className="inline-flex items-center gap-3 border border-slate-300 bg-white px-4 py-3 shadow-[0_10px_22px_rgba(47,52,58,0.04)]">
+                <img src="/logo.svg" alt="Eurydice" className="h-4 w-auto" />
+              </div>
+              <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                Live workspace
               </div>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 xl:text-4xl">
-                Voice-and-camera music tutoring
+                {sessionProfile?.piece || "Live coaching"}{sessionProfile?.instrument ? ` · ${sessionProfile.instrument}` : ""}
               </h1>
-              <p className="mt-2 max-w-2xl text-sm text-slate-600">
-                One profile. One live session. One clean multimodal loop.
+              <p className="mt-2 text-sm text-slate-600">
+                {sessionProfile?.goal || "Talk, show, and adjust in one session."}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Chip label={runtimeInfo?.model_id || "Runtime"} active tone="graphite" />
-              <Chip label={connectionMeta.transport || "No transport"} active={Boolean(connectionMeta.transport)} />
-              <Chip label={modeLabel} active={isConnected || isConnecting} tone="emerald" />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Chip label={runtimeInfo?.model_id || "Runtime"} tone="dark" />
+              <Chip label={connectionMeta.transport || "No transport"} />
+              <Chip label={modeLabel} tone="live" />
+              <button
+                type="button"
+                onClick={stopSession}
+                className="inline-flex min-h-12 items-center gap-2 border border-slate-900 bg-slate-900 px-4 text-sm font-semibold text-white shadow-[8px_8px_0_rgba(47,52,58,0.16)] transition hover:-translate-x-[2px] hover:-translate-y-[2px]"
+              >
+                <Square className="h-4 w-4" />
+                End
+              </button>
             </div>
           </div>
         </header>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)_24rem]">
+        <div className="mt-4 grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)_22rem]">
           <div className="space-y-4">
-            <Panel title="Session profile" eyebrow="Input">
+            <Panel title="Session" eyebrow="Profile">
               <div className="grid gap-3">
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Mode</span>
-                  <select
-                    value={profileDraft.mode}
-                    onChange={(event) =>
-                      setProfileDraft((current) => ({ ...current, mode: event.target.value }))
-                    }
-                    className="border border-slate-300 bg-white px-3 py-3 text-sm outline-none focus:border-slate-900"
-                  >
-                    {MODE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Instrument</span>
-                  <input
-                    value={profileDraft.instrument}
-                    onChange={(event) =>
-                      setProfileDraft((current) => ({ ...current, instrument: event.target.value }))
-                    }
-                    placeholder="Voice, piano, violin"
-                    className="border border-slate-300 bg-white px-3 py-3 text-sm outline-none focus:border-slate-900"
-                  />
-                </label>
-
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Piece</span>
-                  <input
-                    value={profileDraft.piece}
-                    onChange={(event) =>
-                      setProfileDraft((current) => ({ ...current, piece: event.target.value }))
-                    }
-                    placeholder="Caro mio ben"
-                    className="border border-slate-300 bg-white px-3 py-3 text-sm outline-none focus:border-slate-900"
-                  />
-                </label>
-
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Goal</span>
-                  <textarea
-                    value={profileDraft.goal}
-                    onChange={(event) =>
-                      setProfileDraft((current) => ({ ...current, goal: event.target.value }))
-                    }
-                    placeholder="Shape the opening phrase"
-                    rows={4}
-                    className="border border-slate-300 bg-white px-3 py-3 text-sm outline-none focus:border-slate-900"
-                  />
-                </label>
+                <div className="border border-slate-300 bg-white px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Mode</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">{formatMode(sessionProfile?.mode)}</div>
+                </div>
+                <div className="border border-slate-300 bg-white px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Piece</div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">{sessionProfile?.piece || "General practice"}</div>
+                </div>
+                <div className="border border-slate-300 bg-white px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Goal</div>
+                  <div className="mt-2 text-sm text-slate-700">{sessionProfile?.goal || "Listen and guide."}</div>
+                </div>
               </div>
+            </Panel>
 
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
+            <Panel title="Controls" eyebrow="Input">
+              <div className="grid gap-2">
+                <ToggleButton
+                  active={micEnabled}
                   onClick={toggleMic}
-                  className={`flex items-center justify-center gap-2 border px-3 py-3 text-sm font-medium shadow-[6px_6px_0_rgba(184,189,197,0.24)] transition ${
-                    micEnabled
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : "border-slate-300 bg-white text-slate-700"
-                  }`}
-                >
-                  {micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-                  Mic
-                </button>
-                <button
-                  type="button"
+                  ActiveIcon={Mic}
+                  IdleIcon={MicOff}
+                  activeLabel="Mic on"
+                  idleLabel="Mic off"
+                />
+                <ToggleButton
+                  active={cameraEnabled}
                   onClick={toggleCamera}
-                  className={`flex items-center justify-center gap-2 border px-3 py-3 text-sm font-medium shadow-[6px_6px_0_rgba(184,189,197,0.24)] transition ${
-                    cameraEnabled
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : "border-slate-300 bg-white text-slate-700"
-                  }`}
-                >
-                  {cameraEnabled ? <Camera className="h-4 w-4" /> : <CameraOff className="h-4 w-4" />}
-                  Camera
-                </button>
-              </div>
-
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={isConnected ? stopSession : startSession}
-                  className="flex min-h-13 flex-1 items-center justify-center gap-2 border border-slate-900 bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-[8px_8px_0_rgba(47,52,58,0.16)] transition hover:-translate-x-[2px] hover:-translate-y-[2px]"
-                >
-                  {isConnecting ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                  ) : isConnected ? (
-                    <Square className="h-4 w-4" />
-                  ) : (
-                    <PlayCircle className="h-4 w-4" />
-                  )}
-                  {isConnecting ? "Starting" : isConnected ? "Stop session" : "Start session"}
-                </button>
+                  ActiveIcon={Camera}
+                  IdleIcon={CameraOff}
+                  activeLabel="Camera on"
+                  idleLabel="Camera off"
+                />
                 <button
                   type="button"
                   onClick={() => {
                     void refreshRuntime();
                   }}
-                  className="flex min-h-13 items-center justify-center border border-slate-300 bg-white px-4 py-3 text-slate-700 shadow-[6px_6px_0_rgba(184,189,197,0.22)]"
-                  aria-label="Refresh runtime"
+                  className="flex min-h-12 items-center justify-center gap-2 border border-slate-300 bg-white px-3 py-3 text-sm font-medium text-slate-700 shadow-[6px_6px_0_rgba(184,189,197,0.24)]"
                 >
                   <RefreshCw className="h-4 w-4" />
+                  Refresh
                 </button>
               </div>
 
-              {sessionProfile ? (
-                <div className="mt-4 border border-slate-300 bg-[#f8f9fb] px-3 py-3 text-sm text-slate-700">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Normalized</div>
-                  <div className="mt-2">{[sessionProfile.instrument, sessionProfile.piece, sessionProfile.goal].filter(Boolean).join(" · ") || "General music help"}</div>
-                </div>
-              ) : null}
-
               {connectionError ? (
-                <div className="mt-4 border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
+                <div className="mt-3 border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
                   {connectionError}
                 </div>
               ) : null}
             </Panel>
 
-            <Panel title="Runtime" eyebrow="Backend">
+            <Panel title="Signals" eyebrow="Audio">
               <div className="grid gap-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="border border-slate-300 bg-white px-3 py-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Model</div>
-                    <div className="mt-2 text-sm font-medium text-slate-900">{runtimeInfo?.model_id || "..."}</div>
-                  </div>
-                  <div className="border border-slate-300 bg-white px-3 py-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Region</div>
-                    <div className="mt-2 text-sm font-medium text-slate-900">{runtimeInfo?.location || "..."}</div>
-                  </div>
-                </div>
+                <SignalBar label="Speech" value={liveAudioLevels.speechConfidence} />
+                <SignalBar label="Music" value={liveAudioLevels.musicConfidence} />
                 <div className="border border-slate-300 bg-white px-3 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Session</div>
-                  <div className="mt-2 break-all text-sm font-medium text-slate-900">{connectionMeta.sessionId || "Not connected"}</div>
-                </div>
-                <div className="border border-slate-300 bg-white px-3 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Live counts</div>
-                  <div className="mt-2 text-sm text-slate-700">
-                    Active {runtimeDebug?.active_session_count ?? 0}
-                    {recentSession ? ` · Recent ${recentSession.transport}` : ""}
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Capture</div>
+                  <div className="mt-2 flex items-center gap-2 text-sm font-medium text-slate-900">
+                    <Waves className="h-4 w-4 text-slate-700" />
+                    {liveAudioLevels.speechActive ? "Speech active" : liveAudioMode || "Silence"}
                   </div>
                 </div>
               </div>
@@ -319,12 +248,8 @@ export default function LiveAgentWorkspace({
           </div>
 
           <div className="space-y-4">
-            <Panel
-              title="Live surface"
-              eyebrow="Studio"
-              aside={<Chip label={liveAudioMode || "silence"} active={isConnected} tone="emerald" />}
-            >
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-center">
+            <Panel title="Live surface" eyebrow="Studio" aside={<Chip label={modeLabel} tone="live" />}>
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_16rem] xl:items-center">
                 <div className="flex flex-col items-center justify-center">
                   <MarbleSphere className="mx-auto max-w-[30rem]" />
                   <div className="mt-5 text-center">
@@ -335,45 +260,46 @@ export default function LiveAgentWorkspace({
                     <div className="mt-1 text-sm text-slate-600">
                       {connectionMeta.transport
                         ? `${connectionMeta.transport} · ${connectionMeta.location || "live"}`
-                        : "Start a session to connect"}
+                        : "Waiting for transport"}
                     </div>
                   </div>
                 </div>
 
                 <div className="grid gap-3">
-                  <SignalBar label="Speech" value={liveAudioLevels.speechConfidence} />
-                  <SignalBar label="Music" value={liveAudioLevels.musicConfidence} />
                   <div className="border border-slate-300 bg-white px-3 py-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Capture</div>
-                    <div className="mt-2 flex items-center gap-2 text-sm font-medium text-slate-900">
-                      <Waves className="h-4 w-4 text-slate-700" />
-                      {liveAudioLevels.speechActive ? "Speech active" : "Waiting"}
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Session id
+                    </div>
+                    <div className="mt-2 break-all text-sm text-slate-700">
+                      {connectionMeta.sessionId || "Pending"}
+                    </div>
+                  </div>
+                  <div className="border border-slate-300 bg-white px-3 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Region
+                    </div>
+                    <div className="mt-2 text-sm text-slate-700">{runtimeInfo?.location || "..."}</div>
+                  </div>
+                  <div className="border border-slate-300 bg-white px-3 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Active
+                    </div>
+                    <div className="mt-2 text-sm text-slate-700">
+                      {runtimeDebug?.active_session_count ?? 0} live session
+                      {(runtimeDebug?.active_session_count ?? 0) === 1 ? "" : "s"}
                     </div>
                   </div>
                 </div>
               </div>
             </Panel>
 
-            <Panel title="Camera" eyebrow="Vision">
-              <div className="border border-slate-300 bg-slate-950/96">
-                <video ref={videoRef} autoPlay playsInline muted className="aspect-video w-full object-cover" />
-              </div>
-              <div className="mt-3 text-sm text-slate-600">
-                {cameraEnabled
-                  ? "Camera frames will stream while the session is live."
-                  : "Enable camera if you want Eurydice to see notation or homework."}
-              </div>
-            </Panel>
-          </div>
-
-          <div className="space-y-4">
             <Panel title="Dialogue" eyebrow="Transcript">
-              <div className="max-h-[26rem] space-y-3 overflow-auto pr-1">
+              <div className="max-h-[30rem] space-y-3 overflow-auto pr-1">
                 {messages.length ? (
                   messages.map((message) => <MessageCard key={message.id} message={message} />)
                 ) : (
                   <div className="border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500">
-                    Start a session to see live conversation and transcripts.
+                    Waiting for the first turn.
                   </div>
                 )}
               </div>
@@ -401,46 +327,49 @@ export default function LiveAgentWorkspace({
                 </button>
               </div>
             </Panel>
+          </div>
 
-            <Panel title="Diagnostics" eyebrow="Debug">
-              <div className="grid gap-3">
-                <div className="border border-slate-300 bg-white px-3 py-3">
-                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    <Activity className="h-3.5 w-3.5" />
-                    Active session
-                  </div>
-                  <div className="mt-2 text-sm text-slate-700">
-                    {activeDebugSession
-                      ? `${activeDebugSession.transport} · ${activeDebugSession.mode}`
-                      : "No active websocket session"}
-                  </div>
-                </div>
-                <div className="border border-slate-300 bg-white px-3 py-3">
-                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    <Volume2 className="h-3.5 w-3.5" />
-                    Inbound
-                  </div>
-                  <div className="mt-2 text-sm text-slate-700">
-                    {activeDebugSession?.inbound
-                      ? Object.entries(activeDebugSession.inbound)
-                          .map(([key, value]) => `${key} ${value}`)
-                          .join(" · ")
-                      : "No inbound events yet"}
-                  </div>
-                </div>
-                {summary ? (
-                  <div className="border border-slate-300 bg-[#f8f9fb] px-3 py-3">
-                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      <Radio className="h-3.5 w-3.5" />
-                      Summary
+          <div className="space-y-4">
+            <Panel title="Camera" eyebrow="Vision">
+              <div className="border border-slate-300 bg-slate-950/96">
+                <video ref={videoRef} autoPlay playsInline muted className="aspect-video w-full object-cover" />
+              </div>
+              <div className="mt-3 text-sm text-slate-600">
+                {cameraEnabled
+                  ? "Frames stream while the session is live."
+                  : "Enable camera if you want Eurydice to see notation or homework."}
+              </div>
+            </Panel>
+
+            <Panel title="Notes" eyebrow="Summary">
+              {summary?.bullets?.length ? (
+                <div className="space-y-2">
+                  {summary.bullets.map((bullet) => (
+                    <div key={bullet} className="border border-slate-300 bg-white px-3 py-3 text-sm text-slate-700">
+                      {bullet}
                     </div>
-                    <div className="mt-2 space-y-1 text-sm text-slate-700">
-                      {Array.isArray(summary.bullets)
-                        ? summary.bullets.map((bullet) => <div key={bullet}>{bullet}</div>)
-                        : null}
-                    </div>
-                  </div>
-                ) : null}
+                  ))}
+                </div>
+              ) : (
+                <div className="border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500">
+                  Summary will land here when the session closes.
+                </div>
+              )}
+            </Panel>
+
+            <Panel title="Inbound" eyebrow="Debug">
+              <div className="border border-slate-300 bg-white px-3 py-3">
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <Volume2 className="h-3.5 w-3.5" />
+                  Events
+                </div>
+                <div className="mt-2 text-sm text-slate-700">
+                  {activeDebugSession?.inbound
+                    ? Object.entries(activeDebugSession.inbound)
+                        .map(([key, value]) => `${key} ${value}`)
+                        .join(" · ")
+                    : "No inbound events yet"}
+                </div>
               </div>
             </Panel>
           </div>

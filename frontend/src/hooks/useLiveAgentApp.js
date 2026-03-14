@@ -16,6 +16,26 @@ function buildInitialProfile() {
   };
 }
 
+function buildInitialAudioLevels() {
+  return {
+    energyDb: -90,
+    speechConfidence: 0,
+    musicConfidence: 0,
+    speechActive: false,
+    pitchHz: null,
+    pitchConfidence: 0,
+  };
+}
+
+function buildInitialConnectionMeta() {
+  return {
+    sessionId: null,
+    transport: null,
+    location: null,
+    skill: null,
+  };
+}
+
 function normalizeIncomingMessage(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return data;
@@ -105,20 +125,8 @@ export default function useLiveAgentApp() {
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [liveAudioMode, setLiveAudioMode] = useState("SILENCE");
-  const [liveAudioLevels, setLiveAudioLevels] = useState({
-    energyDb: -90,
-    speechConfidence: 0,
-    musicConfidence: 0,
-    speechActive: false,
-    pitchHz: null,
-    pitchConfidence: 0,
-  });
-  const [connectionMeta, setConnectionMeta] = useState({
-    sessionId: null,
-    transport: null,
-    location: null,
-    skill: null,
-  });
+  const [liveAudioLevels, setLiveAudioLevels] = useState(buildInitialAudioLevels);
+  const [connectionMeta, setConnectionMeta] = useState(buildInitialConnectionMeta);
 
   const videoRef = useRef(null);
   const wsRef = useRef(null);
@@ -222,14 +230,7 @@ export default function useLiveAgentApp() {
     audioRouterRef.current = null;
     await router.stop();
     setLiveAudioMode("SILENCE");
-    setLiveAudioLevels({
-      energyDb: -90,
-      speechConfidence: 0,
-      musicConfidence: 0,
-      speechActive: false,
-      pitchHz: null,
-      pitchConfidence: 0,
-    });
+    setLiveAudioLevels(buildInitialAudioLevels());
   }, []);
 
   const startAudioRouter = useCallback(async () => {
@@ -464,12 +465,7 @@ export default function useLiveAgentApp() {
     setSummary(null);
     setMessages([]);
     setSessionProfile(null);
-    setConnectionMeta({
-      sessionId: null,
-      transport: null,
-      location: null,
-      skill: null,
-    });
+    setConnectionMeta(buildInitialConnectionMeta());
     setIsConnecting(true);
 
     try {
@@ -564,6 +560,21 @@ export default function useLiveAgentApp() {
     setCameraEnabled((value) => !value);
   }, []);
 
+  const resetSession = useCallback(() => {
+    disconnectSocket();
+    void stopAudioRouter();
+    void stopCameraCapture();
+    void closePlayback();
+    setSessionProfile(null);
+    setMessages([]);
+    setSummary(null);
+    setConnectionError("");
+    setConversationInput("");
+    setConnectionMeta(buildInitialConnectionMeta());
+    setLiveAudioLevels(buildInitialAudioLevels());
+    setLiveAudioMode("SILENCE");
+  }, [closePlayback, disconnectSocket, stopAudioRouter, stopCameraCapture]);
+
   return {
     profileDraft,
     setProfileDraft,
@@ -590,5 +601,6 @@ export default function useLiveAgentApp() {
     sendText,
     toggleMic,
     toggleCamera,
+    resetSession,
   };
 }

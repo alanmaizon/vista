@@ -25,11 +25,16 @@
   }
 
   body {
+    margin: 0;
     min-width: 320px;
     min-height: 100vh;
     background:
       radial-gradient(circle at top, rgb(184 189 197 / 0.28), transparent 34%),
       linear-gradient(180deg, #f8f9fb 0%, #eef1f4 52%, #e6e8eb 100%);
+  }
+
+  #root {
+    min-height: 100vh;
   }
 
   ::selection {

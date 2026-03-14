@@ -1,16 +1,34 @@
-# React + Vite
+# Eurydice Live Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This frontend is intentionally small. It targets the reset live-agent backend and avoids the older multi-panel lesson workspace.
 
-Currently, two official plugins are available:
+Active app flow:
+- Build a session profile
+- Open `WS /ws/live`
+- Stream microphone audio
+- Optionally stream camera frames
+- Play assistant audio
+- Show transcript, runtime state, and summary
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Primary files:
+- `src/App.jsx`
+- `src/hooks/useLiveAgentApp.js`
+- `src/components/LiveAgentWorkspace.jsx`
+- `src/components/MarbleSphere.tsx`
+- `src/lib/liveAudioRouter.js`
+- `src/lib/liveAudioPlayback.js`
+- `src/lib/audioCapture.js`
 
-## React Compiler
+Useful commands:
+- `npm run dev`
+- `npm run lint`
+- `npm run test`
+- `npm run build`
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Backend contract:
+- `GET /api/runtime`
+- `GET /api/runtime/debug`
+- `POST /api/live/session-profile`
+- `WS /ws/live`
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+For the exact message shapes, use [docs/LIVE_BACKEND_CONTRACT.md](../docs/LIVE_BACKEND_CONTRACT.md).

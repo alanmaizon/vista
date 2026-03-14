@@ -85,10 +85,16 @@ def test_health_and_runtime_endpoints(client: TestClient) -> None:
     assert health.json() == {"status": "ok"}
     assert runtime.status_code == 200
     assert runtime.json()["service"] == "eurydice-live"
+    assert "service_name" in runtime.json()
+    assert "revision_name" in runtime.json()
+    assert "instance_id" in runtime.json()
     assert runtime.json()["active_session_count"] == 0
     assert "/ws/live" not in runtime.json()["accepted_client_messages"]
     assert "server.audio" in runtime.json()["emitted_server_messages"]
     assert debug.status_code == 200
+    assert "service_name" in debug.json()
+    assert "revision_name" in debug.json()
+    assert "instance_id" in debug.json()
     assert debug.json()["active_sessions"] == []
 
 

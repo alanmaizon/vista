@@ -8,6 +8,7 @@ import binascii
 import contextlib
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -90,6 +91,14 @@ def _frontend_asset_path(file_name: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def _runtime_identity() -> dict[str, str | None]:
+    return {
+        "service_name": os.getenv("K_SERVICE") or "eurydice-live",
+        "revision_name": os.getenv("K_REVISION"),
+        "instance_id": os.getenv("HOSTNAME"),
+    }
+
+
 @app.get("/", response_model=None)
 async def root() -> FileResponse | dict[str, Any]:
     if FRONTEND_DIST is not None:
@@ -151,6 +160,7 @@ async def runtime_info() -> dict[str, Any]:
     diagnostics = runtime_registry.snapshot()
     return {
         "service": "eurydice-live",
+        **_runtime_identity(),
         "model_id": settings.model_id,
         "location": settings.location,
         "fallback_location": settings.fallback_location,
@@ -183,6 +193,7 @@ async def runtime_debug() -> dict[str, Any]:
     adk_available, adk_detail = adk_runtime_status()
     return {
         "service": "eurydice-live",
+        **_runtime_identity(),
         "model_id": settings.model_id,
         "location": settings.location,
         "fallback_location": settings.fallback_location,

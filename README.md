@@ -21,6 +21,22 @@ Eurydice can hear a student play, read their score via the camera, coach them ba
 ### For Developers
 See the [Local Setup Guide](docs/LOCAL_SETUP.md) for detailed instructions on running Eurydice locally.
 
+## For Judges
+
+If you only review a few things, start here:
+
+- **What Eurydice is:** a real-time multimodal music tutor that hears a student play, reads a score, and gives structured corrective feedback.
+- **Architecture diagram:** see [Architecture Overview](#architecture-overview).
+- **Deployment proof path:** see [Deployment](docs/DEPLOYMENT.md) for the Cloud Run stack and required Google Cloud services.
+- **Live tutor architecture:** see [Live Tutor Architecture](docs/live-tutor-architecture.md).
+- **Final-week submission guide:** see [Final Submission Playbook](docs/FINAL_SUBMISSION_PLAYBOOK.md).
+- **Demo narration guide:** see [Demo Script](docs/DEMO_SCRIPT.md).
+
+Challenge requirement highlights:
+- **Gemini model:** `gemini-live-2.5-flash-native-audio` is the configured live model.
+- **Google GenAI SDK / ADK:** the live bridge prefers ADK and falls back to the direct Vertex websocket bridge; embeddings use `google.genai`.
+- **Google Cloud deployment:** the backend is designed for **Cloud Run** with **Cloud SQL**, **Secret Manager**, and **Vertex AI**.
+
 ## Features
 
 🎵 **Unified Guided Lesson Loop:**
@@ -230,6 +246,9 @@ FRONTEND_FEATURES_URI=gs://YOUR_BUCKET/features bash infra/sync_feature_assets.s
 - **[Content Ingestion & Curation](docs/CONTENT_INGESTION_AND_CURATION.md)** - Library metadata, curation and guided pack loading
 - **[Local Setup](docs/LOCAL_SETUP.md)** - Step-by-step development guide
 - **[Deployment](docs/DEPLOYMENT.md)** - Cloud Run deployment instructions
+- **[Final Submission Playbook](docs/FINAL_SUBMISSION_PLAYBOOK.md)** - Judge-facing final-week checklist, proof plan, and submission workflow
+- **[Demo Script](docs/DEMO_SCRIPT.md)** - Tight 4-minute recording script for the live lesson loop
+- **[Live Tutor Architecture](docs/live-tutor-architecture.md)** - Event flow, lesson orchestrator, and Gemini Live bridge design
 - **[Constitution](docs/CONSTITUTION.md)** - AI system behavior rules
 - **[Audit Report](docs/AUDIT_REPORT.md)** - Codebase audit and improvements
 

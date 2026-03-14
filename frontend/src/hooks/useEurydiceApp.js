@@ -72,6 +72,19 @@ function generateConversationId(prefix = "msg") {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function mergeTextFragments(existingText, incomingText) {
+  const existing = String(existingText || "").trimEnd();
+  const incoming = String(incomingText || "").trimStart();
+  if (!existing) {
+    return incoming;
+  }
+  if (!incoming) {
+    return existing;
+  }
+  const omitSpace = /^[,.;:!?)]/.test(incoming) || /[(/"']$/.test(existing);
+  return `${existing}${omitSpace ? "" : " "}${incoming}`.replace(/\s+([,.;:!?])/g, "$1");
+}
+
 function normalizeRouterEventNotes(event) {
   if (event?.type === "NOTE_PLAYED" && event.pitch) {
     return [event.pitch];
@@ -183,6 +196,10 @@ export default function useEurydiceApp() {
   const liveEventBusRef = useRef(createLiveEventBus());
   const conversationStreamRefs = useRef({ assistant: null, user: null });
   const assistantStreamingRef = useRef(false);
+  const assistantTextMergeRef = useRef({
+    messageId: null,
+    updatedAt: 0,
+  });
   const liveAudioLevelsRef = useRef({
     energyDb: -90,
     speechConfidence: 0,
@@ -222,6 +239,27 @@ export default function useEurydiceApp() {
         streaming,
       },
     ]);
+  }, []);
+
+  const appendOrMergeLiveCaption = useCallback((text) => {
+    const trimmed = typeof text === "string" ? text.trim() : "";
+    if (!trimmed) {
+      return;
+    }
+    const mergeWindowMs = 1400;
+    const now = Date.now();
+    setCaptions((items) => {
+      const lastCaption = items.at(-1);
+      if (lastCaption?.role === "Live" && now - assistantTextMergeRef.current.updatedAt <= mergeWindowMs) {
+        const nextItems = [...items];
+        nextItems[nextItems.length - 1] = {
+          ...lastCaption,
+          text: mergeTextFragments(lastCaption.text, trimmed),
+        };
+        return nextItems;
+      }
+      return appendTimestamped(items, "Live", trimmed);
+    });
   }, []);
 
   const upsertConversationStream = useCallback((role, text, { kind = "speech", final = false } = {}) => {
@@ -302,7 +340,75 @@ export default function useEurydiceApp() {
       ];
     });
     conversationStreamRefs.current.assistant = null;
+    assistantTextMergeRef.current = {
+      messageId: activeId || null,
+      updatedAt: Date.now(),
+    };
   }, []);
+
+  const appendOrMergeAssistantMessage = useCallback((text) => {
+    const trimmed = typeof text === "string" ? text.trim() : "";
+    if (!trimmed) {
+      return;
+    }
+
+    const mergeWindowMs = 1400;
+    const now = Date.now();
+    const newMessageId = generateConversationId("assistant");
+    const mergeTargetId =
+      now - assistantTextMergeRef.current.updatedAt <= mergeWindowMs
+        ? assistantTextMergeRef.current.messageId
+        : null;
+    let resolvedMessageId = mergeTargetId;
+
+    setConversationMessages((items) => {
+      if (mergeTargetId) {
+        const index = items.findIndex((item) => item.id === mergeTargetId);
+        if (index !== -1) {
+          const nextItems = [...items];
+          const current = nextItems[index];
+          nextItems[index] = {
+            ...current,
+            text: mergeTextFragments(current.text, trimmed),
+            kind: "assistant",
+            streaming: false,
+          };
+          return nextItems;
+        }
+      }
+
+      const lastMessage = items.at(-1);
+      if (lastMessage?.role === "assistant" && !lastMessage.streaming) {
+        resolvedMessageId = lastMessage.id;
+        const nextItems = [...items];
+        nextItems[nextItems.length - 1] = {
+          ...lastMessage,
+          text: mergeTextFragments(lastMessage.text, trimmed),
+          kind: "assistant",
+          streaming: false,
+        };
+        return nextItems;
+      }
+
+      return [
+        ...items,
+        {
+          id: newMessageId,
+          role: "assistant",
+          text: trimmed,
+          kind: "assistant",
+          streaming: false,
+        },
+      ];
+    });
+
+    appendOrMergeLiveCaption(trimmed);
+
+    assistantTextMergeRef.current = {
+      messageId: resolvedMessageId || newMessageId,
+      updatedAt: now,
+    };
+  }, [appendOrMergeLiveCaption]);
 
   const resetLessonState = useCallback(() => {
     setLessonState(initialLessonState());
@@ -356,6 +462,7 @@ export default function useEurydiceApp() {
       conversationStreamRefs.current.assistant = null;
       conversationStreamRefs.current.user = null;
       assistantStreamingRef.current = false;
+      assistantTextMergeRef.current = { messageId: null, updatedAt: 0 };
       pendingMusicInterruptRef.current = null;
       if (musicInterruptTimerRef.current) {
         window.clearTimeout(musicInterruptTimerRef.current);
@@ -480,6 +587,7 @@ export default function useEurydiceApp() {
         conversationStreamRefs.current.assistant = null;
         conversationStreamRefs.current.user = null;
         assistantStreamingRef.current = false;
+        assistantTextMergeRef.current = { messageId: null, updatedAt: 0 };
         sessionStartPromiseRef.current = null;
         setIsSessionStarting(false);
         setRecentMusicEvents([]);
@@ -620,6 +728,7 @@ export default function useEurydiceApp() {
       conversationStreamRefs.current.assistant = null;
       conversationStreamRefs.current.user = null;
       assistantStreamingRef.current = false;
+      assistantTextMergeRef.current = { messageId: null, updatedAt: 0 };
       sessionStartPromiseRef.current = null;
       setIsSessionStarting(false);
       setRecentMusicEvents([]);
@@ -762,6 +871,13 @@ export default function useEurydiceApp() {
     const startPromise = (async () => {
       setIsSessionStarting(true);
       try {
+        if (liveAudioPlaybackRef.current?.ensureContext) {
+          try {
+            await liveAudioPlaybackRef.current.ensureContext();
+          } catch {
+            // If the browser refuses the unlock here, keep the session starting.
+          }
+        }
         setStatus("Creating Gemini Live tutor...");
         const session = await apiRequest("/api/sessions", {
           method: "POST",
@@ -1019,6 +1135,7 @@ export default function useEurydiceApp() {
     conversationStreamRefs.current.assistant = null;
     conversationStreamRefs.current.user = null;
     assistantStreamingRef.current = false;
+    assistantTextMergeRef.current = { messageId: null, updatedAt: 0 };
     if (musicInterruptTimerRef.current) {
       window.clearTimeout(musicInterruptTimerRef.current);
       musicInterruptTimerRef.current = null;
@@ -1503,8 +1620,12 @@ export default function useEurydiceApp() {
           }
           if (!cameraCapturePending) {
             assistantStreamingRef.current = false;
-            finalizeAssistantMessage(data.text ?? "");
-            appendCaption("Live", data.text ?? "");
+            if (conversationStreamRefs.current.assistant) {
+              finalizeAssistantMessage(data.text ?? "");
+              appendOrMergeLiveCaption(data.text ?? "");
+            } else {
+              appendOrMergeAssistantMessage(data.text ?? "");
+            }
             if (pendingMusicInterruptRef.current) {
               if (musicInterruptTimerRef.current) {
                 window.clearTimeout(musicInterruptTimerRef.current);
@@ -1530,13 +1651,6 @@ export default function useEurydiceApp() {
               ...current,
               status: data.skill === "GUIDED_LESSON" ? "listening" : current.status,
             }));
-            appendConversationMessage(
-              "system",
-              data.skill === "GUIDED_LESSON"
-                ? "Gemini Live is ready. Speak naturally or play when prompted."
-                : `Connected in ${data.skill}.`,
-              { kind: "status" },
-            );
           }
           break;
         case "server.score_capture":
@@ -1584,6 +1698,8 @@ export default function useEurydiceApp() {
     [
       appendCaption,
       appendConversationMessage,
+      appendOrMergeAssistantMessage,
+      appendOrMergeLiveCaption,
       cameraCapturePending,
       finalizeAssistantMessage,
       flushPendingMusicInterrupt,

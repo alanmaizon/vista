@@ -1,7 +1,7 @@
 # Eurydice
 
 <p align="center">
-  <img src="frontend/public/logo.svg" alt="Eurydice logo" width="120" height="120">
+  <img src="screenshot.png" alt="Eurydice landing">
 </p>
 
 **A real-time multimodal music tutor built for the Gemini Live Agent Challenge.**

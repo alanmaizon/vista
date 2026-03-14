@@ -59,6 +59,10 @@ This is the shortest path to a working local Eurydice environment.
     - `source .venv/bin/activate`
   - `pip install -r backend/requirements.txt`
   - `pip install -r backend/requirements-dev.txt`
+- Apply database migrations before the backend starts:
+  - `cd backend`
+  - `alembic upgrade head`
+  - `cd ..`
 - Optional: build the React frontend locally so `/` serves it instead of the legacy static fallback:
   - `cd frontend`
   - `npm install`
@@ -81,6 +85,8 @@ Example:
 - `DB_HOST=127.0.0.1`
 - `DB_PORT=5432`
 - `CLOUDSQL_INSTANCE_CONNECTION_NAME=`
+
+If startup fails with a message telling you to run `alembic upgrade head`, your database exists but has not been migrated to the current Eurydice schema yet.
 
 ## Official references
 

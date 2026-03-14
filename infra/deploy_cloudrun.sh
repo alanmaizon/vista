@@ -4,6 +4,7 @@ set -euo pipefail
 GOOGLE_CLOUD_PROJECT="${GOOGLE_CLOUD_PROJECT:-}"
 GOOGLE_CLOUD_LOCATION="${GOOGLE_CLOUD_LOCATION:-${GCP_REGION:-us-central1}}"
 SERVICE_NAME="${SERVICE_NAME:-vista-ai-backend}"
+MIGRATION_JOB_NAME="${MIGRATION_JOB_NAME:-${SERVICE_NAME}-migrations}"
 IMAGE_REPO="${IMAGE_REPO:-cloud-run-source-deploy}"
 IMAGE_NAME="${IMAGE_NAME:-$SERVICE_NAME}"
 IMAGE_URI="${IMAGE_URI:-${GOOGLE_CLOUD_LOCATION}-docker.pkg.dev/${GOOGLE_CLOUD_PROJECT}/${IMAGE_REPO}/${IMAGE_NAME}}"
@@ -64,6 +65,37 @@ if [[ -n "$CLOUD_RUN_BUILD_SERVICE_ACCOUNT" ]]; then
 fi
 
 "${build_cmd[@]}"
+
+migration_cmd=(
+  gcloud run jobs create "$MIGRATION_JOB_NAME"
+  --project "$GOOGLE_CLOUD_PROJECT"
+  --region "$GOOGLE_CLOUD_LOCATION"
+  --image "$IMAGE_URI"
+  --command alembic
+  --args=-c,alembic.ini,upgrade,head
+  --tasks 1
+  --max-retries 0
+  --set-cloudsql-instances "$CLOUDSQL_INSTANCE_CONNECTION_NAME"
+  --set-env-vars "DB_USER=${DB_USER},DB_NAME=${DB_NAME},CLOUDSQL_INSTANCE_CONNECTION_NAME=${CLOUDSQL_INSTANCE_CONNECTION_NAME}"
+  --set-secrets "DB_PASSWORD=${DB_PASSWORD_SECRET_NAME}:latest"
+)
+
+if [[ -n "$CLOUD_RUN_SERVICE_ACCOUNT" ]]; then
+  migration_cmd+=(--service-account "$CLOUD_RUN_SERVICE_ACCOUNT")
+fi
+
+if gcloud run jobs describe "$MIGRATION_JOB_NAME" \
+  --project "$GOOGLE_CLOUD_PROJECT" \
+  --region "$GOOGLE_CLOUD_LOCATION" >/dev/null 2>&1; then
+  migration_cmd[3]="update"
+fi
+
+"${migration_cmd[@]}"
+
+gcloud run jobs execute "$MIGRATION_JOB_NAME" \
+  --project "$GOOGLE_CLOUD_PROJECT" \
+  --region "$GOOGLE_CLOUD_LOCATION" \
+  --wait
 
 deploy_cmd=(
   gcloud run deploy "$SERVICE_NAME"

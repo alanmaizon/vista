@@ -68,6 +68,7 @@
 - Each open websocket keeps a Cloud Run instance busy, so keep concurrency conservative for the MVP.
 - The deploy script only attaches Cloud SQL when `CLOUDSQL_INSTANCE_CONNECTION_NAME` is set.
 - The deploy script prefers Secret Manager for `DB_PASSWORD`, `FIREBASE_SERVICE_ACCOUNT_JSON`, and `VISTA_FIREBASE_WEB_CONFIG` when the corresponding `*_SECRET_NAME` variables are set.
+- The deploy script now creates or updates a Cloud Run job named `${SERVICE_NAME}-migrations` by default and runs `alembic upgrade head` before deploying the service revision.
 - The service account needs:
   - Vertex AI permissions sufficient to call the Live API (`aiplatform`)
   - Cloud SQL Client
@@ -131,6 +132,7 @@
 - Run Postgres locally and point the backend to it with `DB_HOST` and `DB_PORT`.
 - Use a Firebase dev project and set `VISTA_FIREBASE_WEB_CONFIG` in `backend/.env`.
 - If email/password fields are blank, the backend performs anonymous sign-in and issues a session cookie.
+- Run `cd backend && alembic upgrade head` before starting `uvicorn app.main:app` locally.
 - For real Eurydice SVG score rendering, install the optional music stack:
   - `pip install -r backend/requirements-music.txt`
   - Without that extra dependency, Eurydice render endpoints still return MusicXML fallback payloads.

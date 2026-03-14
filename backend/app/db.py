@@ -9,14 +9,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from .domains.base import DEFAULT_DOMAIN
 from .domains.music import models as _music_models  # noqa: F401
-from .models import Base
 
 
-def _sql_string_literal(value: str) -> str:
-    """Render a safe SQL string literal for simple internal DDL patches."""
-    return "'" + value.replace("'", "''") + "'"
+_MIGRATION_HINT = (
+    "Database migrations are missing. Run `alembic -c backend/alembic.ini upgrade head` "
+    "before starting Eurydice."
+)
 
 
 def _make_database_url() -> str:
@@ -49,8 +48,13 @@ def _make_database_url() -> str:
     return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db_name}"
 
 
+def get_database_url() -> str:
+    """Expose the configured database URL for migration tooling."""
+    return _make_database_url()
+
+
 # Create the async engine and sessionmaker
-DATABASE_URL = _make_database_url()
+DATABASE_URL = get_database_url()
 engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(
     bind=engine, class_=AsyncSession, expire_on_commit=False
@@ -58,23 +62,23 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def init_db() -> None:
-    """Create tables if they do not already exist."""
-    default_domain_literal = _sql_string_literal(DEFAULT_DOMAIN)
+    """Verify database connectivity and require migrations to be applied."""
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # Lightweight schema evolution until full migrations are in place.
-        await conn.execute(
+        await conn.execute(text("SELECT 1"))
+        version_table_exists = await conn.execute(
             text(
-                "ALTER TABLE sessions "
-                f"ADD COLUMN IF NOT EXISTS domain VARCHAR(16) NOT NULL DEFAULT {default_domain_literal}"
+                "SELECT EXISTS ("
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = 'alembic_version'"
+                ")"
             )
         )
-        await conn.execute(
-            text(f"ALTER TABLE sessions ALTER COLUMN domain SET DEFAULT {default_domain_literal}")
-        )
-        await conn.execute(
-            text("ALTER TABLE music_live_tool_calls ADD COLUMN IF NOT EXISTS error_kind VARCHAR(24)")
-        )
+        if not bool(version_table_exists.scalar()):
+            raise RuntimeError(_MIGRATION_HINT)
+
+        applied_revision = await conn.execute(text("SELECT version_num FROM alembic_version LIMIT 1"))
+        if not applied_revision.scalar_one_or_none():
+            raise RuntimeError(_MIGRATION_HINT)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

@@ -21,6 +21,8 @@ COPY backend/requirements.txt backend/requirements-music.txt ./
 RUN pip install --no-cache-dir -r requirements-music.txt
 
 COPY backend/app ./app
+COPY backend/alembic ./alembic
+COPY backend/alembic.ini ./alembic.ini
 COPY --from=frontend /frontend/dist ./frontend-dist
 
 EXPOSE 8080

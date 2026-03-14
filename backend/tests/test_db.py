@@ -3,13 +3,12 @@ from __future__ import annotations
 import pytest
 
 from app import db as db_module
-from app.domains.base import DEFAULT_DOMAIN
 
 
 class FakeConnection:
-    def __init__(self) -> None:
+    def __init__(self, results: dict[str, object] | None = None) -> None:
         self.executed: list[tuple[str, dict]] = []
-        self.run_sync_calls: list[object] = []
+        self.results = results or {}
 
     async def __aenter__(self) -> "FakeConnection":
         return self
@@ -17,40 +16,65 @@ class FakeConnection:
     async def __aexit__(self, *_args) -> bool:
         return False
 
-    async def run_sync(self, callable_obj) -> None:  # pragma: no cover - invoked for side effect tracking
-        self.run_sync_calls.append(callable_obj)
+    async def run_sync(self, callable_obj) -> None:  # pragma: no cover - retained for interface parity
+        del callable_obj
 
     async def execute(self, statement, params=None) -> None:
-        self.executed.append((str(statement), params or {}))
+        rendered = str(statement)
+        self.executed.append((rendered, params or {}))
+        for pattern, value in self.results.items():
+            if pattern in rendered:
+                return FakeResult(value)
+        return FakeResult(None)
+
+
+class FakeResult:
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+    def scalar(self) -> object:
+        return self.value
+
+    def scalar_one_or_none(self) -> object:
+        return self.value
 
 
 class FakeEngine:
-    def __init__(self) -> None:
-        self.connection = FakeConnection()
+    def __init__(self, results: dict[str, object] | None = None) -> None:
+        self.connection = FakeConnection(results)
 
     def begin(self) -> FakeConnection:
         return self.connection
 
 
 @pytest.mark.asyncio
-async def test_init_db_sets_domain_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_engine = FakeEngine()
+async def test_init_db_requires_applied_migration(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_engine = FakeEngine(
+        {
+            "SELECT 1": 1,
+            "SELECT EXISTS": True,
+            "SELECT version_num FROM alembic_version": "20260314_0001",
+        }
+    )
     monkeypatch.setattr(db_module, "engine", fake_engine)
 
     await db_module.init_db()
 
-    assert len(fake_engine.connection.run_sync_calls) == 1
     assert len(fake_engine.connection.executed) == 3
+    assert "SELECT 1" in fake_engine.connection.executed[0][0]
+    assert "SELECT EXISTS" in fake_engine.connection.executed[1][0]
+    assert "SELECT version_num FROM alembic_version" in fake_engine.connection.executed[2][0]
 
-    add_stmt, add_params = fake_engine.connection.executed[0]
-    alter_stmt, alter_params = fake_engine.connection.executed[1]
-    live_tool_stmt, live_tool_params = fake_engine.connection.executed[2]
 
-    assert "ADD COLUMN IF NOT EXISTS domain" in add_stmt
-    assert DEFAULT_DOMAIN in add_stmt
-    assert add_params == {}
-    assert "ALTER COLUMN domain SET DEFAULT" in alter_stmt
-    assert DEFAULT_DOMAIN in alter_stmt
-    assert alter_params == {}
-    assert "ALTER TABLE music_live_tool_calls ADD COLUMN IF NOT EXISTS error_kind" in live_tool_stmt
-    assert live_tool_params == {}
+@pytest.mark.asyncio
+async def test_init_db_raises_when_migrations_are_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_engine = FakeEngine(
+        {
+            "SELECT 1": 1,
+            "SELECT EXISTS": False,
+        }
+    )
+    monkeypatch.setattr(db_module, "engine", fake_engine)
+
+    with pytest.raises(RuntimeError, match="alembic -c backend/alembic.ini upgrade head"):
+        await db_module.init_db()

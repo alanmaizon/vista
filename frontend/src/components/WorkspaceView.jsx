@@ -122,7 +122,7 @@ export default function WorkspaceView({
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(184,189,197,0.24),transparent_34%),linear-gradient(180deg,#f7f8fa_0%,#eef1f4_52%,#e6e8eb_100%)] text-slate-800">
-      <main className="mr-auto w-full max-w-[1440px] px-4 py-4 md:px-6 xl:pl-10 xl:pr-8 2xl:pl-14">
+      <main className="w-full px-4 py-4 md:px-6 xl:px-8 2xl:px-10">
         <header className="mb-4 flex flex-col gap-3 border border-slate-300/90 bg-white/78 px-4 py-4 backdrop-blur-md md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">

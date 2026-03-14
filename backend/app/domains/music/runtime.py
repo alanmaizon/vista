@@ -287,7 +287,7 @@ class MusicRuntime(SessionRuntime):
         self.saw_assistant_audio = True
 
     def allow_model_audio(self) -> bool:
-        return self.skill in {"EAR_TRAIN", "GENERATE_EXAMPLE"}
+        return self.skill in {"GUIDED_LESSON", "EAR_TRAIN", "GENERATE_EXAMPLE"}
 
     def summary_payload(self) -> dict[str, list[str]]:
         bullets = [

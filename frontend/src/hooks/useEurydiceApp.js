@@ -884,7 +884,7 @@ export default function useEurydiceApp() {
           body: {
             domain: "MUSIC",
             mode: "GUIDED_LESSON",
-            goal: "Act as a conversational music tutor. Greet the user, listen to speech and played phrases, and use score or comparison tools when relevant.",
+            goal: null,
           },
         });
         setSessionId(session.id);
@@ -1603,6 +1603,15 @@ export default function useEurydiceApp() {
                 ...current,
                 status: "listening",
               }));
+            }
+            if (!data.partial) {
+              if (conversationStreamRefs.current.assistant) {
+                finalizeAssistantMessage(text);
+                appendOrMergeLiveCaption(text);
+              } else {
+                appendOrMergeAssistantMessage(text);
+              }
+              break;
             }
           }
           upsertConversationStream(role, text, {

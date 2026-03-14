@@ -78,7 +78,6 @@ export default function ConversationPanel({
           {lessonFlow?.phase ? (
             <div className="mt-2 text-xs text-slate-500">
               Lesson phase: <span className="font-medium text-slate-700">{lessonFlow.phase}</span>
-              {lessonFlow?.status ? ` · ${lessonFlow.status}` : ""}
             </div>
           ) : null}
         </div>

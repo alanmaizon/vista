@@ -321,6 +321,16 @@ async def ws_live(ws: WebSocket) -> None:
         transport = "adk" if bridge.using_adk else "direct"
         runtime_registry.start_session(session_id, profile, transport)
         runtime_registry.note_inbound(session_id, CLIENT_INIT)
+        logger.info(
+            "Live session connected session_id=%s transport=%s location=%s mode=%s instrument=%s piece=%s camera_expected=%s",
+            session_id,
+            transport,
+            bridge.active_location,
+            profile.mode,
+            profile.instrument,
+            profile.piece,
+            profile.camera_expected,
+        )
 
         await _send_live_event(
             ws,
@@ -362,6 +372,7 @@ async def ws_live(ws: WebSocket) -> None:
             try:
                 message = await ws.receive_json()
             except WebSocketDisconnect:
+                logger.info("Live websocket disconnected session_id=%s", session_id)
                 break
             except (TypeError, ValueError):
                 await _send_live_event(ws, ErrorEvent.from_message("Malformed JSON message"))

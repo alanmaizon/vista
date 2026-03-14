@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
 from .live.events import ErrorEvent, LiveEvent, ServerStatusEvent, ServerSummaryEvent
@@ -24,11 +25,18 @@ from .live.protocol import (
     CLIENT_TEXT,
     CLIENT_VIDEO,
 )
-from .live_agent import LiveAgentContext, build_opening_user_prompt, build_system_prompt, context_from_init
+from .live_agent import (
+    LiveRuntimeRegistry,
+    LiveSessionProfile,
+    LiveSessionProfileResponse,
+    build_opening_user_prompt,
+    build_system_prompt,
+)
 from .settings import settings
 
 
 logger = logging.getLogger("eurydice.live")
+runtime_registry = LiveRuntimeRegistry()
 PUBLIC_FIREBASE_WEB_CONFIG_KEYS = {
     "apiKey",
     "authDomain",
@@ -97,6 +105,7 @@ async def client_config() -> dict[str, object | None]:
 @app.get("/api/runtime")
 async def runtime_info() -> dict[str, Any]:
     adk_available, adk_detail = adk_runtime_status()
+    diagnostics = runtime_registry.snapshot()
     return {
         "service": "eurydice-live",
         "model_id": settings.model_id,
@@ -106,6 +115,7 @@ async def runtime_info() -> dict[str, Any]:
         "use_adk": settings.use_adk,
         "adk_available": adk_available,
         "adk_detail": adk_detail,
+        "active_session_count": diagnostics["active_session_count"],
         "accepted_client_messages": [
             CLIENT_INIT,
             CLIENT_AUDIO,
@@ -123,6 +133,31 @@ async def runtime_info() -> dict[str, Any]:
             "error",
         ],
     }
+
+
+@app.get("/api/runtime/debug")
+async def runtime_debug() -> dict[str, Any]:
+    adk_available, adk_detail = adk_runtime_status()
+    return {
+        "service": "eurydice-live",
+        "model_id": settings.model_id,
+        "location": settings.location,
+        "fallback_location": settings.fallback_location,
+        "project_id": settings.project_id,
+        "use_adk": settings.use_adk,
+        "adk_available": adk_available,
+        "adk_detail": adk_detail,
+        **runtime_registry.snapshot(),
+    }
+
+
+@app.post("/api/live/session-profile", response_model=LiveSessionProfileResponse)
+async def build_session_profile(profile: LiveSessionProfile) -> LiveSessionProfileResponse:
+    return LiveSessionProfileResponse(
+        session_profile=profile,
+        opening_hint=build_opening_user_prompt(profile),
+        label=profile.label,
+    )
 
 
 def _flatten_live_event_envelope(event: dict[str, Any]) -> dict[str, Any]:
@@ -165,23 +200,34 @@ def _decode_b64_payload(message: dict[str, Any]) -> bytes:
         raise ValueError("Invalid base64 payload") from exc
 
 
-def _build_summary_payload(context: LiveAgentContext, bridge: GeminiLiveBridge) -> dict[str, Any]:
+def _build_summary_payload(
+    session_id: str,
+    profile: LiveSessionProfile,
+    bridge: GeminiLiveBridge,
+) -> dict[str, Any]:
     bullets = [
         "Realtime voice tutoring is enabled.",
         "Camera frames can be streamed during the session.",
         f"Gemini transport: {'ADK' if bridge.using_adk else 'direct Vertex Live'}.",
     ]
-    if context.instrument:
-        bullets.append(f"Instrument: {context.instrument}.")
-    if context.piece:
-        bullets.append(f"Piece: {context.piece}.")
-    if context.goal:
-        bullets.append(f"Goal: {context.goal}.")
-    return {"scenario": "live_music_tutor", "bullets": bullets}
+    if profile.instrument:
+        bullets.append(f"Instrument: {profile.instrument}.")
+    if profile.piece:
+        bullets.append(f"Piece: {profile.piece}.")
+    if profile.goal:
+        bullets.append(f"Goal: {profile.goal}.")
+    return {
+        "scenario": "live_music_tutor",
+        "session_id": session_id,
+        "bullets": bullets,
+    }
 
 
-async def _forward_bridge_events(ws: WebSocket, bridge: GeminiLiveBridge) -> None:
+async def _forward_bridge_events(ws: WebSocket, bridge: GeminiLiveBridge, session_id: str) -> None:
     async for event in bridge.receive():
+        event_type = str(event.get("type", ""))
+        if event_type:
+            runtime_registry.note_outbound(session_id, event_type)
         await _send_live_event(ws, event)
 
 
@@ -191,7 +237,8 @@ async def ws_live(ws: WebSocket) -> None:
 
     bridge: GeminiLiveBridge | None = None
     forward_task: asyncio.Task[None] | None = None
-    context = LiveAgentContext()
+    session_id = str(uuid4())
+    profile = LiveSessionProfile()
 
     try:
         try:
@@ -209,42 +256,56 @@ async def ws_live(ws: WebSocket) -> None:
             await _send_live_event(ws, ErrorEvent.from_message("The first websocket message must be client.init"))
             return
 
-        context = context_from_init(init_message)
+        init_payload = {key: value for key, value in init_message.items() if key != "type"}
+        try:
+            profile = LiveSessionProfile.model_validate(init_payload)
+        except ValidationError as exc:
+            await _send_live_event(ws, ErrorEvent.from_message(f"Invalid client.init payload: {exc}"))
+            return
         bridge = GeminiLiveBridge(
             model_id=settings.model_id,
             location=settings.location,
             fallback_location=settings.fallback_location,
             project_id=settings.project_id,
-            system_prompt=build_system_prompt(context),
+            system_prompt=build_system_prompt(profile),
             skill="MUSIC_LIVE_TUTOR",
-            goal=context.goal,
+            goal=profile.goal,
             user_key="anonymous",
-            session_key=f"eurydice-live-{uuid4()}",
+            session_key=session_id,
             prefer_adk=settings.use_adk,
         )
         await bridge.connect()
+        transport = "adk" if bridge.using_adk else "direct"
+        runtime_registry.start_session(session_id, profile, transport)
+        runtime_registry.note_inbound(session_id, CLIENT_INIT)
 
         await _send_live_event(
             ws,
             ServerStatusEvent(
                 payload={
                     "state": "connected",
-                    "mode": context.mode,
+                    "mode": profile.mode,
                     "skill": "MUSIC_LIVE_TUTOR",
                 },
                 metadata={
-                    "transport": "adk" if bridge.using_adk else "direct",
+                    "transport": transport,
                     "model_id": settings.model_id,
                     "location": bridge.active_location,
+                    "session_id": session_id,
+                    "instrument": profile.instrument,
+                    "piece": profile.piece,
+                    "goal": profile.goal,
+                    "camera_expected": profile.camera_expected,
                 },
             ),
         )
+        runtime_registry.note_outbound(session_id, "server.status")
 
-        opening_prompt = build_opening_user_prompt(context)
+        opening_prompt = build_opening_user_prompt(profile)
         if opening_prompt:
             await bridge.send_text(opening_prompt, role="user")
 
-        forward_task = asyncio.create_task(_forward_bridge_events(ws, bridge))
+        forward_task = asyncio.create_task(_forward_bridge_events(ws, bridge, session_id))
 
         while True:
             try:
@@ -262,19 +323,28 @@ async def ws_live(ws: WebSocket) -> None:
             message_type = str(message.get("type", "")).strip()
             try:
                 if message_type == CLIENT_AUDIO:
+                    runtime_registry.note_inbound(session_id, message_type)
                     await bridge.send_audio(_decode_b64_payload(message))
                 elif message_type == CLIENT_AUDIO_END:
+                    runtime_registry.note_inbound(session_id, message_type)
                     await bridge.send_audio_end()
                 elif message_type == CLIENT_VIDEO:
+                    runtime_registry.note_inbound(session_id, message_type)
                     await bridge.send_image_jpeg(_decode_b64_payload(message))
                 elif message_type == CLIENT_TEXT:
                     text = str(message.get("text", "")).strip()
                     if not text:
                         await _send_live_event(ws, ErrorEvent.from_message("client.text requires text"))
                         continue
+                    runtime_registry.note_inbound(session_id, message_type)
                     await bridge.send_text(text, role="user")
                 elif message_type == CLIENT_STOP:
-                    await _send_live_event(ws, ServerSummaryEvent(payload=_build_summary_payload(context, bridge)))
+                    runtime_registry.note_inbound(session_id, message_type)
+                    await _send_live_event(
+                        ws,
+                        ServerSummaryEvent(payload=_build_summary_payload(session_id, profile, bridge)),
+                    )
+                    runtime_registry.note_outbound(session_id, "server.summary")
                     break
                 else:
                     await _send_live_event(ws, ErrorEvent.from_message(f"Unsupported message type: {message_type}"))
@@ -296,5 +366,6 @@ async def ws_live(ws: WebSocket) -> None:
         if bridge is not None:
             with contextlib.suppress(Exception):
                 await bridge.close()
+        runtime_registry.end_session(session_id)
         with contextlib.suppress(RuntimeError):
             await ws.close()

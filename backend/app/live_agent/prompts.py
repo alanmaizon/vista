@@ -1,43 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from .schemas import LiveSessionProfile
 
 
-def _clean_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-@dataclass(slots=True)
-class LiveAgentContext:
-    """Minimal session context for the reset live backend."""
-
-    mode: str = "music_tutor"
-    instrument: str | None = None
-    piece: str | None = None
-    goal: str | None = None
-
-
-def context_from_init(message: dict[str, Any]) -> LiveAgentContext:
-    return LiveAgentContext(
-        mode=_clean_text(message.get("mode")) or "music_tutor",
-        instrument=_clean_text(message.get("instrument")),
-        piece=_clean_text(message.get("piece")),
-        goal=_clean_text(message.get("goal")),
-    )
-
-
-def build_system_prompt(context: LiveAgentContext) -> str:
+def build_system_prompt(profile: LiveSessionProfile) -> str:
     context_lines = []
-    if context.instrument:
-        context_lines.append(f"Instrument: {context.instrument}.")
-    if context.piece:
-        context_lines.append(f"Piece: {context.piece}.")
-    if context.goal:
-        context_lines.append(f"User goal: {context.goal}.")
+    if profile.instrument:
+        context_lines.append(f"Instrument: {profile.instrument}.")
+    if profile.piece:
+        context_lines.append(f"Piece: {profile.piece}.")
+    if profile.goal:
+        context_lines.append(f"User goal: {profile.goal}.")
+    if profile.camera_expected:
+        context_lines.append("The user may point the camera at music notation during the session.")
 
     context_block = " ".join(context_lines).strip()
 
@@ -58,14 +33,16 @@ def build_system_prompt(context: LiveAgentContext) -> str:
     )
 
 
-def build_opening_user_prompt(context: LiveAgentContext) -> str:
+def build_opening_user_prompt(profile: LiveSessionProfile) -> str:
     known_context = []
-    if context.instrument:
-        known_context.append(f"instrument={context.instrument}")
-    if context.piece:
-        known_context.append(f"piece={context.piece}")
-    if context.goal:
-        known_context.append(f"goal={context.goal}")
+    if profile.instrument:
+        known_context.append(f"instrument={profile.instrument}")
+    if profile.piece:
+        known_context.append(f"piece={profile.piece}")
+    if profile.goal:
+        known_context.append(f"goal={profile.goal}")
+    if profile.camera_expected:
+        known_context.append("camera_expected=true")
 
     if known_context:
         joined = ", ".join(known_context)

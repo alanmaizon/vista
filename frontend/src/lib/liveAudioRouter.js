@@ -11,8 +11,13 @@ const MUSIC_SILENCE_MS = 340;
 const CONFIDENCE_SMOOTHING = 0.28;
 const MODE_SWITCH_CONFIRM_FRAMES = 2;
 const MUSIC_PITCH_GATE = 0.5;
-const SPEECH_ACTIVITY_ENTER = 0.62;
-const SPEECH_ACTIVITY_HOLD = 0.38;
+const SPEECH_ACTIVITY_ENTER = 0.7;
+const SPEECH_ACTIVITY_HOLD = 0.4;
+const SPEECH_ACTIVITY_ENTER_DB = -42;
+const SPEECH_ACTIVITY_HOLD_DB = -52;
+const SPEECH_ACTIVITY_ENTER_ZCR = 0.045;
+const SPEECH_CONFIRM_FRAMES = 2;
+const SPEECH_PAUSE_FLUSH_MS = 550;
 const STABLE_NOTE_MIN_FRAMES = 4;
 const STABLE_NOTE_MAX_CENTS_SPAN = 35;
 
@@ -234,13 +239,14 @@ export function resolveSpeechActivity({
 
   if (!active) {
     return (
+      energyDb >= SPEECH_ACTIVITY_ENTER_DB &&
       speechConfidence >= SPEECH_ACTIVITY_ENTER &&
-      zeroCrossingRate >= 0.035 &&
+      zeroCrossingRate >= SPEECH_ACTIVITY_ENTER_ZCR &&
       !(pitchConfidence > 0.84 && zeroCrossingRate < 0.03)
     );
   }
 
-  return speechConfidence >= SPEECH_ACTIVITY_HOLD && energyDb >= -54;
+  return speechConfidence >= SPEECH_ACTIVITY_HOLD && energyDb >= SPEECH_ACTIVITY_HOLD_DB;
 }
 
 export function shouldEmitStableNote(noteHold) {
@@ -279,8 +285,10 @@ export function createLiveAudioRouter({
   let smoothedSpeechConfidence = 0;
   let smoothedMusicConfidence = 0;
   let speechActive = false;
+  let speechCandidateFrames = 0;
   let speechSegmentOpen = false;
   let speechPauseTimer = null;
+  let speechLeadInChunks = [];
   let noteHold = null;
   let phraseState = {
     chunks: [],
@@ -317,8 +325,10 @@ export function createLiveAudioRouter({
         return;
       }
       speechSegmentOpen = false;
+      speechCandidateFrames = 0;
+      speechLeadInChunks = [];
       onSpeechPause?.();
-    }, 900);
+    }, SPEECH_PAUSE_FLUSH_MS);
   }
 
   function resetPhrase() {
@@ -508,9 +518,25 @@ export function createLiveAudioRouter({
 
     if (speechActive) {
       clearSpeechPauseTimer();
-      speechSegmentOpen = true;
-      onSpeechChunk?.(pcmBytes);
+      if (!speechSegmentOpen) {
+        speechCandidateFrames += 1;
+        speechLeadInChunks.push(pcmBytes);
+        if (speechLeadInChunks.length > SPEECH_CONFIRM_FRAMES + 1) {
+          speechLeadInChunks.shift();
+        }
+        if (speechCandidateFrames < SPEECH_CONFIRM_FRAMES) {
+          return;
+        }
+        speechSegmentOpen = true;
+        const bufferedChunks = speechLeadInChunks;
+        speechLeadInChunks = [];
+        bufferedChunks.forEach((chunk) => onSpeechChunk?.(chunk));
+      } else {
+        onSpeechChunk?.(pcmBytes);
+      }
     } else if (currentMode === "MUSIC") {
+      speechCandidateFrames = 0;
+      speechLeadInChunks = [];
       trackMusicFrame({
         pcmBytes,
         pitch,
@@ -518,7 +544,12 @@ export function createLiveAudioRouter({
         velocity,
       });
     } else if (phraseState.startedAt && Date.now() - phraseState.lastMusicAt > MUSIC_SILENCE_MS) {
+      speechCandidateFrames = 0;
+      speechLeadInChunks = [];
       finalizePhrase();
+    } else {
+      speechCandidateFrames = 0;
+      speechLeadInChunks = [];
     }
 
     if (wasSpeechActive && !speechActive) {
@@ -582,13 +613,21 @@ export function createLiveAudioRouter({
       await audioContext.resume();
     }
 
+    const audioConstraints = {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
+    const supportedConstraints = navigator.mediaDevices.getSupportedConstraints?.();
+    if (supportedConstraints?.voiceIsolation) {
+      audioConstraints.voiceIsolation = true;
+    }
+
     mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
+      // Guided live tutor speech is speech-optimized. Raw music capture still
+      // goes through capturePcmClip({ mode: "music" }) with processing disabled.
+      audio: audioConstraints,
       video: false,
     });
 
@@ -668,7 +707,9 @@ export function createLiveAudioRouter({
     smoothedSpeechConfidence = 0;
     smoothedMusicConfidence = 0;
     speechActive = false;
+    speechCandidateFrames = 0;
     speechSegmentOpen = false;
+    speechLeadInChunks = [];
     resetPhrase();
   }
 

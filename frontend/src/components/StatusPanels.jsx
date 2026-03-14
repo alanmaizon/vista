@@ -55,6 +55,153 @@ function MetricTile({ label, value, tone = "sky" }) {
   );
 }
 
+function formatAssessmentLabel(value) {
+  if (!value) {
+    return "";
+  }
+  return String(value)
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function AssessmentIssueRow({ item }) {
+  const severity = String(item?.severity || "low").toLowerCase();
+  const toneClass =
+    severity === "high"
+      ? "border-red-200 bg-red-50 text-red-800"
+      : severity === "medium"
+        ? "border-amber-200 bg-amber-50 text-amber-800"
+        : "border-slate-300 bg-white text-slate-700";
+
+  return (
+    <div className={`rounded-2xl border px-3 py-3 ${toneClass}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-sm font-semibold text-slate-900">
+          {item?.title || `Issue on note ${item?.index ?? "?"}`}
+        </div>
+        <div className="rounded-full border border-current/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
+          {severity}
+        </div>
+      </div>
+      <div className="mt-1 text-xs text-slate-600">{item?.detail || "Issue detected."}</div>
+    </div>
+  );
+}
+
+function AssessmentBucket({ title, items, emptyText }) {
+  const rows = Array.isArray(items) ? items.filter(Boolean).slice(0, 3) : [];
+
+  return (
+    <div className="rounded-[1.6rem] border border-slate-300 bg-[#f8f9fb] px-4 py-4">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-600">{title}</div>
+      {rows.length ? (
+        <div className="mt-3 space-y-2">
+          {rows.map((item) => (
+            <AssessmentIssueRow key={`${title}-${item.index}-${item.kind || "issue"}`} item={item} />
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 text-xs text-slate-400">{emptyText}</div>
+      )}
+    </div>
+  );
+}
+
+function AssessmentInsights({ assessment }) {
+  if (!assessment || typeof assessment !== "object") {
+    return null;
+  }
+
+  const confidence = assessment.confidence && typeof assessment.confidence === "object" ? assessment.confidence : {};
+  const overallConfidence = normalizeMetricValue(confidence.overall);
+  const confidenceTone = overallConfidence >= 0.75 ? "emerald" : overallConfidence >= 0.5 ? "amber" : "sky";
+  const strengths = Array.isArray(assessment.strengths) ? assessment.strengths.filter(Boolean).slice(0, 3) : [];
+  const focusAreas = Array.isArray(assessment.focus_areas) ? assessment.focus_areas.filter(Boolean).slice(0, 4) : [];
+  const primaryIssue = formatAssessmentLabel(assessment.primary_issue) || "Balanced Take";
+  const practiceTip = assessment.practice_tip ? String(assessment.practice_tip) : "";
+
+  return (
+    <div className="mt-4 rounded-[1.6rem] border border-slate-300 bg-[#f8f9fb] px-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="font-medium text-slate-900">Structured assessment</div>
+          <div className="mt-1 text-xs text-slate-500">
+            Teacher-style issues extracted from deterministic note alignment.
+          </div>
+        </div>
+        <div className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+          {formatAssessmentLabel(confidence.label) || "Unknown"} confidence
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <MetricTile
+          label="Assessment confidence"
+          value={`${Math.round(overallConfidence * 100)}%`}
+          tone={confidenceTone}
+        />
+        <div className="rounded-[1.4rem] border border-slate-300 bg-white px-4 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">Primary focus</div>
+          <div className="mt-2 text-lg font-semibold text-slate-900">{primaryIssue}</div>
+          <div className="mt-2 text-xs text-slate-600">
+            {practiceTip || "No major issue stood out in this take."}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 text-xs text-slate-500">
+        Audio {Math.round(normalizeMetricValue(confidence.audio_capture) * 100)}% · Alignment{" "}
+        {Math.round(normalizeMetricValue(confidence.alignment) * 100)}%
+      </div>
+
+      {strengths.length ? (
+        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-800">
+          <div className="font-semibold uppercase tracking-[0.14em] text-emerald-700">Strengths</div>
+          <div className="mt-1">{strengths.join(" · ")}</div>
+        </div>
+      ) : null}
+
+      {focusAreas.length ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {focusAreas.map((area) => (
+            <div
+              key={area}
+              className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600"
+            >
+              {formatAssessmentLabel(area)}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+        <AssessmentBucket
+          title="Pitch errors"
+          items={assessment.pitch_errors}
+          emptyText="No clear pitch errors in this take."
+        />
+        <AssessmentBucket
+          title="Rhythm drift"
+          items={assessment.rhythm_drift}
+          emptyText="Beat placement stayed steady."
+        />
+        <AssessmentBucket
+          title="Hesitation points"
+          items={assessment.hesitation_points}
+          emptyText="The phrase kept moving without obvious stalls."
+        />
+        <AssessmentBucket
+          title="Articulation issues"
+          items={assessment.articulation_issues}
+          emptyText="Note lengths tracked the written values cleanly."
+        />
+      </div>
+    </div>
+  );
+}
+
 function FeedbackMeters({ title, feedback }) {
   if (!feedback || typeof feedback !== "object") {
     return null;
@@ -144,9 +291,12 @@ export function LessonPanel({
         <div className="mt-4 rounded-[1.6rem] border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
           <div className="font-semibold">{lessonFlow.feedbackCard.title || "Lesson feedback"}</div>
           <div className="mt-1">{lessonFlow.feedbackCard.summary || ""}</div>
+          {lessonFlow.feedbackCard.practice_tip ? (
+            <div className="mt-2 text-xs text-emerald-800">{lessonFlow.feedbackCard.practice_tip}</div>
+          ) : null}
           {Array.isArray(lessonFlow.feedbackCard.notes) && lessonFlow.feedbackCard.notes.length ? (
             <div className="mt-2 text-xs text-emerald-800">
-              {lessonFlow.feedbackCard.notes.join(" · ")}
+              {lessonFlow.feedbackCard.notes.map((item) => formatAssessmentLabel(item)).join(" · ")}
             </div>
           ) : null}
         </div>
@@ -174,6 +324,7 @@ export function LessonPanel({
           <div className="mt-4">
             <FeedbackMeters title="Bar comparison" feedback={comparison.performance_feedback} />
           </div>
+          <AssessmentInsights assessment={comparison.assessment} />
         </div>
       ) : null}
 

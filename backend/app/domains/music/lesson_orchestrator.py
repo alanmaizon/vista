@@ -260,11 +260,25 @@ class LessonOrchestrator:
                     suggested_actions=("review_feedback",),
                 )
                 summary = _normalize_text(str(comparison_payload.get("summary", ""))) or "Comparison feedback is ready."
+                assessment = (
+                    comparison_payload.get("assessment")
+                    if isinstance(comparison_payload.get("assessment"), dict)
+                    else {}
+                )
+                focus_areas = (
+                    [str(item) for item in assessment.get("focus_areas", []) if str(item).strip()]
+                    if isinstance(assessment.get("focus_areas"), list)
+                    else []
+                )
                 feedback_card = {
                     "title": "Comparison feedback",
                     "summary": summary,
                     "accuracy": comparison_payload.get("accuracy"),
                     "mismatches": comparison_payload.get("mismatches") if isinstance(comparison_payload.get("mismatches"), list) else [],
+                    "notes": focus_areas[:3],
+                    "practice_tip": (
+                        str(assessment.get("practice_tip", "")).strip() if assessment else ""
+                    ),
                 }
                 self._last_feedback_summary = summary
                 self._transition(

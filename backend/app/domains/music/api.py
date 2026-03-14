@@ -118,6 +118,7 @@ class MusicPerformanceCompareResponse(BaseModel):
     played_phrase: dict
     comparisons: list[dict[str, Any]]
     performance_feedback: dict[str, float]
+    assessment: dict[str, Any]
 
 
 class MusicTranscribeRequest(BaseModel):

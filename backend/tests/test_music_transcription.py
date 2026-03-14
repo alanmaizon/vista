@@ -255,6 +255,149 @@ def test_compare_tempo_aware_rhythm_uses_beats(
     assert result.accuracy >= 0.95
 
 
+def test_compare_builds_structured_assessment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    score = build_stored_score()
+
+    def fake_transcribe(*_args, **_kwargs) -> SymbolicPhrase:
+        return SymbolicPhrase(
+            kind="melody_fragment",
+            notes=(
+                NoteEvent(
+                    midi_note=60,
+                    note_name="C4",
+                    frequency_hz=261.63,
+                    start_ms=0,
+                    duration_ms=420,
+                    confidence=0.98,
+                    beats=0.84,
+                ),
+                NoteEvent(
+                    midi_note=64,
+                    note_name="E4",
+                    frequency_hz=329.63,
+                    start_ms=1000,
+                    duration_ms=80,
+                    confidence=0.77,
+                    beats=0.16,
+                ),
+                NoteEvent(
+                    midi_note=64,
+                    note_name="E4",
+                    frequency_hz=329.63,
+                    start_ms=1500,
+                    duration_ms=700,
+                    confidence=0.83,
+                    beats=1.4,
+                ),
+            ),
+            duration_ms=2200,
+            confidence=0.86,
+            summary="Structured assessment test phrase.",
+            warnings=(),
+            tempo_bpm=120.0,
+            performance_feedback={
+                "pitchAccuracy": 0.86,
+                "rhythmAccuracy": 0.71,
+                "tempoStability": 0.68,
+                "dynamicRange": 0.61,
+                "articulationVariance": 0.32,
+            },
+        )
+
+    monkeypatch.setattr(music_compare_module, "transcribe_pcm16", fake_transcribe)
+
+    result = compare_performance_against_score(
+        score,
+        audio_bytes=b"\x00\x00",
+        sample_rate=16000,
+    )
+
+    assessment = result.assessment
+
+    assert assessment["confidence"]["overall"] > 0.65
+    assert assessment["confidence"]["label"] in {"medium", "high"}
+    assert assessment["pitch_errors"]
+    assert assessment["pitch_errors"][0]["kind"] == "pitch_substitution"
+    assert any(item["kind"] == "timing_drift" for item in assessment["rhythm_drift"])
+    assert any(item["kind"] == "hesitation" for item in assessment["hesitation_points"])
+    assert any(item["kind"] == "clipped" for item in assessment["articulation_issues"])
+    assert "beat placement" in assessment["focus_areas"]
+    assert assessment["practice_tip"]
+
+
+def test_compare_structured_assessment_stays_clean_on_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    score = build_stored_score()
+
+    def fake_transcribe(*_args, **_kwargs) -> SymbolicPhrase:
+        return SymbolicPhrase(
+            kind="melody_fragment",
+            notes=(
+                NoteEvent(
+                    midi_note=60,
+                    note_name="C4",
+                    frequency_hz=261.63,
+                    start_ms=0,
+                    duration_ms=500,
+                    confidence=0.99,
+                    beats=1.0,
+                ),
+                NoteEvent(
+                    midi_note=62,
+                    note_name="D4",
+                    frequency_hz=293.66,
+                    start_ms=500,
+                    duration_ms=500,
+                    confidence=0.99,
+                    beats=1.0,
+                ),
+                NoteEvent(
+                    midi_note=64,
+                    note_name="E4",
+                    frequency_hz=329.63,
+                    start_ms=1000,
+                    duration_ms=1000,
+                    confidence=0.99,
+                    beats=2.0,
+                ),
+            ),
+            duration_ms=2000,
+            confidence=0.97,
+            summary="Clean assessment test phrase.",
+            warnings=(),
+            tempo_bpm=120.0,
+            performance_feedback={
+                "pitchAccuracy": 0.97,
+                "rhythmAccuracy": 0.97,
+                "tempoStability": 0.97,
+                "dynamicRange": 0.58,
+                "articulationVariance": 0.24,
+            },
+        )
+
+    monkeypatch.setattr(music_compare_module, "transcribe_pcm16", fake_transcribe)
+
+    result = compare_performance_against_score(
+        score,
+        audio_bytes=b"\x00\x00",
+        sample_rate=16000,
+    )
+
+    assessment = result.assessment
+
+    assert result.match is True
+    assert assessment["pitch_errors"] == []
+    assert assessment["rhythm_drift"] == []
+    assert assessment["hesitation_points"] == []
+    assert assessment["articulation_issues"] == []
+    assert assessment["primary_issue"] is None
+    assert assessment["practice_tip"]
+    assert "Pitch placement stayed close to the written notes." in assessment["strengths"]
+
+
 def test_estimate_pitch_fastyin_detects_a4() -> None:
     audio_bytes = synth_tone(440.0, duration_ms=700)
     samples = [sample / 32768.0 for (sample,) in struct.iter_unpack("<h", audio_bytes)]

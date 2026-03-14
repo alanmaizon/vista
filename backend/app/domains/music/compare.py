@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from .feedback import (
     ComparisonCalibration,
     PerformanceFeedback,
+    assessment_from_comparison,
     comparison_calibration_for_profile,
     feedback_from_comparison,
 )
@@ -29,11 +30,19 @@ class ComparedEvent:
     played_note_name: str | None
     played_start_ms: int | None
     played_duration_ms: int | None
+    played_confidence: float | None
+    played_start_beat: float | None
     pitch_match: bool
     pitch_class_match: bool
     octave_displacement: int | None
     onset_match: bool
+    onset_direction: str | None
+    onset_delta_ratio: float | None
+    onset_delta_beats: float | None
     duration_match: bool
+    duration_direction: str | None
+    duration_delta_ratio: float | None
+    duration_delta_beats: float | None
     rhythm_match: bool
 
 
@@ -51,6 +60,7 @@ class PerformanceComparison:
     played_phrase: dict
     comparisons: tuple[ComparedEvent, ...]
     performance_feedback: dict[str, float]
+    assessment: dict[str, object]
 
 
 def _flatten_expected_notes(score: MusicScore) -> list[dict]:
@@ -74,6 +84,7 @@ def _compare_expected_window(
     use_beats = played_tempo_bpm is not None and all(
         getattr(n, "beats", None) is not None for n in played_window
     )
+    beat_ms = (60000.0 / played_tempo_bpm) if use_beats and played_tempo_bpm else None
     if use_beats:
         played_total_beats = sum(n.beats for n in played_window) or 1.0
     played_total_ms = sum(note.duration_ms for note in played_window) or 1
@@ -108,14 +119,24 @@ def _compare_expected_window(
         onset_match = False
         duration_match = False
         rhythm_match = False
+        played_start_beat: float | None = None
+        onset_direction: str | None = None
+        onset_delta_ratio: float | None = None
+        onset_delta_beats: float | None = None
+        duration_direction: str | None = None
+        duration_delta_ratio: float | None = None
+        duration_delta_beats: float | None = None
         if played:
             expected_duration_ratio = expected_beats / expected_total_beats
             if use_beats:
                 played_duration_ratio = played.beats / played_total_beats
             else:
                 played_duration_ratio = played.duration_ms / played_total_ms
-            duration_delta = abs(expected_duration_ratio - played_duration_ratio)
-            duration_match = duration_delta <= calibration.duration_tolerance
+            signed_duration_delta = played_duration_ratio - expected_duration_ratio
+            duration_delta_ratio = round(abs(signed_duration_delta), 3)
+            duration_match = abs(signed_duration_delta) <= calibration.duration_tolerance
+            if duration_delta_ratio > 0:
+                duration_direction = "longer" if signed_duration_delta > 0 else "shorter"
 
             expected_onset_ratio = (
                 expected_start_beat / expected_onset_span_beats
@@ -127,8 +148,17 @@ def _compare_expected_window(
                 if len(played_window) > 1
                 else 0.0
             )
-            onset_delta = abs(expected_onset_ratio - played_onset_ratio)
-            onset_match = onset_delta <= calibration.onset_tolerance
+            signed_onset_delta = played_onset_ratio - expected_onset_ratio
+            onset_delta_ratio = round(abs(signed_onset_delta), 3)
+            onset_match = abs(signed_onset_delta) <= calibration.onset_tolerance
+            if onset_delta_ratio > 0:
+                onset_direction = "late" if signed_onset_delta > 0 else "early"
+
+            if beat_ms is not None and beat_ms > 0:
+                played_start_beat = round((played.start_ms - played_window_start_ms) / beat_ms, 3)
+                onset_delta_beats = round(abs(played_start_beat - expected_start_beat), 3)
+                played_duration_beats = played.beats if played.beats is not None else round(played.duration_ms / beat_ms, 3)
+                duration_delta_beats = round(abs(float(played_duration_beats) - expected_beats), 3)
             rhythm_match = onset_match and duration_match
 
         comparisons.append(
@@ -141,11 +171,19 @@ def _compare_expected_window(
                 played_note_name=played.note_name if played else None,
                 played_start_ms=played.start_ms if played else None,
                 played_duration_ms=played.duration_ms if played else None,
+                played_confidence=round(float(played.confidence), 3) if played else None,
+                played_start_beat=played_start_beat,
                 pitch_match=pitch_match,
                 pitch_class_match=pitch_class_match,
                 octave_displacement=octave_displacement,
                 onset_match=onset_match,
+                onset_direction=onset_direction,
+                onset_delta_ratio=onset_delta_ratio,
+                onset_delta_beats=onset_delta_beats,
                 duration_match=duration_match,
+                duration_direction=duration_direction,
+                duration_delta_ratio=duration_delta_ratio,
+                duration_delta_beats=duration_delta_beats,
                 rhythm_match=rhythm_match,
             )
         )
@@ -201,7 +239,9 @@ def _compare_expected_window(
                 played_duration_ratio = played.beats / played_total_beats
             else:
                 played_duration_ratio = played.duration_ms / played_total_ms
-            length_direction = "longer" if played_duration_ratio > expected_duration_ratio else "shorter"
+            length_direction = duration_direction or (
+                "longer" if played_duration_ratio > expected_duration_ratio else "shorter"
+            )
             mismatches.append(
                 f"Length {index + 1}: expected about {expected_duration_code}, heard a {length_direction} hold."
             )
@@ -238,6 +278,7 @@ def compare_performance_against_score(
     total_units = len(expected_notes) or 1
     alignment_start = 0
     played_tempo = phrase.tempo_bpm
+    aligned_played_notes = played_notes
 
     if len(played_notes) > len(expected_notes) and expected_notes:
         best_alignment: tuple[float, int, list[str], list[ComparedEvent]] | None = None
@@ -275,6 +316,9 @@ def compare_performance_against_score(
 
         assert best_alignment is not None
         score_units, alignment_start, mismatches, comparisons = best_alignment
+        aligned_played_notes = played_notes[
+            alignment_start : alignment_start + len(expected_notes)
+        ]
 
         ignored_leading = alignment_start
         ignored_trailing = len(played_notes) - (alignment_start + len(expected_notes))
@@ -303,6 +347,7 @@ def compare_performance_against_score(
             calibration=calibration,
             played_tempo_bpm=played_tempo,
         )
+        aligned_played_notes = played_notes
 
     # Warn if played tempo differs significantly from score tempo
     score_tempo = getattr(score, "tempo_bpm", None)
@@ -352,9 +397,8 @@ def compare_performance_against_score(
         )
 
     phrase_feedback = phrase.performance_feedback if isinstance(phrase.performance_feedback, dict) else None
-    performance_feedback = feedback_from_comparison(
-        comparisons,
-        baseline=None
+    baseline_feedback = (
+        None
         if phrase_feedback is None
         else PerformanceFeedback(
             pitch_accuracy=0.0,
@@ -362,7 +406,19 @@ def compare_performance_against_score(
             tempo_stability=0.0,
             dynamic_range=float(phrase_feedback.get("dynamicRange", 0.0)),
             articulation_variance=float(phrase_feedback.get("articulationVariance", 0.0)),
-        ),
+        )
+    )
+    performance_feedback = feedback_from_comparison(
+        comparisons,
+        baseline=baseline_feedback,
+        instrument_profile=instrument_profile,
+    ).to_dict()
+    assessment = assessment_from_comparison(
+        comparisons,
+        played_notes=aligned_played_notes,
+        audio_confidence=phrase.confidence,
+        alignment_accuracy=accuracy,
+        baseline=baseline_feedback,
         instrument_profile=instrument_profile,
     ).to_dict()
 
@@ -377,6 +433,7 @@ def compare_performance_against_score(
         played_phrase=transcription_to_dict(phrase),
         comparisons=tuple(comparisons),
         performance_feedback=performance_feedback,
+        assessment=assessment,
     )
 
 
@@ -393,4 +450,5 @@ def comparison_to_dict(result: PerformanceComparison) -> dict[str, object]:
         "played_phrase": result.played_phrase,
         "comparisons": [asdict(item) for item in result.comparisons],
         "performance_feedback": result.performance_feedback,
+        "assessment": result.assessment,
     }

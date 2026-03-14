@@ -440,6 +440,10 @@ export default function useEurydiceApp() {
       setStatus(payload.needs_replay ? "Replay requested." : "Comparison ready.");
       appendCaption("Compare", payload.summary);
       appendConversationMessage("assistant", payload.summary, { kind: "analysis" });
+      const practiceTip = payload?.assessment?.practice_tip;
+      if (practiceTip) {
+        appendCaption("Practice tip", practiceTip);
+      }
       for (const mismatch of payload.mismatches ?? []) {
         appendCaption("Difference", mismatch);
       }

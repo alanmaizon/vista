@@ -14,7 +14,7 @@ function SurfaceBadge({ icon, label, active = false, tone = "graphite" }) {
 
   return (
     <div
-      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClass}`}
+      className={`inline-flex items-center gap-2 border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClass}`}
     >
       <IconComponent className="h-3.5 w-3.5" />
       {label}
@@ -58,19 +58,14 @@ export default function OrbLayer({
   const sessionLabel = isSessionStarting ? "Starting" : isConnected ? "Live" : "Closed";
 
   return (
-    <section className="glass rounded-[2.4rem] px-5 py-5 md:px-7 md:py-6">
+    <section className="glass border border-slate-300/90 px-4 py-4 shadow-[0_22px_44px_rgba(47,52,58,0.06)] md:px-6 md:py-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            Marble sphere layer
+            Orb
           </div>
-          <h2 className="mt-2 text-2xl font-semibold text-slate-900 md:text-3xl">
-            Central studio surface
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-            The workspace stays anchored around one quiet object. Session state, lesson focus, and
-            live routing sit around the sphere instead of competing with it.
-          </p>
+          <h2 className="mt-2 text-2xl font-semibold text-slate-900 md:text-3xl">Central studio</h2>
+          <p className="mt-1 max-w-xl text-sm text-slate-600">One object. One lesson loop.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <SurfaceBadge
@@ -92,21 +87,21 @@ export default function OrbLayer({
         </div>
       </div>
 
-      <div className="mt-6 rounded-[2.2rem] border border-slate-300/90 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.98),rgba(242,243,245,0.98)_48%,rgba(230,232,235,1)_100%)] px-4 py-6 md:px-6 md:py-8">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-center">
+      <div className="mt-4 border border-slate-300/90 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.98),rgba(242,243,245,0.98)_48%,rgba(230,232,235,1)_100%)] px-4 py-5 md:px-5 md:py-6">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_21rem] xl:items-center">
           <div className="flex flex-col items-center justify-center">
             <MarbleSphere className="mx-auto" />
             <div className="mt-5 max-w-xl text-center">
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                Current focus
+                Focus
               </div>
               <div className="mt-2 text-base font-medium text-slate-900">{prompt}</div>
-              <div className="mt-2 text-sm leading-relaxed text-slate-600">{runtimeSummary}</div>
+              <div className="mt-1 text-sm text-slate-600">{runtimeSummary}</div>
             </div>
           </div>
 
           <div className="grid gap-3">
-            <div className="rounded-[1.6rem] border border-slate-300 bg-white/80 px-4 py-4 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
+            <div className="border border-slate-300 bg-white/80 px-4 py-4 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                 {isBusy || isSessionStarting ? (
                   <LoaderCircle className="h-3.5 w-3.5 animate-spin text-slate-700" />
@@ -118,23 +113,23 @@ export default function OrbLayer({
               <div className="mt-2 text-lg font-medium capitalize text-slate-900">{stageLabel}</div>
               <div className="mt-1 text-sm text-slate-600">
                 {isSessionStarting
-                  ? "Starting the live tutor."
+                  ? "Opening live tutor."
                   : isConnected
-                    ? "Tutor session is active."
-                    : "Tutor session is closed."}
+                    ? "Tutor active."
+                    : "Tutor closed."}
               </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <div className="rounded-[1.6rem] border border-slate-300 bg-white/80 px-4 py-3 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
+              <div className="border border-slate-300 bg-white/80 px-4 py-3 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  Audio route
+                  Audio
                 </div>
                 <div className="mt-2 text-base font-medium text-slate-900">
                   {liveAudioMode && liveAudioMode !== "SILENCE" ? liveAudioMode : captureMode}
                 </div>
               </div>
-              <div className="rounded-[1.6rem] border border-slate-300 bg-white/80 px-4 py-3 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
+              <div className="border border-slate-300 bg-white/80 px-4 py-3 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                   Interrupts
                 </div>
@@ -145,9 +140,9 @@ export default function OrbLayer({
                   <div className="mt-1 text-xs text-slate-500">{interruptState.pendingSummary}</div>
                 ) : null}
               </div>
-              <div className="rounded-[1.6rem] border border-slate-300 bg-white/80 px-4 py-3 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
+              <div className="border border-slate-300 bg-white/80 px-4 py-3 shadow-[0_14px_30px_rgba(47,52,58,0.05)]">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  Session id
+                  Session
                 </div>
                 <div className="mt-2 truncate text-base font-medium text-slate-900">
                   {sessionId || "Not started"}

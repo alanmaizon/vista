@@ -40,13 +40,13 @@ function SignalMeter({ label, value }) {
   const percentage = Math.max(0, Math.min(100, Math.round(Number(value || 0) * 100)));
 
   return (
-    <div className="rounded-[1.2rem] border border-slate-300 bg-white px-3 py-3">
+    <div className="border border-slate-300 bg-white px-3 py-3">
       <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
         {label}
       </div>
-      <div className="mt-2 h-1.5 rounded-full bg-slate-200">
+      <div className="mt-2 h-1.5 bg-slate-200">
         <div
-          className="h-1.5 rounded-full bg-slate-700 transition-all duration-200"
+          className="h-1.5 bg-slate-700 transition-all duration-200"
           style={{ width: `${percentage}%` }}
         />
       </div>
@@ -68,16 +68,13 @@ export default function ConversationPanel({
   );
 
   return (
-    <section className="glass rounded-[2rem] p-5">
+    <section className="glass border border-slate-300/90 p-4 shadow-[0_18px_38px_rgba(47,52,58,0.05)]">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            Live dialogue
+            Dialogue
           </div>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">
-            Conversation streams here once you start the tutor. Speech and music interrupts stay
-            visible without pushing the workspace into a chat-heavy layout.
-          </p>
+          <p className="mt-1 text-sm text-slate-600">Speech, music, interrupts.</p>
           {lessonFlow?.phase ? (
             <div className="mt-2 text-xs text-slate-500">
               Lesson phase: <span className="font-medium text-slate-700">{lessonFlow.phase}</span>
@@ -88,7 +85,7 @@ export default function ConversationPanel({
         <div className="grid grid-cols-3 gap-2 text-center">
           <SignalMeter label="Speech" value={liveAudioLevels.speechConfidence} />
           <SignalMeter label="Music" value={liveAudioLevels.musicConfidence} />
-          <div className="rounded-[1.2rem] border border-slate-300 bg-white px-3 py-3">
+          <div className="border border-slate-300 bg-white px-3 py-3">
             <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
               Mode
             </div>
@@ -97,21 +94,21 @@ export default function ConversationPanel({
         </div>
       </div>
 
-      <div className="mt-4 rounded-[1.4rem] border border-slate-300 bg-[#f8f9fb] px-4 py-3">
+      <div className="mt-4 border border-slate-300 bg-[#f8f9fb] px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Interrupt controller
+              Interrupts
             </div>
             <div className="mt-1 text-sm text-slate-900">
               {interruptState.status === "queued"
                 ? `Queued ${formatInterruptType(interruptState.pendingType)}`
                 : interruptState.status === "flushing"
-                  ? `Handing ${formatInterruptType(interruptState.pendingType)} to Gemini`
-                  : "Listening for speech or music"}
+                  ? `Sending ${formatInterruptType(interruptState.pendingType)}`
+                  : "Listening"}
             </div>
           </div>
-          <div className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-600">
+          <div className="border border-slate-300 bg-white px-3 py-1 text-xs text-slate-600">
             {interruptState.status}
             {interruptState.queuedCount > 1 ? ` · ${interruptState.queuedCount} queued` : ""}
           </div>
@@ -129,7 +126,7 @@ export default function ConversationPanel({
             return (
               <div
                 key={message.id}
-                className={`rounded-[1.6rem] border px-4 py-3 ${style.className}`}
+                className={`border px-4 py-3 ${style.className}`}
               >
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em]">
                   <IconComponent className="h-3.5 w-3.5" />
@@ -146,8 +143,8 @@ export default function ConversationPanel({
             );
           })
         ) : (
-          <div className="rounded-[1.6rem] border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500">
-            Start Session to open Gemini Live. The tutor stays closed until you explicitly start it.
+          <div className="border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500">
+            Start Session to open Gemini Live.
           </div>
         )}
 
@@ -159,7 +156,7 @@ export default function ConversationPanel({
         ) : null}
 
         {recentMusicEvents?.length ? (
-          <div className="rounded-[1.4rem] border border-slate-300 bg-white px-4 py-3">
+          <div className="border border-slate-300 bg-white px-4 py-3">
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
               Recent interrupts
             </div>
@@ -167,7 +164,7 @@ export default function ConversationPanel({
               {recentMusicEvents.slice(0, 3).map((event) => (
                 <span
                   key={`${event.type}-${event.occurredAt}`}
-                  className="rounded-full border border-slate-300 bg-[#f8f9fb] px-3 py-1 text-xs text-slate-700"
+                  className="border border-slate-300 bg-[#f8f9fb] px-3 py-1 text-xs text-slate-700"
                 >
                   {event.type === "NOTE_PLAYED"
                     ? event.pitch

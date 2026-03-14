@@ -89,8 +89,8 @@ function FeatureTile({ feature, index }) {
   const reverseAlignment = index % 2 === 1;
 
   return (
-    <article className="grid min-h-[21rem] border border-slate-300 bg-white shadow-[0_22px_48px_rgba(47,52,58,0.08)]">
-      <div className="relative h-44 overflow-hidden border-b border-slate-300 bg-slate-200">
+    <article className="grid min-h-[22rem] border border-slate-300 bg-white shadow-[0_24px_52px_rgba(47,52,58,0.08)]">
+      <div className="relative h-56 overflow-hidden border-b border-slate-300 bg-slate-200 md:h-60">
         <img
           src={feature.image}
           alt={`${feature.title} preview`}
@@ -105,13 +105,10 @@ function FeatureTile({ feature, index }) {
           {feature.kicker}
         </div>
       </div>
-      <div className={`flex flex-1 flex-col justify-between p-5 ${reverseAlignment ? "items-end text-right" : "items-start text-left"}`}>
+      <div className={`flex flex-1 flex-col justify-end gap-3 p-4 md:p-5 ${reverseAlignment ? "items-end text-right" : "items-start text-left"}`}>
         <div>
-          <h3 className="text-2xl font-semibold tracking-tight text-slate-900">{feature.title}</h3>
-          <p className="mt-2 max-w-[16rem] text-sm text-slate-600">{feature.blurb}</p>
-        </div>
-        <div className="mt-6 border border-slate-300 bg-slate-100 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-          Eurydice section {index + 1}
+          <h3 className="text-[1.7rem] font-semibold tracking-[-0.04em] text-slate-900">{feature.title}</h3>
+          <p className="mt-2 max-w-[15rem] text-sm text-slate-600">{feature.blurb}</p>
         </div>
       </div>
     </article>
@@ -136,30 +133,28 @@ export default function LandingPage({
       }`}
     >
       <main className="mx-auto w-full max-w-7xl">
-        <section className="grid gap-8 border border-slate-300 bg-white/68 p-6 shadow-[0_30px_60px_rgba(47,52,58,0.08)] lg:grid-cols-[1.15fr_0.85fr] lg:items-start lg:p-8">
-          <div className="space-y-8">
+        <section className="grid gap-6 border border-slate-300 bg-white/68 p-5 shadow-[0_30px_60px_rgba(47,52,58,0.08)] lg:grid-cols-[1.12fr_0.88fr] lg:items-start lg:p-6">
+          <div className="space-y-6">
             <div className="inline-flex items-center gap-3 border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-600 shadow-[0_10px_24px_rgba(47,52,58,0.06)]">
               <img src="/logo.svg" alt="Eurydice" className="h-5 w-5" />
               Eurydice
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
                 Gemini live music tutor
               </div>
               <h1 className="max-w-4xl text-5xl font-semibold tracking-[-0.05em] text-slate-950 md:text-7xl">
                 Hear. See. Correct.
               </h1>
-              <p className="max-w-2xl text-base text-slate-600 md:text-lg">
-                Live music coaching for one bar at a time.
-              </p>
+              <p className="max-w-xl text-base text-slate-600 md:text-lg">Live coaching, one bar at a time.</p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
               {HERO_POINTS.map((item) => (
                 <div
                   key={item.label}
-                  className="border border-slate-300 bg-white px-4 py-4 shadow-[0_14px_28px_rgba(47,52,58,0.05)]"
+                  className="border border-slate-300 bg-white px-4 py-3 shadow-[0_14px_28px_rgba(47,52,58,0.05)]"
                 >
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                     {item.label}
@@ -181,10 +176,10 @@ export default function LandingPage({
               </button>
 
               <a
-                href="#landing-sections"
+                href="#landing-features"
                 className="inline-flex min-h-12 items-center gap-2 border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-800 shadow-[8px_8px_0_rgba(184,189,197,0.32)] transition hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-[12px_12px_0_rgba(184,189,197,0.4)]"
               >
-                Sections
+                Features
               </a>
             </div>
           </div>
@@ -197,10 +192,10 @@ export default function LandingPage({
               <Gamepad2 className="h-4 w-4 text-slate-500" />
             </div>
 
-            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">Enter workspace</h2>
-            <p className="mt-2 text-sm text-slate-600">Sign in or stay anonymous.</p>
+            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">Enter</h2>
+            <p className="mt-1 text-sm text-slate-600">Sign in or stay guest.</p>
 
-            <div className="mt-5 space-y-3">
+            <div className="mt-4 space-y-3">
               <input
                 value={email}
                 onChange={(event) => onEmailChange(event.target.value)}
@@ -234,21 +229,19 @@ export default function LandingPage({
                 {errorMessage}
               </div>
             ) : null}
-            <div className="mt-3 text-xs text-slate-500">Blank fields = guest.</div>
+            <div className="mt-3 text-xs text-slate-500">Blank = guest.</div>
           </aside>
         </section>
 
-        <section id="landing-sections" className="mt-10 space-y-5">
+        <section id="landing-features" className="mt-8 space-y-4">
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-                Sections
+                Features
               </div>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
-                One grid. Nine proofs.
-              </h2>
+              <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">Nine proof points.</h2>
             </div>
-            <div className="text-sm text-slate-600">Live. Listen. Learn.</div>
+            <div className="text-sm text-slate-600">Talk. Play. Improve.</div>
           </div>
 
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">

@@ -48,7 +48,7 @@ function MetricTile({ label, value, tone = "sky" }) {
         : "from-slate-100 to-white text-slate-800";
 
   return (
-    <div className={`rounded-[1.4rem] border border-slate-300 bg-gradient-to-br ${toneClass} px-4 py-3`}>
+    <div className={`border border-slate-300 bg-gradient-to-br ${toneClass} px-4 py-3`}>
       <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">{label}</div>
       <div className="mt-2 text-2xl font-semibold text-slate-900">{value}</div>
     </div>
@@ -76,12 +76,12 @@ function AssessmentIssueRow({ item }) {
         : "border-slate-300 bg-white text-slate-700";
 
   return (
-    <div className={`rounded-2xl border px-3 py-3 ${toneClass}`}>
+    <div className={`border px-3 py-3 ${toneClass}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="text-sm font-semibold text-slate-900">
           {item?.title || `Issue on note ${item?.index ?? "?"}`}
         </div>
-        <div className="rounded-full border border-current/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
+        <div className="border border-current/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
           {severity}
         </div>
       </div>
@@ -94,7 +94,7 @@ function AssessmentBucket({ title, items, emptyText }) {
   const rows = Array.isArray(items) ? items.filter(Boolean).slice(0, 3) : [];
 
   return (
-    <div className="rounded-[1.6rem] border border-slate-300 bg-[#f8f9fb] px-4 py-4">
+    <div className="border border-slate-300 bg-[#f8f9fb] px-4 py-4">
       <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-600">{title}</div>
       {rows.length ? (
         <div className="mt-3 space-y-2">
@@ -123,15 +123,13 @@ function AssessmentInsights({ assessment }) {
   const practiceTip = assessment.practice_tip ? String(assessment.practice_tip) : "";
 
   return (
-    <div className="mt-4 rounded-[1.6rem] border border-slate-300 bg-[#f8f9fb] px-4 py-4">
+    <div className="mt-4 border border-slate-300 bg-[#f8f9fb] px-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="font-medium text-slate-900">Structured assessment</div>
-          <div className="mt-1 text-xs text-slate-500">
-            Teacher-style issues extracted from deterministic note alignment.
-          </div>
+          <div className="font-medium text-slate-900">Assessment</div>
+          <div className="mt-1 text-xs text-slate-500">Aligned note issues.</div>
         </div>
-        <div className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+        <div className="border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
           {formatAssessmentLabel(confidence.label) || "Unknown"} confidence
         </div>
       </div>
@@ -142,7 +140,7 @@ function AssessmentInsights({ assessment }) {
           value={`${Math.round(overallConfidence * 100)}%`}
           tone={confidenceTone}
         />
-        <div className="rounded-[1.4rem] border border-slate-300 bg-white px-4 py-3">
+        <div className="border border-slate-300 bg-white px-4 py-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">Primary focus</div>
           <div className="mt-2 text-lg font-semibold text-slate-900">{primaryIssue}</div>
           <div className="mt-2 text-xs text-slate-600">
@@ -157,7 +155,7 @@ function AssessmentInsights({ assessment }) {
       </div>
 
       {strengths.length ? (
-        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-800">
+        <div className="mt-4 border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-800">
           <div className="font-semibold uppercase tracking-[0.14em] text-emerald-700">Strengths</div>
           <div className="mt-1">{strengths.join(" · ")}</div>
         </div>
@@ -168,7 +166,7 @@ function AssessmentInsights({ assessment }) {
           {focusAreas.map((area) => (
             <div
               key={area}
-              className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600"
+              className="border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600"
             >
               {formatAssessmentLabel(area)}
             </div>
@@ -207,7 +205,7 @@ function FeedbackMeters({ title, feedback }) {
     return null;
   }
   return (
-    <div className="rounded-[1.6rem] border border-slate-300 bg-[#f8f9fb] px-4 py-4">
+    <div className="border border-slate-300 bg-[#f8f9fb] px-4 py-4">
       <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-600">{title}</div>
       <div className="mt-3 space-y-3">
         {FEEDBACK_METRICS.map((metric) => {
@@ -218,9 +216,9 @@ function FeedbackMeters({ title, feedback }) {
                 <span>{metric.label}</span>
                 <span>{Math.round(value * 100)}%</span>
               </div>
-              <div className="h-1.5 rounded-full bg-slate-200">
+              <div className="h-1.5 bg-slate-200">
                 <div
-                  className="h-1.5 rounded-full bg-slate-700 transition-all duration-300"
+                  className="h-1.5 bg-slate-700 transition-all duration-300"
                   style={{ width: `${Math.round(value * 100)}%` }}
                 />
               </div>
@@ -253,15 +251,13 @@ export function LessonPanel({
     : "—";
 
   return (
-    <div className="glass rounded-[2rem] p-5">
+    <div className="glass border border-slate-300/90 p-4 shadow-[0_18px_38px_rgba(47,52,58,0.05)]">
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Analysis</div>
-          <div className="mt-1 text-sm text-slate-600">
-            Compact lesson feedback, adaptive metrics, and tool telemetry.
-          </div>
+          <div className="mt-1 text-sm text-slate-600">Feedback and next moves.</div>
         </div>
-        <div className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+        <div className="border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
           {lessonFlow?.phase || lessonState.stage}
         </div>
       </div>
@@ -282,13 +278,13 @@ export function LessonPanel({
       </div>
 
       {lessonState.prompt ? (
-        <div className="mt-4 rounded-[1.6rem] border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800">
+        <div className="mt-4 border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800">
           {lessonState.prompt}
         </div>
       ) : null}
 
       {lessonFlow?.feedbackCard ? (
-        <div className="mt-4 rounded-[1.6rem] border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
+        <div className="mt-4 border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
           <div className="font-semibold">{lessonFlow.feedbackCard.title || "Lesson feedback"}</div>
           <div className="mt-1">{lessonFlow.feedbackCard.summary || ""}</div>
           {lessonFlow.feedbackCard.practice_tip ? (
@@ -303,8 +299,8 @@ export function LessonPanel({
       ) : null}
 
       {analysis ? (
-        <div className="mt-4 rounded-[1.6rem] border border-slate-300 bg-white px-4 py-4 text-sm text-slate-700">
-          <div className="font-medium text-slate-900">Phrase analysis</div>
+        <div className="mt-4 border border-slate-300 bg-white px-4 py-4 text-sm text-slate-700">
+          <div className="font-medium text-slate-900">Phrase</div>
           <div className="mt-1 text-slate-600">{analysis.summary}</div>
           {analysis.notes?.length ? (
             <div className="mt-2 text-xs text-slate-500">
@@ -318,7 +314,7 @@ export function LessonPanel({
       ) : null}
 
       {comparison ? (
-        <div className="mt-4 rounded-[1.6rem] border border-slate-300 bg-white px-4 py-4 text-sm text-slate-700">
+        <div className="mt-4 border border-slate-300 bg-white px-4 py-4 text-sm text-slate-700">
           <div className="font-medium text-slate-900">Comparison</div>
           <div className="mt-1 text-slate-600">{comparison.summary}</div>
           <div className="mt-4">
@@ -329,16 +325,16 @@ export function LessonPanel({
       ) : null}
 
       {Array.isArray(nextDrills) && nextDrills.length ? (
-        <div className="mt-4 rounded-[1.6rem] border border-slate-300 bg-white px-4 py-4">
+        <div className="mt-4 border border-slate-300 bg-white px-4 py-4">
           <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-600">
-            Recommended drills
+            Drills
           </div>
           <div className="mt-3 space-y-2">
             {nextDrills.slice(0, 3).map((drill) => (
-              <div key={drill.id} className="rounded-2xl border border-slate-300 bg-[#f8f9fb] px-3 py-3">
+              <div key={drill.id} className="border border-slate-300 bg-[#f8f9fb] px-3 py-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-sm font-semibold text-slate-900">{drill.title}</div>
-                  <div className="rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                  <div className="border border-slate-300 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
                     {drill.difficulty}
                   </div>
                 </div>
@@ -349,10 +345,10 @@ export function LessonPanel({
         </div>
       ) : null}
 
-      <div className="mt-4 rounded-[1.6rem] border border-slate-300 bg-white px-4 py-4">
+      <div className="mt-4 border border-slate-300 bg-white px-4 py-4">
         <div className="flex items-center justify-between gap-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-600">
-            Live tool reliability
+            Tool reliability
           </div>
           <div className="text-[11px] text-slate-500">{Number(liveToolMetrics?.total_calls || 0)} calls</div>
         </div>
@@ -361,7 +357,7 @@ export function LessonPanel({
             {liveToolMetrics.metrics.slice(0, 3).map((metric) => (
               <div
                 key={`${metric.tool_name}-${metric.source}`}
-                className="rounded-2xl border border-slate-300 bg-[#f8f9fb] px-3 py-3 text-xs text-slate-600"
+                className="border border-slate-300 bg-[#f8f9fb] px-3 py-3 text-xs text-slate-600"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold text-slate-900">{metric.tool_name}</span>
@@ -381,14 +377,14 @@ export function LessonPanel({
       </div>
 
       {tutorPrompt ? (
-        <div className="mt-4 rounded-[1.6rem] border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
+        <div className="mt-4 border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
           <div className="font-semibold uppercase tracking-[0.14em] text-emerald-700">Tutor context</div>
           <div className="mt-1">{tutorPrompt}</div>
         </div>
       ) : null}
 
       {errorMessage ? (
-        <div className="mt-4 rounded-[1.6rem] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mt-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {errorMessage}
         </div>
       ) : null}
@@ -398,7 +394,7 @@ export function LessonPanel({
 
 export function SessionLog({ captions }) {
   return (
-    <div className="glass rounded-[2rem] p-5">
+    <div className="glass border border-slate-300/90 p-4 shadow-[0_18px_38px_rgba(47,52,58,0.05)]">
       <div className="flex items-center justify-between gap-3">
         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Session log</div>
         <div className="text-[11px] text-slate-500">{captions.length} entries</div>
@@ -406,7 +402,7 @@ export function SessionLog({ captions }) {
       <div className="mt-4 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
         {captions.length ? (
           captions.map((caption) => (
-            <div key={caption.id} className="rounded-[1.4rem] border border-slate-300 bg-white px-4 py-3">
+            <div key={caption.id} className="border border-slate-300 bg-white px-4 py-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                 {caption.role}
               </div>
@@ -414,7 +410,7 @@ export function SessionLog({ captions }) {
             </div>
           ))
         ) : (
-          <div className="rounded-[1.4rem] border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500">
+          <div className="border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500">
             Sign in and prepare a lesson to populate the live log.
           </div>
         )}

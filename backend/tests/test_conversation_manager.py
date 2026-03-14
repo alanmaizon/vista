@@ -51,3 +51,17 @@ def test_register_tool_result_rejects_duplicate_completed_call() -> None:
     assert first_result is True
     assert duplicate_result is False
     assert len(manager.get_full_history()) == 2
+
+
+def test_add_assistant_turn_merges_chunks_for_same_turn_id() -> None:
+    manager = _manager()
+
+    manager.add_assistant_turn("Hello", turn_id="assistant-1")
+    manager.add_assistant_turn("there.", turn_id="assistant-1")
+    manager.add_assistant_turn("New turn", turn_id="assistant-2")
+
+    history = manager.get_full_history()
+    assert len(history) == 2
+    assert history[0]["text"] == "Hello there."
+    assert history[0]["turn_id"] == "assistant-1"
+    assert history[1]["text"] == "New turn"

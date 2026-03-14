@@ -7,8 +7,8 @@ import { createLiveAudioRouter } from "../lib/liveAudioRouter";
 import { createLiveEventBus } from "../lib/liveEventBus";
 import { playPhrase } from "../lib/playback";
 
-function appendTimestamped(items, role, text) {
-  return [...items, { role, text, id: `${Date.now()}-${items.length}` }];
+function appendTimestamped(items, role, text, id = null) {
+  return [...items, { role, text, id: id || `${Date.now()}-${items.length}` }];
 }
 
 function scoreIsDirty(scoreLine, activeScore) {
@@ -83,6 +83,27 @@ function mergeTextFragments(existingText, incomingText) {
   }
   const omitSpace = /^[,.;:!?)]/.test(incoming) || /[(/"']$/.test(existing);
   return `${existing}${omitSpace ? "" : " "}${incoming}`.replace(/\s+([,.;:!?])/g, "$1");
+}
+
+function resolveLiveTurnText(existingText, incomingText) {
+  const existing = String(existingText || "").trim();
+  const incoming = String(incomingText || "").trim();
+  if (!existing) {
+    return incoming;
+  }
+  if (!incoming) {
+    return existing;
+  }
+  if (incoming === existing) {
+    return existing;
+  }
+  if (incoming.startsWith(existing)) {
+    return incoming;
+  }
+  if (existing.startsWith(incoming)) {
+    return existing;
+  }
+  return mergeTextFragments(existing, incoming);
 }
 
 function normalizeRouterEventNotes(event) {
@@ -225,6 +246,29 @@ export default function useEurydiceApp() {
     setCaptions((items) => appendTimestamped(items, role, text));
   }, []);
 
+  const upsertCaption = useCallback((role, text, id) => {
+    const trimmed = typeof text === "string" ? text.trim() : "";
+    if (!trimmed) {
+      return;
+    }
+    setCaptions((items) => {
+      if (!id) {
+        return appendTimestamped(items, role, trimmed);
+      }
+      const index = items.findIndex((item) => item.id === id);
+      if (index === -1) {
+        return appendTimestamped(items, role, trimmed, id);
+      }
+      const nextItems = [...items];
+      nextItems[index] = {
+        ...nextItems[index],
+        role,
+        text: resolveLiveTurnText(nextItems[index].text, trimmed),
+      };
+      return nextItems;
+    });
+  }, []);
+
   const appendConversationMessage = useCallback((role, text, { kind = "message", streaming = false } = {}) => {
     if (!text) {
       return;
@@ -240,6 +284,41 @@ export default function useEurydiceApp() {
       },
     ]);
   }, []);
+
+  const upsertConversationMessageById = useCallback(
+    (messageId, role, text, { kind = "message", streaming = false } = {}) => {
+      const trimmed = typeof text === "string" ? text.trim() : "";
+      if (!messageId || !trimmed) {
+        return;
+      }
+      setConversationMessages((items) => {
+        const index = items.findIndex((item) => item.id === messageId);
+        if (index === -1) {
+          return [
+            ...items,
+            {
+              id: messageId,
+              role,
+              text: trimmed,
+              kind,
+              streaming,
+            },
+          ];
+        }
+        const nextItems = [...items];
+        const current = nextItems[index];
+        nextItems[index] = {
+          ...current,
+          role,
+          text: resolveLiveTurnText(current.text, trimmed),
+          kind,
+          streaming,
+        };
+        return nextItems;
+      });
+    },
+    [],
+  );
 
   const appendOrMergeLiveCaption = useCallback((text) => {
     const trimmed = typeof text === "string" ? text.trim() : "";
@@ -1604,15 +1683,29 @@ export default function useEurydiceApp() {
                 status: "listening",
               }));
             }
-            if (!data.partial) {
-              if (conversationStreamRefs.current.assistant) {
-                finalizeAssistantMessage(text);
-                appendOrMergeLiveCaption(text);
-              } else {
-                appendOrMergeAssistantMessage(text);
-              }
-              break;
+          }
+          const turnId = typeof data.turn_id === "string" ? data.turn_id.trim() : "";
+          if (turnId) {
+            upsertConversationMessageById(`${role}-turn-${turnId}`, role, text, {
+              kind: role === "assistant" ? "assistant" : "speech",
+              streaming: Boolean(data.partial),
+            });
+            if (!data.partial && role === "assistant") {
+              upsertCaption("Live", text, `caption-${turnId}`);
             }
+            if (!data.partial && role === "user") {
+              appendCaption("You", text);
+            }
+            break;
+          }
+          if (role === "assistant" && !data.partial) {
+            if (conversationStreamRefs.current.assistant) {
+              finalizeAssistantMessage(text);
+              appendOrMergeLiveCaption(text);
+            } else {
+              appendOrMergeAssistantMessage(text);
+            }
+            break;
           }
           upsertConversationStream(role, text, {
             kind: "speech",
@@ -1629,7 +1722,14 @@ export default function useEurydiceApp() {
           }
           if (!cameraCapturePending) {
             assistantStreamingRef.current = false;
-            if (conversationStreamRefs.current.assistant) {
+            const turnId = typeof data.turn_id === "string" ? data.turn_id.trim() : "";
+            if (turnId) {
+              upsertConversationMessageById(`assistant-turn-${turnId}`, "assistant", data.text ?? "", {
+                kind: "assistant",
+                streaming: false,
+              });
+              upsertCaption("Live", data.text ?? "", `caption-${turnId}`);
+            } else if (conversationStreamRefs.current.assistant) {
               finalizeAssistantMessage(data.text ?? "");
               appendOrMergeLiveCaption(data.text ?? "");
             } else {
@@ -1714,6 +1814,8 @@ export default function useEurydiceApp() {
       flushPendingMusicInterrupt,
       liveMode,
       loadLiveToolMetrics,
+      upsertCaption,
+      upsertConversationMessageById,
       upsertConversationStream,
     ],
   );

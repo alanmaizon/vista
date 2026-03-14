@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.live.bridge import _parse_text_tool_call
+from app.live.bridge import _LiveEventSequencer, _parse_text_tool_call
 
 
 def test_parse_text_tool_call_extracts_name_args_and_call_id() -> None:
@@ -17,3 +17,17 @@ def test_parse_text_tool_call_extracts_name_args_and_call_id() -> None:
 def test_parse_text_tool_call_returns_none_for_invalid_json() -> None:
     assert _parse_text_tool_call("TOOL_CALL: {not-json}") is None
 
+
+def test_live_event_sequencer_reuses_turn_id_until_completion() -> None:
+    sequencer = _LiveEventSequencer()
+
+    partial = sequencer.new_transcript_event(role="assistant", text="Hello", partial=True)
+    final_text = sequencer.new_text_event("Hello there", turn_complete=True)
+
+    assert partial["turn_id"] == final_text["turn_id"]
+    assert partial["chunk_index"] == 0
+    assert final_text["chunk_index"] == 1
+
+    sequencer.complete_assistant_turn()
+    next_turn = sequencer.new_text_event("Next turn", turn_complete=True)
+    assert next_turn["turn_id"] != final_text["turn_id"]

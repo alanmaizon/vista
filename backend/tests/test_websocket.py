@@ -310,14 +310,26 @@ def test_ws_live_emits_transcript_events_progressively(
             "role": "assistant",
             "text": "Let's begin",
             "partial": True,
+            "turn_id": "assistant-1",
+            "chunk_index": 0,
+            "turn_complete": False,
         },
         {
             "type": "server.transcript",
             "role": "user",
             "text": "I want help with arpeggios",
             "partial": False,
+            "turn_id": "user-2",
+            "chunk_index": 0,
+            "turn_complete": True,
         },
-        {"type": "server.text", "text": "Let's begin with a D minor arpeggio."},
+        {
+            "type": "server.text",
+            "text": "Let's begin with a D minor arpeggio.",
+            "turn_id": "assistant-1",
+            "chunk_index": 1,
+            "turn_complete": True,
+        },
     ]
     session_id = uuid.uuid4()
 
@@ -350,22 +362,24 @@ def test_ws_live_emits_transcript_events_progressively(
     assert intro_state["type"] == "server.lesson_state"
     assert intro_state["phase"] == "intro"
     assert "I am starting a GUIDED_LESSON music tutoring session." in bridge.sent_text[0][0]
-    assert assistant_partial == {
-        "type": "server.transcript",
-        "role": "assistant",
-        "text": "Let's begin",
-        "partial": True,
-    }
-    assert user_transcript == {
-        "type": "server.transcript",
-        "role": "user",
-        "text": "I want help with arpeggios",
-        "partial": False,
-    }
-    assert assistant_text == {
-        "type": "server.text",
-        "text": "Let's begin with a D minor arpeggio.",
-    }
+    assert assistant_partial["type"] == "server.transcript"
+    assert assistant_partial["role"] == "assistant"
+    assert assistant_partial["text"] == "Let's begin"
+    assert assistant_partial["partial"] is True
+    assert assistant_partial["turn_id"] == "assistant-1"
+    assert assistant_partial["chunk_index"] == 0
+    assert assistant_partial["turn_complete"] is False
+    assert user_transcript["type"] == "server.transcript"
+    assert user_transcript["role"] == "user"
+    assert user_transcript["text"] == "I want help with arpeggios"
+    assert user_transcript["partial"] is False
+    assert user_transcript["turn_id"] == "user-2"
+    assert user_transcript["turn_complete"] is True
+    assert assistant_text["type"] == "server.text"
+    assert assistant_text["text"] == "Let's begin with a D minor arpeggio."
+    assert assistant_text["turn_id"] == "assistant-1"
+    assert assistant_text["chunk_index"] == 1
+    assert assistant_text["turn_complete"] is True
     assert goal_capture_state["type"] == "server.lesson_state"
     assert goal_capture_state["phase"] == "goal_capture"
     assert complete_state["type"] == "server.lesson_state"

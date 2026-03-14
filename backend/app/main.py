@@ -633,7 +633,7 @@ async def _forward_bridge_events(
         elif event_type == "server.text":
             text = str(event.get("text", ""))
             if not event.get("partial"):
-                conversation_manager.add_assistant_turn(text)
+                conversation_manager.add_assistant_turn(text, turn_id=str(event.get("turn_id", "")).strip() or None)
             extra_events = runtime.on_model_text(text)
             for extra_event in extra_events:
                 await _send_live_event(ws, extra_event)

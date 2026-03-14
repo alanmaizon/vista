@@ -57,6 +57,24 @@ class ConversationManager:
         return cleaned
 
     @staticmethod
+    def _merge_text(existing: str, incoming: str) -> str:
+        current = (existing or "").strip()
+        update = (incoming or "").strip()
+        if not current:
+            return update
+        if not update:
+            return current
+        if update == current:
+            return current
+        if update.startswith(current):
+            return update
+        if current.startswith(update):
+            return current
+        omit_space = update[:1] in {",", ".", ";", ":", "!", "?", ")"} or current[-1:] in {"(", "/", '"', "'"}
+        merged = f"{current}{'' if omit_space else ' '}{update}"
+        return merged.replace(" ,", ",").replace(" .", ".").replace(" !", "!").replace(" ?", "?")
+
+    @staticmethod
     def _validate_tool_name(name: str) -> str:
         cleaned = (name or "").strip().lower()
         if not cleaned:
@@ -134,9 +152,19 @@ class ConversationManager:
         event = self._create_event("user", {"text": self._validate_text(text)})
         self.events.append(event)
 
-    def add_assistant_turn(self, text: str) -> None:
+    def add_assistant_turn(self, text: str, *, turn_id: str | None = None) -> None:
         """Append an assistant text message to the history."""
-        event = self._create_event("assistant", {"text": self._validate_text(text)})
+        cleaned = self._validate_text(text)
+        normalized_turn_id = (turn_id or "").strip() or None
+        if normalized_turn_id:
+            for event in reversed(self.events):
+                if event.get("type") == "assistant" and event.get("turn_id") == normalized_turn_id:
+                    event["text"] = self._merge_text(str(event.get("text", "")), cleaned)
+                    return
+        payload: dict[str, Any] = {"text": cleaned}
+        if normalized_turn_id:
+            payload["turn_id"] = normalized_turn_id
+        event = self._create_event("assistant", payload)
         self.events.append(event)
 
     def add_tool_call(self, name: str, args: dict[str, Any], call_id: str | None = None) -> None:

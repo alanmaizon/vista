@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from time import monotonic
 from typing import Any, AsyncIterator
 
@@ -95,9 +96,91 @@ def _format_exception_detail(exc: Exception | None) -> str:
     return type(exc).__name__
 
 
+@dataclass
+class _LiveTurnState:
+    turn_id: str
+    next_chunk_index: int = 0
+
+
+class _LiveEventSequencer:
+    """Assign stable turn and chunk identifiers to live bridge events."""
+
+    def __init__(self) -> None:
+        self._sequence = 0
+        self._assistant_turn: _LiveTurnState | None = None
+        self._user_turn: _LiveTurnState | None = None
+
+    def _new_turn_id(self, role: str) -> str:
+        self._sequence += 1
+        return f"{role}-{self._sequence}"
+
+    def _ensure_turn(self, role: str) -> _LiveTurnState:
+        if role == "assistant":
+            if self._assistant_turn is None:
+                self._assistant_turn = _LiveTurnState(turn_id=self._new_turn_id(role))
+            return self._assistant_turn
+        if self._user_turn is None:
+            self._user_turn = _LiveTurnState(turn_id=self._new_turn_id(role))
+        return self._user_turn
+
+    @staticmethod
+    def _base_event(state: _LiveTurnState, *, turn_complete: bool) -> dict[str, Any]:
+        payload = {
+            "turn_id": state.turn_id,
+            "chunk_index": state.next_chunk_index,
+            "turn_complete": turn_complete,
+        }
+        state.next_chunk_index += 1
+        return payload
+
+    def new_text_event(self, text: str, *, turn_complete: bool = False) -> dict[str, Any]:
+        state = self._ensure_turn("assistant")
+        return {
+            "type": "server.text",
+            "text": str(text),
+            **self._base_event(state, turn_complete=turn_complete),
+        }
+
+    def new_audio_event(self, data_b64: str, mime_type: str, *, turn_complete: bool = False) -> dict[str, Any]:
+        state = self._ensure_turn("assistant")
+        return {
+            "type": "server.audio",
+            "mime": str(mime_type),
+            "data_b64": str(data_b64),
+            **self._base_event(state, turn_complete=turn_complete),
+        }
+
+    def new_transcript_event(
+        self,
+        *,
+        role: str,
+        text: str,
+        partial: bool,
+        turn_complete: bool = False,
+    ) -> dict[str, Any]:
+        normalized_role = "assistant" if role == "assistant" else "user"
+        state = self._ensure_turn(normalized_role)
+        return {
+            "type": "server.transcript",
+            "role": normalized_role,
+            "text": str(text),
+            "partial": bool(partial),
+            **self._base_event(state, turn_complete=turn_complete),
+        }
+
+    def complete_assistant_turn(self) -> None:
+        self._assistant_turn = None
+
+    def complete_user_turn(self) -> None:
+        self._user_turn = None
+
+
 async def _emit_transcription_events(
     queue: asyncio.Queue[dict[str, Any] | None],
     payload: dict[str, Any],
+    *,
+    sequencer: _LiveEventSequencer,
+    assistant_turn_complete: bool = False,
 ) -> None:
     """Emit transcript text from any known transcription field shape."""
     for field_name in (
@@ -113,14 +196,18 @@ async def _emit_transcription_events(
         partial_text = transcription.get("partial")
         text = final_text or partial_text
         if text:
+            role = "assistant" if field_name.startswith("output") else "user"
+            is_partial = bool(partial_text and not final_text)
             await queue.put(
-                {
-                    "type": "server.transcript",
-                    "role": "assistant" if field_name.startswith("output") else "user",
-                    "text": str(text),
-                    "partial": bool(partial_text and not final_text),
-                }
+                sequencer.new_transcript_event(
+                    role=role,
+                    text=str(text),
+                    partial=is_partial,
+                    turn_complete=assistant_turn_complete if role == "assistant" else not is_partial,
+                )
             )
+            if role == "user" and not is_partial:
+                sequencer.complete_user_turn()
 
 
 def _parse_live_json_message(raw_message: Any) -> dict[str, Any] | None:
@@ -317,6 +404,7 @@ class _DirectGeminiLiveBridge:
         self._last_video_sent_at = 0.0
         self._sentinel_enqueued = False
         self._logged_payload_categories: set[str] = set()
+        self._event_sequencer = _LiveEventSequencer()
 
     @property
     def active_location(self) -> str:
@@ -328,6 +416,7 @@ class _DirectGeminiLiveBridge:
         self._logged_payload_categories.clear()
         self._events = asyncio.Queue()
         last_error: Exception | None = None
+        self._event_sequencer = _LiveEventSequencer()
         for location in _candidate_locations(self.location, self.fallback_location):
             try:
                 await self._connect_once(location)
@@ -466,9 +555,20 @@ class _DirectGeminiLiveBridge:
             return
 
         server_content = _read_field(payload, "server_content")
+        assistant_turn_complete = False
         if isinstance(server_content, dict):
-            await self._process_server_content(server_content)
-        await _emit_transcription_events(self._events, payload)
+            assistant_turn_complete = bool(
+                _read_field(server_content, "turn_complete") or _read_field(server_content, "generation_complete")
+            )
+            await self._process_server_content(server_content, assistant_turn_complete=assistant_turn_complete)
+        await _emit_transcription_events(
+            self._events,
+            payload,
+            sequencer=self._event_sequencer,
+            assistant_turn_complete=assistant_turn_complete,
+        )
+        if assistant_turn_complete:
+            self._event_sequencer.complete_assistant_turn()
 
     def _log_payload_summary(self, summary: dict[str, Any]) -> None:
         categories: list[str] = []
@@ -508,8 +608,9 @@ class _DirectGeminiLiveBridge:
             summary["transcription_fields"],
         )
 
-    async def _process_server_content(self, payload: dict[str, Any]) -> None:
+    async def _process_server_content(self, payload: dict[str, Any], *, assistant_turn_complete: bool) -> None:
         if _read_field(payload, "interrupted"):
+            self._event_sequencer.complete_assistant_turn()
             await self._events.put(
                 {
                     "type": "server.status",
@@ -519,7 +620,12 @@ class _DirectGeminiLiveBridge:
                 }
             )
 
-        await _emit_transcription_events(self._events, payload)
+        await _emit_transcription_events(
+            self._events,
+            payload,
+            sequencer=self._event_sequencer,
+            assistant_turn_complete=assistant_turn_complete,
+        )
 
         model_turn = _read_field(payload, "model_turn")
         if not isinstance(model_turn, dict):
@@ -535,7 +641,9 @@ class _DirectGeminiLiveBridge:
                 if tool_call_event is not None:
                     await self._events.put(tool_call_event)
                     continue
-                await self._events.put({"type": "server.text", "text": str(text)})
+                await self._events.put(
+                    self._event_sequencer.new_text_event(str(text), turn_complete=assistant_turn_complete)
+                )
             inline_data = _read_field(part, "inline_data")
             if not isinstance(inline_data, dict):
                 continue
@@ -543,11 +651,11 @@ class _DirectGeminiLiveBridge:
             mime_type = _read_field(inline_data, "mime_type") or "audio/pcm;rate=24000"
             if data_b64:
                 await self._events.put(
-                    {
-                        "type": "server.audio",
-                        "mime": str(mime_type),
-                        "data_b64": str(data_b64),
-                    }
+                    self._event_sequencer.new_audio_event(
+                        str(data_b64),
+                        str(mime_type),
+                        turn_complete=assistant_turn_complete,
+                    )
                 )
 
     async def _send_realtime_chunk(self, chunk: dict[str, Any]) -> None:
@@ -669,6 +777,7 @@ class _AdkGeminiLiveBridge:
         self._run_config: Any = None
         self._runner: Any = None
         self._types: Any = None
+        self._event_sequencer = _LiveEventSequencer()
 
     @property
     def active_location(self) -> str:
@@ -678,6 +787,7 @@ class _AdkGeminiLiveBridge:
         self._closed = False
         self._sentinel_enqueued = False
         self._events = asyncio.Queue()
+        self._event_sequencer = _LiveEventSequencer()
 
         self._configure_vertex_environment()
         (
@@ -809,6 +919,7 @@ class _AdkGeminiLiveBridge:
 
     async def _process_adk_event(self, event: Any) -> None:
         if getattr(event, "interrupted", False):
+            self._event_sequencer.complete_assistant_turn()
             await self._events.put(
                 {
                     "type": "server.status",
@@ -832,24 +943,30 @@ class _AdkGeminiLiveBridge:
             return
 
         parts = getattr(content, "parts", None) or []
+        assistant_turn_complete = not bool(getattr(event, "partial", False))
         for part in parts:
             text = getattr(part, "text", None)
             if text:
                 if getattr(event, "partial", False):
                     await self._events.put(
-                        {
-                            "type": "server.transcript",
-                            "role": "assistant",
-                            "text": str(text),
-                            "partial": True,
-                        }
+                        self._event_sequencer.new_transcript_event(
+                            role="assistant",
+                            text=str(text),
+                            partial=True,
+                            turn_complete=False,
+                        )
                     )
                 else:
                     tool_call_event = _parse_text_tool_call(str(text))
                     if tool_call_event is not None:
                         await self._events.put(tool_call_event)
                     else:
-                        await self._events.put({"type": "server.text", "text": str(text)})
+                        await self._events.put(
+                            self._event_sequencer.new_text_event(
+                                str(text),
+                                turn_complete=assistant_turn_complete,
+                            )
+                        )
 
             inline_data = getattr(part, "inline_data", None)
             if inline_data is None:
@@ -866,12 +983,14 @@ class _AdkGeminiLiveBridge:
                 data_b64 = base64.b64encode(bytes(data)).decode("ascii")
 
             await self._events.put(
-                {
-                    "type": "server.audio",
-                    "mime": str(mime_type),
-                    "data_b64": data_b64,
-                }
+                self._event_sequencer.new_audio_event(
+                    data_b64,
+                    str(mime_type),
+                    turn_complete=assistant_turn_complete,
+                )
             )
+        if assistant_turn_complete:
+            self._event_sequencer.complete_assistant_turn()
 
     def _configure_vertex_environment(self) -> None:
         if not self.project_id:

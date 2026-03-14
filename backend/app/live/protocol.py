@@ -17,6 +17,7 @@ from typing import List, Optional
 # Types of events sent by the client
 CLIENT_INIT = "client.init"
 CLIENT_AUDIO = "client.audio"
+CLIENT_AUDIO_END = "client.audio_end"
 CLIENT_VIDEO = "client.video"
 CLIENT_CONFIRM = "client.confirm"
 CLIENT_STOP = "client.stop"
@@ -62,6 +63,13 @@ class ClientVideo:
 
     jpeg: bytes
     mime: str = "image/jpeg"
+
+
+@dataclass
+class ClientAudioEnd:
+    """Represents a pause boundary for a streamed user audio turn."""
+
+    pass
 
 
 @dataclass

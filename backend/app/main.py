@@ -32,6 +32,7 @@ from .domains.music.render import verovio_runtime_status
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
 from .live.protocol import (
     CLIENT_AUDIO,
+    CLIENT_AUDIO_END,
     CLIENT_CONFIRM,
     CLIENT_INIT,
     CLIENT_STOP,
@@ -867,6 +868,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     await bridge.send_audio(audio_bytes)
                     for extra_event in runtime.on_client_audio(audio_bytes, str(message.get("mime", ""))):
                         await _send_live_event(ws, extra_event)
+                elif message_type == CLIENT_AUDIO_END:
+                    await bridge.send_audio_end()
                 elif message_type == CLIENT_VIDEO:
                     runtime.on_client_video()
                     await bridge.send_image_jpeg(_decode_b64_payload(message))

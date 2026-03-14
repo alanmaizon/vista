@@ -257,6 +257,7 @@ export function shouldEmitStableNote(noteHold) {
 export function createLiveAudioRouter({
   eventBus = null,
   onSpeechChunk = null,
+  onSpeechPause = null,
   onLevels = null,
   onModeChange = null,
 } = {}) {
@@ -278,6 +279,8 @@ export function createLiveAudioRouter({
   let smoothedSpeechConfidence = 0;
   let smoothedMusicConfidence = 0;
   let speechActive = false;
+  let speechSegmentOpen = false;
+  let speechPauseTimer = null;
   let noteHold = null;
   let phraseState = {
     chunks: [],
@@ -294,6 +297,28 @@ export function createLiveAudioRouter({
       return;
     }
     eventBus.emit(type, payload);
+  }
+
+  function clearSpeechPauseTimer() {
+    if (speechPauseTimer === null) {
+      return;
+    }
+    window.clearTimeout(speechPauseTimer);
+    speechPauseTimer = null;
+  }
+
+  function scheduleSpeechPauseFlush() {
+    if (!speechSegmentOpen || speechPauseTimer !== null) {
+      return;
+    }
+    speechPauseTimer = window.setTimeout(() => {
+      speechPauseTimer = null;
+      if (speechActive || !speechSegmentOpen) {
+        return;
+      }
+      speechSegmentOpen = false;
+      onSpeechPause?.();
+    }, 900);
   }
 
   function resetPhrase() {
@@ -446,6 +471,7 @@ export function createLiveAudioRouter({
       musicConfidence: smoothedMusicConfidence,
       pitchConfidence: pitch.clarity,
     });
+    const wasSpeechActive = speechActive;
     speechActive = resolveSpeechActivity({
       active: speechActive,
       energyDb,
@@ -480,7 +506,9 @@ export function createLiveAudioRouter({
       });
     }
 
-    if (currentMode === "SPEECH" && speechActive) {
+    if (speechActive) {
+      clearSpeechPauseTimer();
+      speechSegmentOpen = true;
       onSpeechChunk?.(pcmBytes);
     } else if (currentMode === "MUSIC") {
       trackMusicFrame({
@@ -491,6 +519,12 @@ export function createLiveAudioRouter({
       });
     } else if (phraseState.startedAt && Date.now() - phraseState.lastMusicAt > MUSIC_SILENCE_MS) {
       finalizePhrase();
+    }
+
+    if (wasSpeechActive && !speechActive) {
+      scheduleSpeechPauseFlush();
+    } else if (!speechActive && speechSegmentOpen) {
+      scheduleSpeechPauseFlush();
     }
   }
 
@@ -596,6 +630,12 @@ export function createLiveAudioRouter({
       return;
     }
 
+    clearSpeechPauseTimer();
+    if (speechSegmentOpen) {
+      speechSegmentOpen = false;
+      onSpeechPause?.();
+    }
+
     if (processorNode) {
       processorNode.disconnect();
       processorNode.onaudioprocess = null;
@@ -628,6 +668,7 @@ export function createLiveAudioRouter({
     smoothedSpeechConfidence = 0;
     smoothedMusicConfidence = 0;
     speechActive = false;
+    speechSegmentOpen = false;
     resetPhrase();
   }
 

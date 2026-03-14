@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import uuid
 from types import SimpleNamespace
 
@@ -29,6 +30,7 @@ class FakeBridge:
         self.using_adk = False
         self.system_prompt = kwargs["system_prompt"]
         self.sent_audio: list[bytes] = []
+        self.audio_end_calls = 0
         self.sent_images: list[bytes] = []
         self.sent_text: list[tuple[str, str]] = []
         self.closed = False
@@ -45,6 +47,9 @@ class FakeBridge:
 
     async def send_audio(self, payload: bytes) -> None:
         self.sent_audio.append(payload)
+
+    async def send_audio_end(self) -> None:
+        self.audio_end_calls += 1
 
     async def send_image_jpeg(self, payload: bytes) -> None:
         self.sent_images.append(payload)
@@ -147,6 +152,31 @@ def test_ws_live_handles_audio_confirm_and_stop(client: TestClient) -> None:
     assert summary_payload["type"] == "server.summary"
     assert bridge.sent_audio == [b"\x01\x02"]
     assert bridge.closed is True
+
+
+def test_ws_live_forwards_audio_end_to_bridge(client: TestClient) -> None:
+    session_id = uuid.uuid4()
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json(
+            {
+                "type": "client.init",
+                "token": "test-token",
+                "session_id": str(session_id),
+                "mode": "GUIDED_LESSON",
+            }
+        )
+        ws.receive_json()  # connected
+        ws.receive_json()  # intro lesson state
+
+        ws.send_json({"type": "client.audio_end"})
+        ws.send_json({"type": "client.stop"})
+        with contextlib.suppress(Exception):
+            while True:
+                ws.receive_json()
+
+    bridge = FakeBridge.created[0]
+    assert bridge.audio_end_calls == 1
 
 
 def test_ws_live_reports_invalid_base64_payload(client: TestClient) -> None:

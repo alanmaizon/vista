@@ -1493,6 +1493,14 @@ export default function useEurydiceApp() {
           data_b64: bytesToBase64(pcmBytes),
         });
       },
+      onSpeechPause: () => {
+        if (!isConnectedRef.current || liveModeRef.current !== "GUIDED_LESSON") {
+          return;
+        }
+        send({
+          type: "client.audio_end",
+        });
+      },
       onLevels: (levels) => {
         setLiveAudioLevels(levels);
       },

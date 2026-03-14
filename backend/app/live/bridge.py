@@ -450,6 +450,9 @@ class _DirectGeminiLiveBridge:
             }
         )
 
+    async def send_audio_end(self) -> None:
+        await self._send_json({"realtime_input": {"audioStreamEnd": True}})
+
     async def send_image_jpeg(self, jpeg_bytes: bytes) -> None:
         if monotonic() - self._last_video_sent_at < 1.0:
             return
@@ -703,6 +706,15 @@ class _DirectGeminiLiveBridge:
                 "generation_config": {
                     "response_modalities": ["AUDIO"],
                 },
+                "realtime_input_config": {
+                    "automatic_activity_detection": {
+                        "disabled": False,
+                        "start_of_speech_sensitivity": "START_SENSITIVITY_HIGH",
+                        "end_of_speech_sensitivity": "END_SENSITIVITY_HIGH",
+                        "prefix_padding_ms": 20,
+                        "silence_duration_ms": 180,
+                    }
+                },
                 "system_instruction": {
                     "parts": [{"text": self.system_prompt}],
                 },
@@ -867,6 +879,11 @@ class _AdkGeminiLiveBridge:
                 )
             )
         )
+
+    async def send_audio_end(self) -> None:
+        # ADK streaming support varies by installed version. When a direct
+        # stream-end primitive is unavailable, rely on server-side VAD.
+        return None
 
     async def send_image_jpeg(self, jpeg_bytes: bytes) -> None:
         self._require_ready()
@@ -1129,6 +1146,10 @@ class GeminiLiveBridge:
     async def send_audio(self, pcm16k_bytes: bytes) -> None:
         self._require_impl()
         await self._impl.send_audio(pcm16k_bytes)
+
+    async def send_audio_end(self) -> None:
+        self._require_impl()
+        await self._impl.send_audio_end()
 
     async def send_image_jpeg(self, jpeg_bytes: bytes) -> None:
         self._require_impl()

@@ -124,6 +124,8 @@ export default function useLiveAgentApp() {
   const [assistantState, setAssistantState] = useState("idle");
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [speechInputMode, setSpeechInputMode] = useState("push_to_talk");
+  const [isPushToTalkActive, setIsPushToTalkActive] = useState(false);
   const [liveAudioMode, setLiveAudioMode] = useState("SILENCE");
   const [liveAudioLevels, setLiveAudioLevels] = useState(buildInitialAudioLevels);
   const [connectionMeta, setConnectionMeta] = useState(buildInitialConnectionMeta);
@@ -138,6 +140,22 @@ export default function useLiveAgentApp() {
   const messageCounterRef = useRef(0);
   const isConnectedRef = useRef(false);
   const cameraCanvasRef = useRef(null);
+  const speechInputModeRef = useRef("push_to_talk");
+  const pushToTalkActiveRef = useRef(false);
+  const pushToTalkReleaseTimerRef = useRef(null);
+  const speechTurnOpenRef = useRef(false);
+
+  useEffect(() => {
+    speechInputModeRef.current = speechInputMode;
+    if (speechInputMode !== "push_to_talk") {
+      pushToTalkActiveRef.current = false;
+      const timerId = window.setTimeout(() => {
+        setIsPushToTalkActive(false);
+      }, 0);
+      return () => window.clearTimeout(timerId);
+    }
+    return undefined;
+  }, [speechInputMode]);
 
   const refreshRuntime = useCallback(async () => {
     try {
@@ -221,7 +239,22 @@ export default function useLiveAgentApp() {
     return true;
   }, []);
 
+  const endSpeechTurn = useCallback(() => {
+    if (!speechTurnOpenRef.current) {
+      return;
+    }
+    speechTurnOpenRef.current = false;
+    sendSocketMessage({ type: "client.audio_end" });
+  }, [sendSocketMessage]);
+
   const stopAudioRouter = useCallback(async () => {
+    if (pushToTalkReleaseTimerRef.current) {
+      window.clearTimeout(pushToTalkReleaseTimerRef.current);
+      pushToTalkReleaseTimerRef.current = null;
+    }
+    pushToTalkActiveRef.current = false;
+    setIsPushToTalkActive(false);
+    speechTurnOpenRef.current = false;
     if (!audioRouterRef.current) {
       setLiveAudioMode("SILENCE");
       return;
@@ -240,14 +273,26 @@ export default function useLiveAgentApp() {
 
     const router = createLiveAudioRouter({
       onSpeechChunk: (pcmBytes) => {
-        sendSocketMessage({
+        if (
+          speechInputModeRef.current === "push_to_talk" &&
+          !pushToTalkActiveRef.current
+        ) {
+          return;
+        }
+        const accepted = sendSocketMessage({
           type: "client.audio",
           mime: "audio/pcm;rate=16000",
           data_b64: bytesToBase64(pcmBytes),
         });
+        if (accepted) {
+          speechTurnOpenRef.current = true;
+        }
       },
       onSpeechPause: () => {
-        sendSocketMessage({ type: "client.audio_end" });
+        if (speechInputModeRef.current === "push_to_talk") {
+          return;
+        }
+        endSpeechTurn();
       },
       onLevels: (levels) => {
         setLiveAudioLevels(levels);
@@ -264,7 +309,7 @@ export default function useLiveAgentApp() {
       audioRouterRef.current = null;
       setConnectionError(error instanceof Error ? error.message : "Microphone unavailable.");
     }
-  }, [micEnabled, sendSocketMessage]);
+  }, [endSpeechTurn, micEnabled, sendSocketMessage]);
 
   const stopCameraCapture = useCallback(async () => {
     if (frameTimerRef.current) {
@@ -560,6 +605,36 @@ export default function useLiveAgentApp() {
     setCameraEnabled((value) => !value);
   }, []);
 
+  const beginPushToTalk = useCallback(() => {
+    if (speechInputModeRef.current !== "push_to_talk" || !micEnabled || !isConnectedRef.current) {
+      return;
+    }
+    if (pushToTalkReleaseTimerRef.current) {
+      window.clearTimeout(pushToTalkReleaseTimerRef.current);
+      pushToTalkReleaseTimerRef.current = null;
+    }
+    pushToTalkActiveRef.current = true;
+    setIsPushToTalkActive(true);
+    if (!audioRouterRef.current) {
+      void startAudioRouter();
+    }
+  }, [micEnabled, startAudioRouter]);
+
+  const endPushToTalk = useCallback(() => {
+    if (speechInputModeRef.current !== "push_to_talk") {
+      return;
+    }
+    setIsPushToTalkActive(false);
+    if (pushToTalkReleaseTimerRef.current) {
+      window.clearTimeout(pushToTalkReleaseTimerRef.current);
+    }
+    pushToTalkReleaseTimerRef.current = window.setTimeout(() => {
+      pushToTalkReleaseTimerRef.current = null;
+      pushToTalkActiveRef.current = false;
+      endSpeechTurn();
+    }, 140);
+  }, [endSpeechTurn]);
+
   const resetSession = useCallback(() => {
     disconnectSocket();
     void stopAudioRouter();
@@ -601,6 +676,11 @@ export default function useLiveAgentApp() {
     sendText,
     toggleMic,
     toggleCamera,
+    speechInputMode,
+    setSpeechInputMode,
+    isPushToTalkActive,
+    beginPushToTalk,
+    endPushToTalk,
     resetSession,
   };
 }

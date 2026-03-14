@@ -127,6 +127,9 @@ export default function LiveAgentWorkspace({
   assistantState,
   micEnabled,
   cameraEnabled,
+  speechInputMode,
+  setSpeechInputMode,
+  isPushToTalkActive,
   liveAudioMode,
   liveAudioLevels,
   connectionMeta,
@@ -136,6 +139,8 @@ export default function LiveAgentWorkspace({
   sendText,
   toggleMic,
   toggleCamera,
+  beginPushToTalk,
+  endPushToTalk,
 }) {
   const activeDebugSession = runtimeDebug?.active_sessions?.[0] || null;
   const modeLabel = formatAssistantState(assistantState, isConnected);
@@ -163,6 +168,7 @@ export default function LiveAgentWorkspace({
             <div className="flex flex-wrap items-center gap-2">
               <Chip label={runtimeInfo?.model_id || "Runtime"} tone="dark" />
               <Chip label={connectionMeta.transport || "No transport"} />
+              <Chip label={speechInputMode === "push_to_talk" ? "Push to talk" : "Auto detect"} />
               <Chip label={modeLabel} tone="live" />
               <button
                 type="button"
@@ -197,6 +203,30 @@ export default function LiveAgentWorkspace({
 
             <Panel title="Controls" eyebrow="Input">
               <div className="grid gap-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSpeechInputMode("push_to_talk")}
+                    className={`min-h-12 border px-3 py-3 text-sm font-medium shadow-[6px_6px_0_rgba(184,189,197,0.24)] ${
+                      speechInputMode === "push_to_talk"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700"
+                    }`}
+                  >
+                    Push to talk
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSpeechInputMode("auto")}
+                    className={`min-h-12 border px-3 py-3 text-sm font-medium shadow-[6px_6px_0_rgba(184,189,197,0.24)] ${
+                      speechInputMode === "auto"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700"
+                    }`}
+                  >
+                    Auto detect
+                  </button>
+                </div>
                 <ToggleButton
                   active={micEnabled}
                   onClick={toggleMic}
@@ -225,6 +255,25 @@ export default function LiveAgentWorkspace({
                 </button>
               </div>
 
+              {speechInputMode === "push_to_talk" ? (
+                <button
+                  type="button"
+                  disabled={!micEnabled || !isConnected}
+                  onPointerDown={beginPushToTalk}
+                  onPointerUp={endPushToTalk}
+                  onPointerLeave={endPushToTalk}
+                  onPointerCancel={endPushToTalk}
+                  className={`mt-3 flex min-h-13 w-full items-center justify-center gap-2 border px-4 py-3 text-sm font-semibold shadow-[8px_8px_0_rgba(47,52,58,0.14)] transition ${
+                    isPushToTalkActive
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-300 bg-white text-slate-800"
+                  } disabled:cursor-not-allowed disabled:opacity-45`}
+                >
+                  <Mic className="h-4 w-4" />
+                  {isPushToTalkActive ? "Release to send" : "Hold to talk"}
+                </button>
+              ) : null}
+
               {connectionError ? (
                 <div className="mt-3 border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
                   {connectionError}
@@ -240,7 +289,11 @@ export default function LiveAgentWorkspace({
                   <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Capture</div>
                   <div className="mt-2 flex items-center gap-2 text-sm font-medium text-slate-900">
                     <Waves className="h-4 w-4 text-slate-700" />
-                    {liveAudioLevels.speechActive ? "Speech active" : liveAudioMode || "Silence"}
+                    {isPushToTalkActive
+                      ? "Sending speech"
+                      : liveAudioLevels.speechActive
+                        ? "Speech active"
+                        : liveAudioMode || "Silence"}
                   </div>
                 </div>
               </div>

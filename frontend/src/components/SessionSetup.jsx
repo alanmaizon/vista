@@ -119,6 +119,8 @@ export default function SessionSetup({
   setProfileDraft,
   micEnabled,
   cameraEnabled,
+  speechInputMode,
+  setSpeechInputMode,
   toggleMic,
   toggleCamera,
   startSession,
@@ -216,6 +218,9 @@ export default function SessionSetup({
                   placeholder="Piece"
                   className="min-h-12 border border-slate-300 bg-white px-3 text-sm outline-none focus:border-slate-900"
                 />
+                <div className="border border-slate-300 bg-[#f8f9fb] px-3 py-3 text-sm text-slate-600">
+                  Add the tune or piece name if you know it. It improves live recognition.
+                </div>
 
                 <textarea
                   value={profileDraft.goal}
@@ -226,6 +231,36 @@ export default function SessionSetup({
                   rows={4}
                   className="border border-slate-300 bg-white px-3 py-3 text-sm outline-none focus:border-slate-900"
                 />
+              </div>
+
+              <div className="mt-4">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Speech turns
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSpeechInputMode("push_to_talk")}
+                    className={`min-h-12 border px-3 py-3 text-sm font-medium shadow-[6px_6px_0_rgba(184,189,197,0.22)] ${
+                      speechInputMode === "push_to_talk"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700"
+                    }`}
+                  >
+                    Push to talk
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSpeechInputMode("auto")}
+                    className={`min-h-12 border px-3 py-3 text-sm font-medium shadow-[6px_6px_0_rgba(184,189,197,0.22)] ${
+                      speechInputMode === "auto"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700"
+                    }`}
+                  >
+                    Auto detect
+                  </button>
+                </div>
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-2">
@@ -256,7 +291,7 @@ export default function SessionSetup({
               </button>
 
               <div className="mt-4 border border-slate-300 bg-[#f8f9fb] px-3 py-3 text-sm text-slate-600">
-                Blank fields = general practice.
+                Blank fields = general practice. Push to talk is best in a noisy room.
               </div>
 
               {connectionError ? (

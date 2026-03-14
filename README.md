@@ -1,9 +1,5 @@
 # Eurydice
 
-<p align="center">
-  <img src="screenshot.png" alt="Eurydice landing">
-</p>
-
 **A real-time multimodal music tutor built for the Gemini Live Agent Challenge.**
 
 Eurydice can hear a student play, read their score via the camera, coach them bar by bar in voice, and adapt the lesson live until the phrase is learned.
@@ -28,6 +24,7 @@ The current active backend has been reset to a minimal live-agent service.
 
 ### For Developers
 See the [Local Setup Guide](docs/LOCAL_SETUP.md) for detailed instructions on running Eurydice locally.
+For the current test path, use the [Testing Guide](docs/TESTING.md).
 
 ## For Judges
 
@@ -38,6 +35,7 @@ If you only review a few things, start here:
 - **Architecture diagram:** see [Architecture Overview](#architecture-overview).
 - **Deployment proof path:** see [Deployment](docs/DEPLOYMENT.md) for the Cloud Run stack and required Google Cloud services.
 - **Live tutor architecture:** see [Live Tutor Architecture](docs/live-tutor-architecture.md).
+- **Testing guide:** see [Testing](docs/TESTING.md).
 - **Final-week submission guide:** see [Final Submission Playbook](docs/FINAL_SUBMISSION_PLAYBOOK.md).
 - **Demo narration guide:** see [Demo Script](docs/DEMO_SCRIPT.md).
 
@@ -195,22 +193,15 @@ The repo does not currently ship committed Black, Flake8, Prettier, or pre-commi
 ### Running Tests
 ```bash
 # Backend tests from repo root
-pytest backend/tests
+python3 -m pytest backend/tests -q
 
-# Prompt quality evaluation from repo root
-python backend/scripts/prompt_eval_music.py
-
-# Live tutor architecture eval (scenario + rubric)
-python backend/app/eval_live_tutor.py
-
-# Run one backend test module
-pytest backend/tests/test_music_transcription.py
-
-# Frontend lint, tests, and build
+# Frontend lint, tests, and build from repo root
 npm --prefix frontend run lint
 npm --prefix frontend run test
 npm --prefix frontend run build
 ```
+
+For focused suites, known skips, and the recommended pre-ship sequence, see [Testing](docs/TESTING.md).
 
 Architecture notes for the live tutor are documented in [`docs/live-tutor-architecture.md`](docs/live-tutor-architecture.md).
 
@@ -254,6 +245,7 @@ FRONTEND_FEATURES_URI=gs://YOUR_BUCKET/features bash infra/sync_feature_assets.s
 - **[Product Specification](docs/EURYDICE_CHALLENGE_BRIEF.md)** - Comprehensive challenge brief
 - **[Content Ingestion & Curation](docs/CONTENT_INGESTION_AND_CURATION.md)** - Library metadata, curation and guided pack loading
 - **[Local Setup](docs/LOCAL_SETUP.md)** - Step-by-step development guide
+- **[Testing](docs/TESTING.md)** - Current backend/frontend checks and pre-ship verification flow
 - **[Deployment](docs/DEPLOYMENT.md)** - Cloud Run deployment instructions
 - **[Final Submission Playbook](docs/FINAL_SUBMISSION_PLAYBOOK.md)** - Judge-facing final-week checklist, proof plan, and submission workflow
 - **[Demo Script](docs/DEMO_SCRIPT.md)** - Tight 4-minute recording script for the live lesson loop

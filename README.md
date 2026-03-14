@@ -8,6 +8,14 @@
 
 Eurydice can hear a student play, read their score via the camera, coach them bar by bar in voice, and adapt the lesson live until the phrase is learned.
 
+## Reset Note
+
+The current active backend has been reset to a minimal live-agent service.
+
+- The active backend contract is documented in [Live Backend Contract](docs/LIVE_BACKEND_CONTRACT.md).
+- The main runtime now focuses on one surface: a real-time voice-and-camera music tutor over `/ws/live`.
+- Legacy music APIs and earlier product layers still exist in the repo, but they are not the current serving path.
+
 ## Quick Start
 
 ### For Users
@@ -26,6 +34,7 @@ See the [Local Setup Guide](docs/LOCAL_SETUP.md) for detailed instructions on ru
 If you only review a few things, start here:
 
 - **What Eurydice is:** a real-time multimodal music tutor that hears a student play, reads a score, and gives structured corrective feedback.
+- **Current backend contract:** see [Live Backend Contract](docs/LIVE_BACKEND_CONTRACT.md).
 - **Architecture diagram:** see [Architecture Overview](#architecture-overview).
 - **Deployment proof path:** see [Deployment](docs/DEPLOYMENT.md) for the Cloud Run stack and required Google Cloud services.
 - **Live tutor architecture:** see [Live Tutor Architecture](docs/live-tutor-architecture.md).

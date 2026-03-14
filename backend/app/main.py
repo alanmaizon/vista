@@ -9,10 +9,13 @@ import contextlib
 import json
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from .live.bridge import GeminiLiveBridge, adk_runtime_status
@@ -66,15 +69,57 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Eurydice Live", version="1.0.0", lifespan=lifespan)
 
+CONTAINER_FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend-dist"
+LOCAL_FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+FRONTEND_DIST = (
+    CONTAINER_FRONTEND_DIST
+    if CONTAINER_FRONTEND_DIST.is_dir()
+    else LOCAL_FRONTEND_DIST
+    if LOCAL_FRONTEND_DIST.is_dir()
+    else None
+)
 
-@app.get("/")
-async def root() -> dict[str, Any]:
+if FRONTEND_DIST is not None and (FRONTEND_DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
+if FRONTEND_DIST is not None and (FRONTEND_DIST / "features").is_dir():
+    app.mount("/features", StaticFiles(directory=FRONTEND_DIST / "features"), name="frontend-features")
+
+
+def _frontend_asset_path(file_name: str) -> Path | None:
+    if FRONTEND_DIST is None:
+        return None
+    candidate = FRONTEND_DIST / file_name
+    return candidate if candidate.is_file() else None
+
+
+@app.get("/", response_model=None)
+async def root() -> FileResponse | dict[str, Any]:
+    if FRONTEND_DIST is not None:
+        index_path = FRONTEND_DIST / "index.html"
+        if index_path.is_file():
+            return FileResponse(index_path)
     return {
         "service": "eurydice-live",
         "status": "ok",
         "ws_path": "/ws/live",
         "docs_path": "/docs",
     }
+
+
+@app.get("/logo.svg", include_in_schema=False)
+async def logo() -> FileResponse:
+    asset_path = _frontend_asset_path("logo.svg")
+    if asset_path is None:
+        raise HTTPException(status_code=404, detail="logo.svg not found")
+    return FileResponse(asset_path, media_type="image/svg+xml")
+
+
+@app.get("/marble-pattern.png", include_in_schema=False)
+async def marble_pattern() -> FileResponse:
+    asset_path = _frontend_asset_path("marble-pattern.png")
+    if asset_path is None:
+        raise HTTPException(status_code=404, detail="marble-pattern.png not found")
+    return FileResponse(asset_path, media_type="image/png")
 
 
 @app.get("/health")

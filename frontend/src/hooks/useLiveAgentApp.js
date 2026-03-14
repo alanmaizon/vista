@@ -6,6 +6,9 @@ import { createLiveAudioRouter } from "../lib/liveAudioRouter";
 
 const MESSAGE_LIMIT = 32;
 const CAMERA_FRAME_INTERVAL_MS = 1100;
+const AUTO_MIN_SPEECH_CHUNKS = 4;
+const PUSH_TO_TALK_MIN_SPEECH_CHUNKS = 2;
+const ASSISTANT_SPEECH_GATE_MS = 1200;
 
 function buildInitialProfile() {
   return {
@@ -144,6 +147,15 @@ export default function useLiveAgentApp() {
   const pushToTalkActiveRef = useRef(false);
   const pushToTalkReleaseTimerRef = useRef(null);
   const speechTurnOpenRef = useRef(false);
+  const speechChunkBufferRef = useRef([]);
+  const speechSentChunkCountRef = useRef(0);
+  const awaitingAssistantTurnRef = useRef(false);
+  const assistantStateRef = useRef("idle");
+  const assistantSpeechGateUntilRef = useRef(0);
+
+  useEffect(() => {
+    assistantStateRef.current = assistantState;
+  }, [assistantState]);
 
   useEffect(() => {
     speechInputModeRef.current = speechInputMode;
@@ -240,10 +252,14 @@ export default function useLiveAgentApp() {
   }, []);
 
   const endSpeechTurn = useCallback(() => {
+    speechChunkBufferRef.current = [];
     if (!speechTurnOpenRef.current) {
+      speechSentChunkCountRef.current = 0;
       return;
     }
     speechTurnOpenRef.current = false;
+    speechSentChunkCountRef.current = 0;
+    awaitingAssistantTurnRef.current = true;
     sendSocketMessage({ type: "client.audio_end" });
   }, [sendSocketMessage]);
 
@@ -255,6 +271,10 @@ export default function useLiveAgentApp() {
     pushToTalkActiveRef.current = false;
     setIsPushToTalkActive(false);
     speechTurnOpenRef.current = false;
+    speechChunkBufferRef.current = [];
+    speechSentChunkCountRef.current = 0;
+    awaitingAssistantTurnRef.current = false;
+    assistantSpeechGateUntilRef.current = 0;
     if (!audioRouterRef.current) {
       setLiveAudioMode("SILENCE");
       return;
@@ -273,10 +293,49 @@ export default function useLiveAgentApp() {
 
     const router = createLiveAudioRouter({
       onSpeechChunk: (pcmBytes) => {
+        const suppressAutoSpeech =
+          speechInputModeRef.current !== "push_to_talk" &&
+          (awaitingAssistantTurnRef.current ||
+            assistantStateRef.current === "speaking" ||
+            performance.now() < assistantSpeechGateUntilRef.current);
+        if (suppressAutoSpeech) {
+          speechChunkBufferRef.current = [];
+          speechSentChunkCountRef.current = 0;
+          return;
+        }
         if (
           speechInputModeRef.current === "push_to_talk" &&
           !pushToTalkActiveRef.current
         ) {
+          return;
+        }
+        const requiredChunkCount =
+          speechInputModeRef.current === "push_to_talk"
+            ? PUSH_TO_TALK_MIN_SPEECH_CHUNKS
+            : AUTO_MIN_SPEECH_CHUNKS;
+        if (!speechTurnOpenRef.current) {
+          speechChunkBufferRef.current.push(pcmBytes);
+          if (speechChunkBufferRef.current.length < requiredChunkCount) {
+            return;
+          }
+          const bufferedChunks = speechChunkBufferRef.current;
+          speechChunkBufferRef.current = [];
+          let acceptedCount = 0;
+          for (const chunk of bufferedChunks) {
+            const accepted = sendSocketMessage({
+              type: "client.audio",
+              mime: "audio/pcm;rate=16000",
+              data_b64: bytesToBase64(chunk),
+            });
+            if (!accepted) {
+              speechSentChunkCountRef.current = 0;
+              return;
+            }
+            acceptedCount += 1;
+          }
+          speechTurnOpenRef.current = acceptedCount > 0;
+          speechSentChunkCountRef.current = acceptedCount;
+          awaitingAssistantTurnRef.current = false;
           return;
         }
         const accepted = sendSocketMessage({
@@ -285,7 +344,7 @@ export default function useLiveAgentApp() {
           data_b64: bytesToBase64(pcmBytes),
         });
         if (accepted) {
-          speechTurnOpenRef.current = true;
+          speechSentChunkCountRef.current += 1;
         }
       },
       onSpeechPause: () => {
@@ -432,6 +491,8 @@ export default function useLiveAgentApp() {
       }
 
       if (message.type === "server.audio") {
+        awaitingAssistantTurnRef.current = false;
+        assistantSpeechGateUntilRef.current = performance.now() + ASSISTANT_SPEECH_GATE_MS;
         if (playbackRef.current && message.data_b64) {
           await playbackRef.current.enqueue(message.data_b64, message.mime);
         }
@@ -485,6 +546,9 @@ export default function useLiveAgentApp() {
         if (!text) {
           return;
         }
+        if (role === "user" && message.partial) {
+          return;
+        }
         setMessages((items) =>
           upsertMessage(items, {
             id: makeMessageId(role, turnId, fallbackIndex),
@@ -494,6 +558,8 @@ export default function useLiveAgentApp() {
           }),
         );
         if (role === "assistant") {
+          awaitingAssistantTurnRef.current = false;
+          assistantSpeechGateUntilRef.current = performance.now() + ASSISTANT_SPEECH_GATE_MS;
           pulseAssistantSpeaking();
         }
       }
@@ -512,6 +578,10 @@ export default function useLiveAgentApp() {
     setSessionProfile(null);
     setConnectionMeta(buildInitialConnectionMeta());
     setIsConnecting(true);
+    awaitingAssistantTurnRef.current = false;
+    assistantSpeechGateUntilRef.current = 0;
+    speechChunkBufferRef.current = [];
+    speechSentChunkCountRef.current = 0;
 
     try {
       await ensurePlayback();
@@ -648,6 +718,10 @@ export default function useLiveAgentApp() {
     setConnectionMeta(buildInitialConnectionMeta());
     setLiveAudioLevels(buildInitialAudioLevels());
     setLiveAudioMode("SILENCE");
+    awaitingAssistantTurnRef.current = false;
+    assistantSpeechGateUntilRef.current = 0;
+    speechChunkBufferRef.current = [];
+    speechSentChunkCountRef.current = 0;
   }, [closePlayback, disconnectSocket, stopAudioRouter, stopCameraCapture]);
 
   return {

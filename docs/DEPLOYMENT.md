@@ -49,7 +49,18 @@
   - The deploy script clamps this to at least `600`
   - Defaults to `900`
 - `CLOUD_RUN_CONCURRENCY`
-  - Defaults to `8` for a conservative websocket-friendly setting
+  - Defaults to `2` for a more reliable live websocket setting
+- `CLOUD_RUN_MIN_INSTANCES`
+  - Defaults to `0`
+  - Set to `1` for demo or judge-facing deployments if you want to reduce cold starts
+- `CLOUD_RUN_MAX_INSTANCES`
+  - Defaults to `3`
+- `CLOUD_RUN_CPU`
+  - Optional
+  - Recommended starting point for live demo quality: `2`
+- `CLOUD_RUN_MEMORY`
+  - Optional
+  - Recommended starting point for live demo quality: `1Gi` or `2Gi`
 - `FRONTEND_FEATURES_URI`
   - Optional private asset source for landing-page feature art
   - Point it at a GCS folder such as `gs://eurydice-private-assets/features`
@@ -66,6 +77,11 @@
 - Set Cloud Run request timeout to at least 10 minutes if you want long-running websocket sessions.
 - Websocket clients must reconnect after timeouts or connection loss.
 - Each open websocket keeps a Cloud Run instance busy, so keep concurrency conservative for the MVP.
+- For real-time voice demos, prefer:
+  - `CLOUD_RUN_CONCURRENCY=1` or `2`
+  - `CLOUD_RUN_MIN_INSTANCES=1`
+  - `CLOUD_RUN_CPU=2`
+  - `CLOUD_RUN_MEMORY=1Gi` or `2Gi`
 - The deploy script only attaches Cloud SQL when `CLOUDSQL_INSTANCE_CONNECTION_NAME` is set.
 - The deploy script prefers Secret Manager for `DB_PASSWORD`, `FIREBASE_SERVICE_ACCOUNT_JSON`, and `VISTA_FIREBASE_WEB_CONFIG` when the corresponding `*_SECRET_NAME` variables are set.
 - The deploy script now creates or updates a Cloud Run job named `${SERVICE_NAME}-migrations` by default and runs `alembic upgrade head` before deploying the service revision.

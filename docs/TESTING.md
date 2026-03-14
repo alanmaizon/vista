@@ -10,6 +10,7 @@ This is the current test path for the reset Eurydice Live app.
   - `/ws/live` init, audio, video, text, and shutdown flow
   - Live bridge event sequencing
   - Conversation turn merging
+  - Ping-pong timing capture after `client.audio_end`
   - Runtime state and prompt behavior
 
 - **Frontend checks**
@@ -44,9 +45,19 @@ If all four pass, the current live-agent app is in good shape for local verifica
 python3 -m pytest backend/tests/test_websocket.py -q
 python3 -m pytest backend/tests/test_live_bridge_tools.py -q
 python3 -m pytest backend/tests/test_conversation_manager.py -q
+python3 backend/app/eval_live_pingpong.py
 ```
 
-Use these when working on the live session contract, bridge behavior, or transcript assembly.
+Use these when working on the live session contract, bridge behavior, transcript assembly, or turn latency.
+
+`backend/app/eval_live_pingpong.py` is the new reset-backend grading report. It drives the actual `/ws/live` contract with a fake bridge and reports:
+
+- prompt biasing
+- transcript propagation
+- first response latency after `client.audio_end`
+- first assistant audio latency
+- full assistant turn latency
+- turn completion
 
 ### Frontend
 
@@ -84,3 +95,4 @@ Then do one manual browser pass:
 3. Speak one prompt and confirm a reply comes back
 4. Toggle camera and confirm frames are accepted
 5. End the session and confirm the recap view appears
+6. Check `GET /api/runtime/debug` and confirm the latest session includes `pingpong.recent_turns`

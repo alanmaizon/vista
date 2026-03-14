@@ -94,6 +94,19 @@ Example response:
 
 Returns in-memory diagnostics for active and recent live sessions. Use this for demo proof, debugging, and backend sanity checks.
 
+Each session snapshot also includes a `pingpong` report for spoken turns. That report is keyed off `client.audio_end` and shows:
+
+- aggregate averages such as `average_first_response_ms`, `average_first_audio_ms`, and `average_full_turn_ms`
+- completed vs pending turn counts
+- `recent_turns[]` entries with:
+  - `user_turn_ended_at`
+  - `user_transcript_final`
+  - `first_response_ms`
+  - `first_transcript_ms`
+  - `first_audio_ms`
+  - `full_turn_ms`
+  - `status`
+
 Example response:
 
 ```json

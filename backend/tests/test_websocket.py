@@ -18,6 +18,7 @@ from app import main as main_module
 class FakeBridge:
     created: list["FakeBridge"] = []
     initial_events: list[dict] = []
+    audio_end_events: list[dict] = []
 
     def __init__(self, **kwargs) -> None:
         self.model_id = kwargs["model_id"]
@@ -45,6 +46,8 @@ class FakeBridge:
 
     async def send_audio_end(self) -> None:
         self.audio_end_calls += 1
+        for event in type(self).audio_end_events:
+            await self._events.put(event)
 
     async def send_image_jpeg(self, payload: bytes) -> None:
         self.sent_images.append(payload)
@@ -64,6 +67,7 @@ class FakeBridge:
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     FakeBridge.created = []
     FakeBridge.initial_events = []
+    FakeBridge.audio_end_events = []
 
     monkeypatch.setattr(main_module, "GeminiLiveBridge", FakeBridge)
     monkeypatch.setattr(main_module, "adk_runtime_status", lambda: (False, "test"))
@@ -211,6 +215,67 @@ def test_ws_live_forwards_audio_video_text_and_audio_end(client: TestClient) -> 
     post_stop_snapshot = client.get("/api/runtime/debug").json()
     assert post_stop_snapshot["active_session_count"] == 0
     assert post_stop_snapshot["recent_sessions"][0]["session_id"] == status_payload["session_id"]
+
+
+def test_runtime_debug_includes_pingpong_turn_timings(client: TestClient) -> None:
+    FakeBridge.audio_end_events = [
+        {
+            "type": "server.transcript",
+            "role": "user",
+            "text": "shoe the donkey",
+            "partial": False,
+            "turn_id": "user-1",
+            "chunk_index": 0,
+            "turn_complete": True,
+        },
+        {
+            "type": "server.transcript",
+            "role": "assistant",
+            "text": "Shoe the Donkey sounds good.",
+            "partial": False,
+            "turn_id": "assistant-1",
+            "chunk_index": 0,
+            "turn_complete": False,
+        },
+        {
+            "type": "server.audio",
+            "mime": "audio/pcm;rate=24000",
+            "data_b64": "AAAA",
+            "turn_id": "assistant-1",
+            "chunk_index": 1,
+            "turn_complete": False,
+        },
+        {
+            "type": "server.text",
+            "text": "Shoe the Donkey sounds good. Do you want the first phrase?",
+            "turn_id": "assistant-1",
+            "chunk_index": 2,
+            "turn_complete": True,
+        },
+    ]
+
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json({"type": "client.init", "mode": "music_tutor", "piece": "Shoe the Donkey"})
+        status_payload = ws.receive_json()
+        ws.send_json({"type": "client.audio", "mime": "audio/pcm;rate=16000", "data_b64": "AA=="})
+        ws.send_json({"type": "client.audio_end"})
+        for _ in range(4):
+            ws.receive_json()
+        ws.send_json({"type": "client.stop"})
+        ws.receive_json()
+
+    debug_payload = client.get("/api/runtime/debug").json()
+    session = debug_payload["recent_sessions"][0]
+    turn = session["pingpong"]["recent_turns"][0]
+    assert session["session_id"] == status_payload["session_id"]
+    assert session["pingpong"]["responded_turn_count"] == 1
+    assert session["pingpong"]["completed_turn_count"] == 1
+    assert turn["status"] == "completed"
+    assert turn["audio_chunk_count"] == 1
+    assert turn["user_transcript_final"] == "shoe the donkey"
+    assert turn["first_response_ms"] is not None
+    assert turn["first_audio_ms"] is not None
+    assert turn["full_turn_ms"] is not None
 
 
 def test_ws_live_reports_invalid_base64_payload(client: TestClient) -> None:

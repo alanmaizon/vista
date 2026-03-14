@@ -270,7 +270,7 @@ async def _forward_bridge_events(ws: WebSocket, bridge: GeminiLiveBridge, sessio
     async for event in bridge.receive():
         event_type = str(event.get("type", ""))
         if event_type:
-            runtime_registry.note_outbound(session_id, event_type)
+            runtime_registry.note_outbound(session_id, event_type, event)
         await _send_live_event(ws, event)
 
 
@@ -342,7 +342,15 @@ async def ws_live(ws: WebSocket) -> None:
                 },
             ),
         )
-        runtime_registry.note_outbound(session_id, "server.status")
+        runtime_registry.note_outbound(
+            session_id,
+            "server.status",
+            {
+                "type": "server.status",
+                "state": "connected",
+                "session_id": session_id,
+            },
+        )
 
         opening_prompt = build_opening_user_prompt(profile)
         if opening_prompt:
@@ -387,7 +395,14 @@ async def ws_live(ws: WebSocket) -> None:
                         ws,
                         ServerSummaryEvent(payload=_build_summary_payload(session_id, profile, bridge)),
                     )
-                    runtime_registry.note_outbound(session_id, "server.summary")
+                    runtime_registry.note_outbound(
+                        session_id,
+                        "server.summary",
+                        {
+                            "type": "server.summary",
+                            "session_id": session_id,
+                        },
+                    )
                     break
                 else:
                     await _send_live_event(ws, ErrorEvent.from_message(f"Unsupported message type: {message_type}"))
@@ -409,6 +424,20 @@ async def ws_live(ws: WebSocket) -> None:
         if bridge is not None:
             with contextlib.suppress(Exception):
                 await bridge.close()
-        runtime_registry.end_session(session_id)
+        closed_snapshot = runtime_registry.end_session(session_id)
+        if closed_snapshot is not None:
+            pingpong = closed_snapshot.get("pingpong") or {}
+            logger.info(
+                "Live session closed session_id=%s transport=%s inbound=%s outbound=%s "
+                "avg_first_response_ms=%s avg_first_audio_ms=%s avg_full_turn_ms=%s pending_turns=%s",
+                closed_snapshot.get("session_id"),
+                closed_snapshot.get("transport"),
+                closed_snapshot.get("inbound"),
+                closed_snapshot.get("outbound"),
+                pingpong.get("average_first_response_ms"),
+                pingpong.get("average_first_audio_ms"),
+                pingpong.get("average_full_turn_ms"),
+                pingpong.get("pending_turn_count"),
+            )
         with contextlib.suppress(RuntimeError):
             await ws.close()

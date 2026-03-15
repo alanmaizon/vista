@@ -1,51 +1,58 @@
-import os
+"""Environment-driven settings for the Ancient Greek tutor service."""
+
+from __future__ import annotations
+
+import json
+from functools import lru_cache
+from typing import Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .constitution import DEFAULT_SYSTEM_INSTRUCTIONS
-from .domains.music.constitution import DEFAULT_MUSIC_SYSTEM_INSTRUCTIONS
-
-
-DEPRECATED_LIVE_MODEL_ID = "gemini-live-2.5-flash-preview-native-audio-09-2025"
+from .schemas import TutorMode
 
 
 class Settings(BaseSettings):
-    """Global configuration for the Eurydice backend."""
+    app_name: str = "Ancient Greek Live Tutor"
+    environment: str = "development"
+    host: str = "0.0.0.0"
+    port: int = 8000
+    log_level: str = "INFO"
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    google_cloud_project: str | None = None
+    google_cloud_location: str = "us-central1"
+    gemini_live_model: str = "gemini-live-2.5-flash-preview"
+    gemini_response_model: str = "gemini-2.5-flash"
+    use_google_adk: bool = True
+    default_tutoring_mode: TutorMode = TutorMode.guided_reading
+    websocket_path: str = "/ws/live"
 
-    model_id: str = "gemini-live-2.5-flash-native-audio"
-    location: str = "us-central1"
-    fallback_location: str = "us-central1"
-    use_adk: bool = False
-    firebase_web_config: str = ""
-    session_cookie_name: str = "eurydice_session"
-    session_cookie_secure: bool = False
-    session_cookie_samesite: str = "lax"
-    session_cookie_domain: str = ""
-    session_cookie_max_age_seconds: int = 60 * 60 * 24 * 5
-    live_context_enabled: bool = True
-    live_context_max_chars: int = 2600
-    live_context_attempt_limit: int = 5
-    live_context_library_limit: int = 4
-    music_system_instructions: str = DEFAULT_MUSIC_SYSTEM_INSTRUCTIONS
-    project_id: str = Field(
-        default_factory=lambda: (
-            os.getenv("GOOGLE_CLOUD_PROJECT")
-            or os.getenv("GCLOUD_PROJECT")
-            or os.getenv("GOOGLE_CLOUD_PROJECT_ID")
-            or ""
-        )
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="TUTOR_",
+        extra="ignore",
     )
-    system_instructions: str = DEFAULT_SYSTEM_INSTRUCTIONS
 
-    model_config = SettingsConfigDict(env_prefix="VISTA_", extra="ignore")
-
-    @field_validator("model_id")
+    @field_validator("cors_origins", mode="before")
     @classmethod
-    def validate_model_id(cls, value: str) -> str:
-        if value == DEPRECATED_LIVE_MODEL_ID:
-            raise ValueError("The deprecated preview Gemini Live model is not allowed.")
-        return value
+    def parse_cors_origins(cls, value: Any) -> list[str]:
+        if value in (None, ""):
+            return ["http://localhost:5173"]
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("["):
+                parsed = json.loads(stripped)
+                if not isinstance(parsed, list):
+                    raise ValueError("TUTOR_CORS_ORIGINS must decode to a list of origins")
+                return [str(item) for item in parsed]
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        raise TypeError("Unsupported value for TUTOR_CORS_ORIGINS")
 
 
-settings = Settings()  # type: ignore[call-arg]
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+

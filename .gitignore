@@ -2,43 +2,23 @@
 .env
 .env.local
 .venv/
-.pytest_cache/
 __pycache__/
 *.pyc
+*.pyo
 *.log
 *.swp
-*.swo
 *~
 
-backend/.env
-frontend/react/node_modules/
-backend/adminsdk.json
-
-# IDE
-.idea/
-.vscode/
-*.sublime-project
-*.sublime-workspace
-
-# Test coverage
-.coverage
+.pytest_cache/
 coverage/
 htmlcov/
-.pytest_cache/
 
-# Build artifacts
+node_modules/
 dist/
 build/
-*.egg-info/
+.vite/
 
-# Memory store data
-memory_store.jsonl
+backend/.env
+frontend/.env
+frontend/.env.local
 
-# Private frontend assets fetched during CI/build
-frontend/public/features/*
-!frontend/public/features/.gitkeep
-
-# Landing (Next.js)
-landing/node_modules/
-landing/.next/
-landing/out/

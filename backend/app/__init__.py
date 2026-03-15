@@ -1,1 +1,2 @@
-"""Evaluation and utility scripts."""
+"""Ancient Greek live tutor backend package."""
+

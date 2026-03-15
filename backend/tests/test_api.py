@@ -38,6 +38,7 @@ def test_session_bootstrap() -> None:
     assert payload["live_session"]["protocol_version"] == "2026-03-15"
     assert "client.hello" in payload["live_session"]["accepted_client_events"]
     assert {tool["name"] for tool in payload["tools"]} == {
+        "resolve_reference",
         "parse_passage",
         "grade_attempt",
         "generate_drill",

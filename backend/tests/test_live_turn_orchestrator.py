@@ -25,6 +25,26 @@ def test_plan_turn_selects_parse_for_morphology_mode() -> None:
     assert plan.preflight_tool_name == "parse_passage"
 
 
+def test_plan_turn_selects_reference_resolution_for_reference_input() -> None:
+    orchestrator = LiveTurnOrchestrator(Settings())
+    plan = asyncio.run(
+        orchestrator.plan_turn(
+            mode=TutorMode.guided_reading,
+            target_text=None,
+            preferred_response_language="English",
+            turn_input=LiveTurnInput(
+                turn_id="turn-reference",
+                reason="done",
+                learner_text="Mark 1:1",
+                audio_chunk_count=0,
+                image_frame_count=0,
+            ),
+        )
+    )
+    assert plan.stage == "tool_preflight"
+    assert plan.preflight_tool_name == "resolve_reference"
+
+
 def test_plan_turn_selects_grade_for_translation_mode() -> None:
     orchestrator = LiveTurnOrchestrator(Settings())
     plan = asyncio.run(

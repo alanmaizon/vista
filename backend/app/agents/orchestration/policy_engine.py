@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..tools.reference import looks_like_reference_request
 from .contracts import TurnPlan, TurnPolicyContext
 from ...schemas import TutorMode
 
@@ -12,6 +13,20 @@ class TurnPolicyEngine:
     def choose(self, context: TurnPolicyContext) -> TurnPlan:
         learner_text = context.turn_input.learner_text.strip()
         lower_text = learner_text.lower()
+
+        if learner_text and looks_like_reference_request(learner_text) and not context.target_text:
+            return TurnPlan(
+                engine="heuristic-fallback",
+                stage="tool_preflight",
+                rationale=(
+                    "Resolve the cited passage first so the tutor can read and ground follow-up help in actual text."
+                ),
+                preflight_tool_name="resolve_reference",
+                preflight_tool_arguments={
+                    "reference": learner_text,
+                    "preferred_translation_language": context.preferred_response_language,
+                },
+            )
 
         if context.mode == TutorMode.morphology_coach or any(
             marker in lower_text for marker in ("parse", "morph", "ending", "case", "declension")

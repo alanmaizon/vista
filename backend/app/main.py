@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .agents.orchestration.live_turns import LiveTurnInput, LiveTurnOrchestrator
 from .agents.prompts import build_system_prompt
+from .agents.tools.reference import looks_like_reference_request
 from .agents.tools import ToolExecutionError, build_default_tool_registry, execute_tool_call
 from .api.router import api_router
 from .api.routes.health import router as health_router
@@ -131,6 +132,21 @@ def _merge_streaming_text(previous_text: str, incoming_text: str) -> str:
     return f"{previous} {incoming}"
 
 
+def _is_read_request(text: str) -> bool:
+    normalized = _compact_text(text).lower()
+    return any(
+        phrase in normalized
+        for phrase in (
+            "can you read it",
+            "read it",
+            "read that",
+            "read this",
+            "please read it",
+            "could you read it",
+        )
+    )
+
+
 def _append_message(
     memory: list[dict[str, str]],
     *,
@@ -162,6 +178,7 @@ def _build_session_context_message(
     *,
     history: list[dict[str, str]],
     mode: str,
+    target_reference: str | None,
     target_text: str | None,
     preferred_response_language: str,
 ) -> str:
@@ -174,12 +191,18 @@ def _build_session_context_message(
         dialogue_lines.append(f"- {label}: {item.get('content', '')}")
     full_dialogue = "\n".join(dialogue_lines)
 
-    target_line = f"Target passage: {target_text}" if target_text else "Target passage: (none)"
+    reference_line = (
+        f"Target passage reference: {target_reference}"
+        if target_reference
+        else "Target passage reference: (none)"
+    )
+    target_line = f"Target passage text: {target_text}" if target_text else "Target passage text: (none)"
     return (
         "[session_context]\n"
         "Use the full in-session dialogue history below when answering.\n"
         f"Tutoring mode: {mode}\n"
         f"Preferred explanation language: {preferred_response_language}\n"
+        f"{reference_line}\n"
         f"{target_line}\n"
         "Conversation history (oldest to newest):\n"
         f"{full_dialogue}\n"
@@ -239,7 +262,9 @@ async def live_websocket(websocket: WebSocket) -> None:
         "audio_chunk_index": 0,
         "mode": settings.default_tutoring_mode,
         "target_text": None,
+        "target_reference": None,
         "preferred_response_language": "English",
+        "pending_reference": None,
     }
     turn_buffers: dict[str, dict[str, Any]] = {}
     session_memory: list[dict[str, str]] = []
@@ -289,6 +314,52 @@ async def live_websocket(websocket: WebSocket) -> None:
         add_user_message(session_memory, compact_text, turn_id=turn_id)
         committed_learner_turn_ids.add(turn_id)
         learner_audio_memory_buffers.pop(turn_id, None)
+
+    async def emit_local_tutor_reply(turn_id: str, text: str) -> None:
+        compact_text = _compact_text(text)
+        if not compact_text:
+            return
+        await emit(
+            ServerTextOutputEvent(
+                session_id=state["session_id"] or "session-unknown",
+                turn_id=turn_id,
+                text=compact_text,
+                is_final=True,
+            )
+        )
+        await emit(
+            ServerTranscriptEvent(
+                session_id=state["session_id"] or "session-unknown",
+                turn_id=turn_id,
+                speaker="tutor",
+                source="output_text",
+                text=compact_text,
+                is_final=True,
+                interrupted=False,
+            )
+        )
+        add_assistant_message(session_memory, compact_text, turn_id=turn_id)
+        await emit(
+            ServerTurnEvent(
+                session_id=state["session_id"] or "session-unknown",
+                turn_id=turn_id,
+                event="turn_complete",
+                detail="Backend satisfied this turn locally without an upstream generation.",
+            )
+        )
+
+    def apply_tool_side_effects(tool_name: str, tool_result: dict[str, Any]) -> None:
+        if tool_name != "resolve_reference" or tool_result.get("status") != "ok":
+            return
+
+        resolved_text = str(tool_result.get("resolved_text", "")).strip()
+        normalized_reference = str(tool_result.get("normalized_reference", "")).strip()
+        if not resolved_text:
+            return
+
+        state["target_text"] = resolved_text
+        state["target_reference"] = normalized_reference or state["target_reference"]
+        state["pending_reference"] = None
 
     def cancel_turn_first_output_watchdog(turn_id: str) -> None:
         watchdog = turn_first_output_watchdogs.pop(turn_id, None)
@@ -397,6 +468,7 @@ async def live_websocket(websocket: WebSocket) -> None:
         )
         try:
             result = execute_tool_call(tool_name, args)
+            apply_tool_side_effects(tool_name, result)
             await emit(
                 ServerToolResultEvent(
                     session_id=state["session_id"] or "session-unknown",
@@ -733,9 +805,11 @@ async def live_websocket(websocket: WebSocket) -> None:
                 state["active_generation_turn_id"] = None
                 state["mode"] = event.mode or settings.default_tutoring_mode
                 state["target_text"] = event.target_text.strip() if event.target_text else None
+                state["target_reference"] = None
                 state["preferred_response_language"] = (
                     event.preferred_response_language or "English"
                 )
+                state["pending_reference"] = None
                 turn_buffers.clear()
                 session_memory.clear()
                 learner_audio_memory_buffers.clear()
@@ -973,6 +1047,31 @@ async def live_websocket(websocket: WebSocket) -> None:
                 )
                 if turn_input.learner_text:
                     commit_learner_memory(event.turn_id, turn_input.learner_text)
+
+                learner_text = turn_input.learner_text
+                if learner_text and looks_like_reference_request(learner_text) and not state["target_text"]:
+                    state["pending_reference"] = _compact_text(learner_text)
+
+                if learner_text and _is_read_request(learner_text) and state["pending_reference"] and not state["target_text"]:
+                    await emit(
+                        ServerTurnEvent(
+                            session_id=state["session_id"],
+                            turn_id=event.turn_id,
+                            event="learner_turn_closed",
+                            detail=f"Learner turn ended because: {event.reason}.",
+                        )
+                    )
+                    await emit_local_tutor_reply(
+                        event.turn_id,
+                        (
+                            f"I still do not have the text of {state['pending_reference']} in the session. "
+                            "Paste the verse or point your camera at it, and then I can read it with you."
+                        ),
+                    )
+                    continue
+
+                if learner_text and state["target_text"]:
+                    state["pending_reference"] = None
                 plan = await turn_orchestrator.plan_turn(
                     mode=state["mode"],
                     target_text=state["target_text"],
@@ -1015,6 +1114,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                             plan.preflight_tool_arguments,
                         )
                     except ToolExecutionError as exc:
+                        failure_payload = {"status": "error", "message": str(exc)}
                         await emit(
                             ServerToolResultEvent(
                                 session_id=state["session_id"],
@@ -1022,11 +1122,25 @@ async def live_websocket(websocket: WebSocket) -> None:
                                 tool_call_id=orchestrator_tool_call_id,
                                 tool_name=plan.preflight_tool_name,
                                 status="failed",
-                                result={"status": "error", "message": str(exc)},
+                                result=failure_payload,
                                 error="ORCHESTRATION_PREFLIGHT_FAILED",
                             )
                         )
+                        if (
+                            plan.preflight_tool_name == "resolve_reference"
+                            and state["pending_reference"]
+                            and not state["target_text"]
+                        ):
+                            await emit_local_tutor_reply(
+                                event.turn_id,
+                                (
+                                    f"I could not resolve {state['pending_reference']} from the current corpus. "
+                                    "Paste the Greek text or show it on camera, and I can work with it directly."
+                                ),
+                            )
+                            continue
                     else:
+                        apply_tool_side_effects(plan.preflight_tool_name, preflight_result)
                         preflight_result_with_meta = {
                             **preflight_result,
                             "orchestration_engine": plan.engine,
@@ -1042,6 +1156,20 @@ async def live_websocket(websocket: WebSocket) -> None:
                                 result=preflight_result_with_meta,
                             )
                         )
+                        if (
+                            plan.preflight_tool_name == "resolve_reference"
+                            and preflight_result.get("status") != "ok"
+                            and state["pending_reference"]
+                            and not state["target_text"]
+                        ):
+                            await emit_local_tutor_reply(
+                                event.turn_id,
+                                (
+                                    f"I could not resolve {state['pending_reference']} from the current corpus. "
+                                    "Paste the Greek text or show it on camera, and I can work with it directly."
+                                ),
+                            )
+                            continue
                         await send_orchestration_context_to_gemini(
                             turn_id=event.turn_id,
                             tool_name=plan.preflight_tool_name,
@@ -1057,6 +1185,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                     learner_payload = _build_session_context_message(
                         history=list(session_memory),
                         mode=mode_value,
+                        target_reference=state["target_reference"],
                         target_text=state["target_text"],
                         preferred_response_language=state["preferred_response_language"],
                     )
@@ -1085,6 +1214,8 @@ async def live_websocket(websocket: WebSocket) -> None:
                 if gemini_connection is not None:
                     state["active_generation_turn_id"] = event.turn_id
                     try:
+                        if turn_input.audio_chunk_count > 0 and hasattr(gemini_connection, "end_audio_stream"):
+                            await gemini_connection.end_audio_stream()
                         await gemini_connection.end_turn()
                         arm_turn_first_output_watchdog(event.turn_id)
                     except Exception:

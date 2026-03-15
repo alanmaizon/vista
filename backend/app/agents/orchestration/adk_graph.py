@@ -15,7 +15,7 @@ from .policy_engine import TurnPolicyEngine
 
 logger = logging.getLogger("ancient_greek.orchestration")
 
-_ALLOWED_TOOLS = {"parse_passage", "grade_attempt", "generate_drill"}
+_ALLOWED_TOOLS = {"resolve_reference", "parse_passage", "grade_attempt", "generate_drill"}
 _ALLOWED_STAGES = {"tool_preflight", "direct_generation"}
 
 _INTENT_AGENT_INSTRUCTION = """You classify learner-turn intent for an Ancient Greek tutor.
@@ -35,7 +35,7 @@ Rules:
 - Use "tool_preflight" when deterministic grounding should happen first.
 - Use "direct_generation" when model generation can proceed immediately.
 - If you choose "tool_preflight", preflight_tool_name must be one of:
-  parse_passage, grade_attempt, generate_drill.
+  resolve_reference, parse_passage, grade_attempt, generate_drill.
 - preflight_tool_arguments must match the chosen tool.
 - Keep rationale short and operational.
 
@@ -43,7 +43,7 @@ Return JSON only in this schema:
 {
   "stage": "tool_preflight" | "direct_generation",
   "rationale": "short rationale",
-  "preflight_tool_name": "parse_passage" | "grade_attempt" | "generate_drill" | null,
+  "preflight_tool_name": "resolve_reference" | "parse_passage" | "grade_attempt" | "generate_drill" | null,
   "preflight_tool_arguments": { ... }
 }
 """

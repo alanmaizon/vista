@@ -11,6 +11,7 @@ class FakeGeminiConnection:
         self._messages = messages
         self.tool_responses: list[dict[str, object]] = []
         self.sent_texts: list[str] = []
+        self.end_audio_stream_count = 0
         self.end_turn_count = 0
         self.closed = False
 
@@ -40,6 +41,9 @@ class FakeGeminiConnection:
 
     async def end_turn(self) -> None:  # pragma: no cover - not used in this test
         self.end_turn_count += 1
+
+    async def end_audio_stream(self) -> None:
+        self.end_audio_stream_count += 1
 
     async def send_tool_response(
         self,
@@ -375,3 +379,208 @@ def test_live_text_is_forwarded_once_per_closed_turn(monkeypatch) -> None:
     assert "Learner: what is logos?" in fake_connection.sent_texts[1]
     assert "Learner: what context?" in fake_connection.sent_texts[1]
     assert fake_connection.end_turn_count == 2
+
+
+def test_live_audio_turn_flushes_audio_stream_before_generation(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+
+    async def fake_connect_session(*, system_prompt: str, tools):
+        assert "Current tutoring mode:" in system_prompt
+        assert any(tool.name == "parse_passage" for tool in tools)
+        return fake_connection
+
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-audio-1",
+                "mode": "guided_reading",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+        websocket.receive_json()  # ready status
+        websocket.receive_json()  # listening status
+
+        websocket.send_json(
+            {
+                "type": "client.input.audio",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-audio-1",
+                "chunk_index": 0,
+                "mime_type": "audio/pcm;rate=16000",
+                "data_base64": "AAE=",
+                "is_final_chunk": False,
+            }
+        )
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-audio-1",
+                "reason": "stop_recording",
+            }
+        )
+        _ = [websocket.receive_json() for _ in range(3)]  # closed, orchestration status, thinking status
+
+    assert fake_connection.end_audio_stream_count == 1
+    assert fake_connection.end_turn_count == 1
+
+
+def test_reference_turn_loads_passage_into_session_context(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+
+    async def fake_connect_session(*, system_prompt: str, tools):
+        assert "Current tutoring mode:" in system_prompt
+        assert any(tool.name == "resolve_reference" for tool in tools)
+        return fake_connection
+
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-reference-1",
+                "mode": "guided_reading",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+        websocket.receive_json()  # ready status
+        websocket.receive_json()  # listening status
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-reference-1",
+                "text": "Mark 1:1",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-reference-1",
+                "reason": "done",
+            }
+        )
+
+        _ = [websocket.receive_json() for _ in range(5)]
+
+    assert fake_connection.end_turn_count == 1
+    assert any(
+        sent_text.startswith("[orchestration_context]") and "resolve_reference" in sent_text
+        for sent_text in fake_connection.sent_texts
+    )
+    session_context_message = next(
+        sent_text for sent_text in fake_connection.sent_texts if sent_text.startswith("[session_context]")
+    )
+    assert "Target passage reference: mark 1:1" in session_context_message
+    assert "Target passage text: Αρχη του ευαγγελιου Ιησου Χριστου υιου θεου." in session_context_message
+
+
+def test_unknown_reference_prompts_for_passage_text_instead_of_stalling(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+
+    async def fake_connect_session(*, system_prompt: str, tools):
+        assert "Current tutoring mode:" in system_prompt
+        assert any(tool.name == "resolve_reference" for tool in tools)
+        return fake_connection
+
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-reference-miss-1",
+                "mode": "guided_reading",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+        websocket.receive_json()  # ready status
+        websocket.receive_json()  # listening status
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-reference-miss-1",
+                "text": "Mark 99:99",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-reference-miss-1",
+                "reason": "done",
+            }
+        )
+
+        local_reply_events = [websocket.receive_json() for _ in range(7)]
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-reference-miss-2",
+                "text": "can you read it?",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-reference-miss-2",
+                "reason": "done",
+            }
+        )
+
+        follow_up_events = [websocket.receive_json() for _ in range(4)]
+
+    first_text = next(event for event in local_reply_events if event["type"] == "server.output.text")
+    assert "could not resolve Mark 99:99" in first_text["text"]
+
+    second_text = next(event for event in follow_up_events if event["type"] == "server.output.text")
+    assert "still do not have the text of Mark 99:99" in second_text["text"]
+    assert fake_connection.end_turn_count == 0
+    assert fake_connection.sent_texts == []

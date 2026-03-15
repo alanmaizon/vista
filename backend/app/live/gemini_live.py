@@ -57,6 +57,9 @@ class GeminiLiveConnection:
         blob = self._types.Blob(data=audio_bytes, mime_type=mime_type)
         await self._session.send_realtime_input(audio=blob, audio_stream_end=is_final_chunk)
 
+    async def end_audio_stream(self) -> None:
+        await self._session.send_realtime_input(audio_stream_end=True)
+
     async def send_image_chunk(
         self,
         *,

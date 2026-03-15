@@ -14,6 +14,31 @@ def test_parse_tool_returns_analysis() -> None:
     assert result["analysis"]["part_of_speech"] in {"noun_or_adjective", "verb", "unknown"}
 
 
+def test_resolve_reference_tool_returns_passage_text() -> None:
+    result = execute_tool_call(
+        "resolve_reference",
+        {
+            "reference": "Mark 1:1",
+            "preferred_translation_language": "English",
+        },
+    )
+    assert result["tool"] == "resolve_reference"
+    assert result["status"] == "ok"
+    assert result["normalized_reference"] == "mark 1:1"
+    assert "ευαγγελιου" in result["resolved_text"].lower()
+
+
+def test_resolve_reference_tool_returns_not_found_for_unknown_reference() -> None:
+    result = execute_tool_call(
+        "resolve_reference",
+        {
+            "reference": "Mark 99:99",
+        },
+    )
+    assert result["tool"] == "resolve_reference"
+    assert result["status"] == "not_found"
+
+
 def test_grade_tool_scores_against_reference() -> None:
     result = execute_tool_call(
         "grade_attempt",
@@ -49,4 +74,3 @@ def test_unknown_tool_raises_execution_error() -> None:
     except ToolExecutionError:
         return
     raise AssertionError("Expected ToolExecutionError for unknown tool")
-

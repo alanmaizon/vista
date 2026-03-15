@@ -6,6 +6,7 @@ from .drill import build_drill_generation_tool
 from .grade import build_grade_response_tool
 from .parse import build_parse_tool
 from .registry import ToolRegistry
+from .runtime import ToolExecutionError, execute_tool_call
 
 
 def build_default_tool_registry() -> ToolRegistry:
@@ -17,3 +18,9 @@ def build_default_tool_registry() -> ToolRegistry:
         ]
     )
 
+
+__all__ = [
+    "ToolExecutionError",
+    "build_default_tool_registry",
+    "execute_tool_call",
+]

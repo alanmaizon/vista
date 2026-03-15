@@ -59,9 +59,10 @@ flowchart LR
 - A bootstrap API that returns mode metadata, registered tools, prompt preview, and live session configuration
 - A stable websocket path the frontend can code against immediately
 - A typed websocket contract documented in `docs/live-event-contract.md` and mirrored in backend/frontend source
+- Initial deterministic tool executors (`parse_passage`, `grade_attempt`, `generate_drill`) wired to live tool calls
 
 ## What comes next
 
 1. Build the first ADK orchestration pass around tutoring turns and tool routing.
-2. Implement deterministic outputs for parsing, grading, and drill generation.
+2. Improve deterministic outputs for parsing, grading, and drill generation.
 3. Add persistence for session state and learner progress.

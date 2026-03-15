@@ -56,6 +56,6 @@ Or configure Vertex mode with `TUTOR_GOOGLE_CLOUD_PROJECT`.
 ## What is still a stub
 
 - ADK agent graph and tool execution
-- deterministic tool execution (parse/grade/drill currently return placeholder tool results)
+- deeper deterministic tool logic (current parse/grade/drill execution is intentionally lightweight)
 - storage, auth, and session persistence
 - production observability

@@ -16,7 +16,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .agents.prompts import build_system_prompt
-from .agents.tools import build_default_tool_registry
+from .agents.tools import ToolExecutionError, build_default_tool_registry, execute_tool_call
 from .api.router import api_router
 from .api.routes.health import router as health_router
 from .live.gemini_live import GeminiLiveConnection, GeminiLiveGateway
@@ -104,16 +104,6 @@ def _normalize_function_args(raw_args: Any) -> dict[str, Any]:
             return parsed
         return {"raw_args": parsed}
     return {"raw_args": raw_args}
-
-
-def _tool_not_implemented_response(tool_name: str) -> dict[str, Any]:
-    return {
-        "status": "NOT_IMPLEMENTED",
-        "message": (
-            f"Tool '{tool_name}' is registered but executable logic is not implemented yet in this "
-            "bridge iteration."
-        ),
-    }
 
 
 async def send_live_event(
@@ -214,24 +204,41 @@ async def live_websocket(websocket: WebSocket) -> None:
                 status="requested",
             )
         )
-
-        placeholder_response = _tool_not_implemented_response(tool_name)
-        await emit(
-            ServerToolResultEvent(
-                session_id=state["session_id"] or "session-unknown",
-                turn_id=turn_id,
+        try:
+            result = execute_tool_call(tool_name, args)
+            await emit(
+                ServerToolResultEvent(
+                    session_id=state["session_id"] or "session-unknown",
+                    turn_id=turn_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    status="completed",
+                    result=result,
+                )
+            )
+            await send_tool_response_to_gemini(
                 tool_call_id=tool_call_id,
                 tool_name=tool_name,
-                status="failed",
-                result=placeholder_response,
-                error="NOT_IMPLEMENTED",
+                response=result,
             )
-        )
-        await send_tool_response_to_gemini(
-            tool_call_id=tool_call_id,
-            tool_name=tool_name,
-            response=placeholder_response,
-        )
+        except ToolExecutionError as exc:
+            failure_payload = {"status": "error", "message": str(exc), "tool": tool_name}
+            await emit(
+                ServerToolResultEvent(
+                    session_id=state["session_id"] or "session-unknown",
+                    turn_id=turn_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    status="failed",
+                    result=failure_payload,
+                    error="TOOL_EXECUTION_FAILED",
+                )
+            )
+            await send_tool_response_to_gemini(
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                response=failure_payload,
+            )
 
     async def pump_gemini_messages() -> None:
         if gemini_connection is None:

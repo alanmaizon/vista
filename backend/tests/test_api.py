@@ -37,6 +37,12 @@ def test_session_bootstrap() -> None:
     assert payload["live_session"]["provider"] == "gemini-live"
     assert payload["live_session"]["protocol_version"] == "2026-03-15"
     assert "client.hello" in payload["live_session"]["accepted_client_events"]
+    assert {tool["name"] for tool in payload["tools"]} == {
+        "parse_passage",
+        "grade_attempt",
+        "generate_drill",
+    }
+    assert all(tool["status"] == "ready" for tool in payload["tools"])
     assert payload["session_state"]["microphone_ready"] is True
 
 

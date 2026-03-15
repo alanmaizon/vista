@@ -76,9 +76,7 @@ app.include_router(health_router)
 app.include_router(api_router)
 
 _SECONDS_DURATION_RE = re.compile(r"^(?P<seconds>\d+(?:\.\d+)?)s$")
-_MAX_SESSION_MEMORY_MESSAGES = 24
-_MAX_SESSION_MEMORY_CHARS = 320
-_MAX_SESSION_CONTEXT_MESSAGES = 10
+_MAX_SESSION_MESSAGE_CHARS = 1200
 
 
 def _decode_base64_payload(payload: str, *, field_name: str) -> bytes:
@@ -132,10 +130,10 @@ def _merge_streaming_text(previous_text: str, incoming_text: str) -> str:
     return f"{previous} {incoming}"
 
 
-def _append_session_memory(
+def _append_message(
     memory: list[dict[str, str]],
     *,
-    speaker: str,
+    role: str,
     turn_id: str,
     text: str,
 ) -> None:
@@ -144,13 +142,19 @@ def _append_session_memory(
         return
     memory.append(
         {
-            "speaker": speaker,
+            "role": role,
             "turn_id": turn_id,
-            "text": compact_text[:_MAX_SESSION_MEMORY_CHARS],
+            "content": compact_text[:_MAX_SESSION_MESSAGE_CHARS],
         }
     )
-    if len(memory) > _MAX_SESSION_MEMORY_MESSAGES:
-        del memory[:-_MAX_SESSION_MEMORY_MESSAGES]
+
+
+def add_user_message(messages: list[dict[str, str]], text: str, *, turn_id: str) -> None:
+    _append_message(messages, role="user", turn_id=turn_id, text=text)
+
+
+def add_assistant_message(messages: list[dict[str, str]], text: str, *, turn_id: str) -> None:
+    _append_message(messages, role="assistant", turn_id=turn_id, text=text)
 
 
 def _build_session_context_message(
@@ -159,32 +163,27 @@ def _build_session_context_message(
     mode: str,
     target_text: str | None,
     preferred_response_language: str,
-    learner_text: str,
 ) -> str:
-    compact_learner_text = _compact_text(learner_text)
-    if not compact_learner_text:
-        return learner_text
     if not history:
-        return compact_learner_text
+        return ""
 
-    recent_entries = history[-_MAX_SESSION_CONTEXT_MESSAGES:]
     dialogue_lines = []
-    for item in recent_entries:
-        label = "Learner" if item.get("speaker") == "learner" else "Tutor"
-        dialogue_lines.append(f"- {label}: {item.get('text', '')}")
-    recent_dialogue = "\n".join(dialogue_lines)
+    for item in history:
+        label = "Learner" if item.get("role") == "user" else "Tutor"
+        dialogue_lines.append(f"- {label}: {item.get('content', '')}")
+    full_dialogue = "\n".join(dialogue_lines)
 
     target_line = f"Target passage: {target_text}" if target_text else "Target passage: (none)"
     return (
         "[session_context]\n"
-        "Use the recent dialogue context below when answering the learner.\n"
+        "Use the full in-session dialogue history below when answering.\n"
         f"Tutoring mode: {mode}\n"
         f"Preferred explanation language: {preferred_response_language}\n"
         f"{target_line}\n"
-        "Recent dialogue:\n"
-        f"{recent_dialogue}\n"
+        "Conversation history (oldest to newest):\n"
+        f"{full_dialogue}\n"
         "[/session_context]\n"
-        f"Current learner turn: {compact_learner_text}"
+        "Respond to the most recent learner message."
     )
 
 
@@ -270,12 +269,7 @@ async def live_websocket(websocket: WebSocket) -> None:
         buffered = tutor_memory_buffers.pop(turn_id, "")
         tutor_audio_turn_ids.discard(turn_id)
         if buffered:
-            _append_session_memory(
-                session_memory,
-                speaker="tutor",
-                turn_id=turn_id,
-                text=buffered,
-            )
+            add_assistant_message(session_memory, buffered, turn_id=turn_id)
 
     async def send_tool_response_to_gemini(
         tool_call_id: str,
@@ -890,14 +884,8 @@ async def live_websocket(websocket: WebSocket) -> None:
                     audio_chunk_count=int(turn_buffer["audio_chunk_count"]),
                     image_frame_count=int(turn_buffer["image_frame_count"]),
                 )
-                prior_session_history = list(session_memory)
                 if turn_input.learner_text:
-                    _append_session_memory(
-                        session_memory,
-                        speaker="learner",
-                        turn_id=event.turn_id,
-                        text=turn_input.learner_text,
-                    )
+                    add_user_message(session_memory, turn_input.learner_text, turn_id=event.turn_id)
                 plan = await turn_orchestrator.plan_turn(
                     mode=state["mode"],
                     target_text=state["target_text"],
@@ -980,11 +968,10 @@ async def live_websocket(websocket: WebSocket) -> None:
                         else str(state["mode"])
                     )
                     learner_payload = _build_session_context_message(
-                        history=prior_session_history,
+                        history=list(session_memory),
                         mode=mode_value,
                         target_text=state["target_text"],
                         preferred_response_language=state["preferred_response_language"],
-                        learner_text=turn_input.learner_text,
                     )
                     try:
                         await gemini_connection.send_text(learner_payload)

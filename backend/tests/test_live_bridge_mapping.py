@@ -369,8 +369,9 @@ def test_live_text_is_forwarded_once_per_closed_turn(monkeypatch) -> None:
         _ = [websocket.receive_json() for _ in range(3)]  # closed, orchestration status, thinking status
 
     assert len(fake_connection.sent_texts) == 2
-    assert fake_connection.sent_texts[0] == "what is logos?"
+    assert "[session_context]" in fake_connection.sent_texts[0]
+    assert "Learner: what is logos?" in fake_connection.sent_texts[0]
     assert "[session_context]" in fake_connection.sent_texts[1]
     assert "Learner: what is logos?" in fake_connection.sent_texts[1]
-    assert "Current learner turn: what context?" in fake_connection.sent_texts[1]
+    assert "Learner: what context?" in fake_connection.sent_texts[1]
     assert fake_connection.end_turn_count == 2

@@ -1,6 +1,6 @@
 # Infrastructure Notes
 
-This repository is intentionally light on infrastructure for now.
+This repository is intentionally minimal on infrastructure, but now includes practical Cloud Build pipelines for provisioning and backend deploy.
 
 ## Deployment direction
 
@@ -9,7 +9,9 @@ This repository is intentionally light on infrastructure for now.
 - Secrets: Secret Manager
 - Future persistence: likely Cloud SQL or Firestore, depending on session-state needs
 
-## Why there is no deployment automation yet
+## Cloud Build pipelines
 
-The app surface is still scaffold-level, so shipping Terraform or Cloud Build config right now would create fake completeness. The backend Dockerfile is present because it is a low-cost, useful foundation for later Cloud Run deployment.
+- `cloudbuild/provision.yaml`: idempotent setup for APIs, Artifact Registry, runtime service account, and secret access
+- `cloudbuild/deploy-backend.yaml`: docker build/push and Cloud Run deploy for `backend/Dockerfile`
 
+See [Cloud Build Provisioning](/Users/alanmaizon/vista/infra/cloudbuild.md) for commands, IAM prerequisites, and recommended trigger setup.

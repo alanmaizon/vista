@@ -1,0 +1,58 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE_NAME: vista-ai-backend
+  _AR_REPO: ancient-greek-backend
+  _IMAGE_NAME: backend
+  _RUNTIME_SA: tutor-runtime
+  _ALLOW_UNAUTHENTICATED: "true"
+  _TUTOR_USE_GOOGLE_ADK: "true"
+
+steps:
+  - id: build-backend-image
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE_URI="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${SHORT_SHA}"
+        docker build -f backend/Dockerfile -t "$${IMAGE_URI}" .
+
+  - id: push-backend-image
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE_URI="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${SHORT_SHA}"
+        docker push "$${IMAGE_URI}"
+
+  - id: deploy-cloud-run
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE_URI="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${SHORT_SHA}"
+        RUNTIME_SA_EMAIL="${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+        auth_flag=(--allow-unauthenticated)
+        if [ "${_ALLOW_UNAUTHENTICATED}" != "true" ]; then
+          auth_flag=(--no-allow-unauthenticated)
+        fi
+
+        gcloud run deploy "${_SERVICE_NAME}" \
+          --project="${PROJECT_ID}" \
+          --region="${_REGION}" \
+          --platform=managed \
+          --image="$${IMAGE_URI}" \
+          --service-account="$${RUNTIME_SA_EMAIL}" \
+          --port=8080 \
+          --set-env-vars="TUTOR_ENVIRONMENT=production,TUTOR_GOOGLE_CLOUD_PROJECT=${PROJECT_ID},TUTOR_GOOGLE_CLOUD_LOCATION=${_REGION},TUTOR_USE_GOOGLE_ADK=${_TUTOR_USE_GOOGLE_ADK}" \
+          --set-secrets="TUTOR_GEMINI_API_KEY=TUTOR_GEMINI_API_KEY:latest" \
+          "$${auth_flag[@]}"

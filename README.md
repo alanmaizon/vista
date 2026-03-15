@@ -15,6 +15,7 @@ This scaffold keeps that shape, while leaving the archival application under `le
 
 ```text
 vista/
+├── cloudbuild/       # Cloud Build configs for infra provisioning and backend deploy
 ├── backend/          # FastAPI scaffold for session bootstrap, runtime info, and Gemini Live websocket bridge
 ├── docs/             # Product and architecture notes
 ├── frontend/         # Vite + React + TypeScript scaffold for the tutor session UI
@@ -37,7 +38,7 @@ What exists now:
 What is intentionally not implemented yet:
 
 - ADK decision quality evaluation and guardrail tuning
-- Persistent storage, auth, or deployment automation
+- Persistent storage, auth, or full infrastructure-as-code coverage
 
 ## Local development
 

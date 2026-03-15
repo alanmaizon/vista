@@ -9,6 +9,7 @@ substitutions:
   _RUNTIME_SA: tutor-runtime
   _ALLOW_UNAUTHENTICATED: "true"
   _TUTOR_USE_GOOGLE_ADK: "true"
+  _CORS_ORIGINS: https://vista-ai-488623.web.app;https://vista-ai-488623.firebaseapp.com
 
 steps:
   - id: build-backend-image
@@ -65,6 +66,6 @@ steps:
           --image="$${IMAGE_URI}" \
           --service-account="$${RUNTIME_SA_EMAIL}" \
           --port=8080 \
-          --set-env-vars="TUTOR_ENVIRONMENT=production,TUTOR_GOOGLE_CLOUD_PROJECT=${PROJECT_ID},TUTOR_GOOGLE_CLOUD_LOCATION=${_REGION},TUTOR_USE_GOOGLE_ADK=${_TUTOR_USE_GOOGLE_ADK}" \
+          --set-env-vars="TUTOR_ENVIRONMENT=production,TUTOR_GOOGLE_CLOUD_PROJECT=${PROJECT_ID},TUTOR_GOOGLE_CLOUD_LOCATION=${_REGION},TUTOR_USE_GOOGLE_ADK=${_TUTOR_USE_GOOGLE_ADK},TUTOR_CORS_ORIGINS=${_CORS_ORIGINS}" \
           --set-secrets="TUTOR_GEMINI_API_KEY=TUTOR_GEMINI_API_KEY:latest" \
           "$${auth_flag[@]}"

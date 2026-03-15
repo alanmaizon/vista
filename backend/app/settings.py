@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from .schemas import TutorMode
 
@@ -18,7 +19,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "INFO"
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:5173"])
     google_cloud_project: str | None = None
     google_cloud_location: str = "us-central1"
     gemini_api_key: str | None = None
@@ -42,15 +43,16 @@ class Settings(BaseSettings):
         if value in (None, ""):
             return ["http://localhost:5173"]
         if isinstance(value, list):
-            return [str(item) for item in value]
+            return [str(item).strip() for item in value if str(item).strip()]
         if isinstance(value, str):
             stripped = value.strip()
             if stripped.startswith("["):
                 parsed = json.loads(stripped)
                 if not isinstance(parsed, list):
                     raise ValueError("TUTOR_CORS_ORIGINS must decode to a list of origins")
-                return [str(item) for item in parsed]
-            return [item.strip() for item in stripped.split(",") if item.strip()]
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            # Accept both comma and semicolon delimiters for easier Cloud Build substitutions.
+            return [item.strip() for item in re.split(r"[;,]", stripped) if item.strip()]
         raise TypeError("Unsupported value for TUTOR_CORS_ORIGINS")
 
 

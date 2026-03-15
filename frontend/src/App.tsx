@@ -6,6 +6,7 @@ import { MorphologyPanel } from "./components/MorphologyPanel";
 import { SessionComposer } from "./components/SessionComposer";
 import { StatusPanel } from "./components/StatusPanel";
 import { TranscriptPanel } from "./components/TranscriptPanel";
+import { useLiveAgent } from "./hooks/useLiveAgent";
 import { useMediaPrep } from "./hooks/useMediaPrep";
 import { getModes, getRuntime, startSession } from "./lib/api";
 import type {
@@ -61,6 +62,10 @@ function App() {
   const [isStarting, setIsStarting] = useState(false);
 
   const media = useMediaPrep();
+  const live = useLiveAgent({
+    preferredResponseLanguage: draft.preferredResponseLanguage,
+    session,
+  });
 
   useEffect(() => {
     void loadBootstrapData();
@@ -117,37 +122,30 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="hero">
+      <header className="call-header">
         <div>
           <p className="eyebrow">Scaffold</p>
           <h1>Ancient Greek Live Tutor</h1>
           <p className="hero-copy">
-            A fresh foundation for a voice-first tutor that can hear the learner, inspect a passage
-            or worksheet, and respond with spoken guidance in real time.
+            Video-call style tutoring shell with a large transcript workspace for live coaching.
           </p>
         </div>
-        <div className="hero-meta">
-          <p>Frontend: Vite + React</p>
-          <p>Backend: FastAPI</p>
-          <p>Target stack: Gemini Live API + Google ADK + Google Cloud</p>
+        <div className="call-header-meta">
+          <span className={live.connectionState === "connected" ? "chip chip-ok" : "chip"}>
+            Live agent: {live.connectionState}
+          </span>
+          <span className={session ? "chip chip-ok" : "chip"}>
+            Session: {session ? session.session_id : "not started"}
+          </span>
         </div>
       </header>
 
-      <main className="content-grid">
-        <div className="stack">
-          <SessionComposer
-            draft={draft}
-            isLoading={runtimeLoading}
-            isStarting={isStarting}
-            modes={modes}
-            onChange={updateDraft}
-            onSubmit={handleSubmit}
-            session={session}
-            sessionError={sessionError}
-          />
+      <main className="call-layout">
+        <div className="call-stage-stack">
           <MediaPrepCard
             busyKind={media.busyKind}
             cameraReady={media.cameraReady}
+            cameraStream={media.cameraStream}
             error={media.error}
             microphoneReady={media.microphoneReady}
             onRequestCamera={media.requestCamera}
@@ -158,22 +156,39 @@ function App() {
             worksheetName={media.worksheetName}
             worksheetPreviewUrl={media.worksheetPreviewUrl}
           />
-        </div>
-
-        <div className="stack">
+          <SessionComposer
+            draft={draft}
+            isLoading={runtimeLoading}
+            isStarting={isStarting}
+            modes={modes}
+            onChange={updateDraft}
+            onSubmit={handleSubmit}
+            session={session}
+            sessionError={sessionError}
+          />
           <StatusPanel
             runtime={runtime}
             runtimeError={runtimeError}
             runtimeLoading={runtimeLoading}
             session={session}
           />
-          <TranscriptPanel session={session} />
           <MorphologyPanel session={session} />
         </div>
+
+        <TranscriptPanel
+          connectionDetail={live.connectionDetail}
+          connectionError={live.connectionError}
+          connectionState={live.connectionState}
+          onClearTranscript={live.clearTranscript}
+          onConnect={live.connect}
+          onDisconnect={live.disconnect}
+          onSendTextTurn={live.sendTextTurn}
+          session={session}
+          transcriptEntries={live.transcriptEntries}
+        />
       </main>
     </div>
   );
 }
 
 export default App;
-

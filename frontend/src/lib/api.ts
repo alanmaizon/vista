@@ -40,3 +40,23 @@ export function startSession(
   });
 }
 
+export function resolveLiveWebSocketUrl(websocketPath: string): string {
+  if (websocketPath.startsWith("ws://") || websocketPath.startsWith("wss://")) {
+    return websocketPath;
+  }
+
+  const normalizedPath = websocketPath.startsWith("/") ? websocketPath : `/${websocketPath}`;
+
+  if (API_BASE_URL) {
+    const baseUrl = new URL(API_BASE_URL);
+    const protocol = baseUrl.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${baseUrl.host}${normalizedPath}`;
+  }
+
+  if (typeof window !== "undefined") {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${window.location.host}${normalizedPath}`;
+  }
+
+  return `ws://localhost:8000${normalizedPath}`;
+}

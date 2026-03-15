@@ -140,13 +140,17 @@ class GeminiLiveGateway:
             )
             for tool in tools
         ]
+        session_resumption_config = None
+        if creds.get("mode") == "vertex_ai":
+            # Vertex supports explicit transparent resumption control.
+            session_resumption_config = types.SessionResumptionConfig(transparent=True)
         connect_config = types.LiveConnectConfig(
             system_instruction=system_prompt,
             response_modalities=[types.Modality.AUDIO],
             tools=[types.Tool(function_declarations=declarations)] if declarations else None,
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
-            session_resumption=types.SessionResumptionConfig(transparent=True),
+            session_resumption=session_resumption_config,
         )
         context_manager = client.aio.live.connect(
             model=self._settings.gemini_live_model,

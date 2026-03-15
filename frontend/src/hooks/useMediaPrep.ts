@@ -71,6 +71,14 @@ export function useMediaPrep() {
     }
   }
 
+  function stopCamera() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+    }
+    setCameraStream(null);
+    setCameraReady(false);
+  }
+
   function setWorksheet(file: File | null) {
     if (worksheetPreviewUrl) {
       URL.revokeObjectURL(worksheetPreviewUrl);
@@ -97,6 +105,7 @@ export function useMediaPrep() {
     microphoneReady,
     requestCamera,
     requestMicrophone,
+    stopCamera,
     setWorksheet,
     supportsMediaDevices,
     worksheetAttached,

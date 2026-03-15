@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 
-import { MediaPrepCard } from "./components/MediaPrepCard";
+import { CallStage } from "./components/CallStage";
+import { LiveControlTray } from "./components/LiveControlTray";
 import { MorphologyPanel } from "./components/MorphologyPanel";
 import { SessionComposer } from "./components/SessionComposer";
 import { StatusPanel } from "./components/StatusPanel";
 import { TranscriptPanel } from "./components/TranscriptPanel";
 import { useLiveAgent } from "./hooks/useLiveAgent";
 import { useMediaPrep } from "./hooks/useMediaPrep";
+import { AudioRecorder } from "./lib/live-audio/AudioRecorder";
 import { getModes, getRuntime, startSession } from "./lib/api";
 import type {
   ModeSummary,
@@ -51,7 +53,7 @@ const initialDraft: SessionDraft = {
   preferredResponseLanguage: "English",
 };
 
-function App() {
+export default function App() {
   const [draft, setDraft] = useState<SessionDraft>(initialDraft);
   const [modes, setModes] = useState<ModeSummary[]>(fallbackModes);
   const [runtime, setRuntime] = useState<RuntimeSnapshot | null>(null);
@@ -60,16 +62,41 @@ function App() {
   const [session, setSession] = useState<SessionBootstrapResponse | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [isStarting, setIsStarting] = useState(false);
+  const [microphoneReady, setMicrophoneReady] = useState(false);
+  const [microphoneActive, setMicrophoneActive] = useState(false);
+  const [microphoneLevel, setMicrophoneLevel] = useState(0);
+  const [liveActionError, setLiveActionError] = useState<string | null>(null);
 
   const media = useMediaPrep();
   const live = useLiveAgent({
     preferredResponseLanguage: draft.preferredResponseLanguage,
     session,
   });
+  const audioRecorderRef = useRef<AudioRecorder | null>(null);
+  const audioTurnRef = useRef<{
+    turnId: string;
+    chunkIndex: number;
+    sentAnyChunks: boolean;
+  } | null>(null);
 
   useEffect(() => {
     void loadBootstrapData();
   }, []);
+
+  useEffect(() => {
+    audioRecorderRef.current = new AudioRecorder();
+
+    return () => {
+      audioRecorderRef.current?.stop();
+      audioRecorderRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (live.connectionState !== "connected" && microphoneActive) {
+      stopMicrophoneTurn();
+    }
+  }, [live.connectionState, microphoneActive]);
 
   async function loadBootstrapData() {
     setRuntimeLoading(true);
@@ -108,7 +135,7 @@ function App() {
         mode: draft.mode,
         target_text: draft.targetText,
         worksheet_attached: media.worksheetAttached,
-        microphone_ready: media.microphoneReady,
+        microphone_ready: microphoneReady,
         camera_ready: media.cameraReady,
         preferred_response_language: draft.preferredResponseLanguage,
       });
@@ -120,42 +147,135 @@ function App() {
     }
   }
 
+  async function startMicrophoneTurn() {
+    if (live.connectionState !== "connected") {
+      setLiveActionError("Join live before starting a microphone turn.");
+      return;
+    }
+
+    const recorder = audioRecorderRef.current;
+    if (!recorder) {
+      setLiveActionError("Microphone recorder is not ready.");
+      return;
+    }
+
+    const turnId = live.createTurnId("turn-voice");
+    audioTurnRef.current = {
+      turnId,
+      chunkIndex: 0,
+      sentAnyChunks: false,
+    };
+
+    recorder.onData = (dataBase64: string) => {
+      const currentTurn = audioTurnRef.current;
+      if (!currentTurn) {
+        return;
+      }
+
+      const sent = live.sendAudioChunk({
+        turnId: currentTurn.turnId,
+        chunkIndex: currentTurn.chunkIndex,
+        dataBase64,
+      });
+
+      if (sent) {
+        currentTurn.chunkIndex += 1;
+        currentTurn.sentAnyChunks = true;
+      }
+    };
+
+    recorder.onVolume = (volume: number) => {
+      setMicrophoneLevel(volume);
+    };
+
+    try {
+      setLiveActionError(null);
+      await recorder.start();
+      setMicrophoneReady(true);
+      setMicrophoneActive(true);
+    } catch (error) {
+      audioTurnRef.current = null;
+      recorder.stop();
+      recorder.onData = null;
+      recorder.onVolume = null;
+      setMicrophoneActive(false);
+      setMicrophoneLevel(0);
+      setLiveActionError(
+        error instanceof Error ? error.message : "Unable to start microphone capture.",
+      );
+    }
+  }
+
+  function stopMicrophoneTurn() {
+    const recorder = audioRecorderRef.current;
+    recorder?.stop();
+    if (recorder) {
+      recorder.onData = null;
+      recorder.onVolume = null;
+    }
+
+    const completedTurn = audioTurnRef.current;
+    audioTurnRef.current = null;
+    setMicrophoneActive(false);
+    setMicrophoneLevel(0);
+
+    if (completedTurn?.sentAnyChunks) {
+      live.endTurn(completedTurn.turnId, "stop_recording");
+    }
+  }
+
+  async function handleToggleCamera() {
+    setLiveActionError(null);
+
+    if (media.cameraReady) {
+      media.stopCamera();
+      return;
+    }
+
+    await media.requestCamera();
+  }
+
+  function handleWorksheetChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    media.setWorksheet(file);
+    event.target.value = "";
+  }
+
+  function handleConnect() {
+    setLiveActionError(null);
+    live.connect();
+  }
+
+  function handleDisconnect() {
+    stopMicrophoneTurn();
+    live.disconnect();
+  }
+
+  const transcriptError = liveActionError ?? media.error ?? live.connectionError;
+
   return (
     <div className="app-shell">
       <header className="call-header">
         <div>
-          <p className="eyebrow">Scaffold</p>
+          <p className="eyebrow">Gemini Live Console</p>
           <h1>Ancient Greek Live Tutor</h1>
           <p className="hero-copy">
-            Video-call style tutoring shell with a large transcript workspace for live coaching.
+            Official-console-inspired live tutoring workspace, adapted to our backend websocket and
+            session-based agent context.
           </p>
         </div>
         <div className="call-header-meta">
+          <span className={session ? "chip chip-ok" : "chip"}>
+            {session ? session.mode_label : "Session not started"}
+          </span>
           <span className={live.connectionState === "connected" ? "chip chip-ok" : "chip"}>
             Live agent: {live.connectionState}
-          </span>
-          <span className={session ? "chip chip-ok" : "chip"}>
-            Session: {session ? session.session_id : "not started"}
           </span>
         </div>
       </header>
 
-      <main className="call-layout">
-        <div className="call-stage-stack">
-          <MediaPrepCard
-            busyKind={media.busyKind}
-            cameraReady={media.cameraReady}
-            cameraStream={media.cameraStream}
-            error={media.error}
-            microphoneReady={media.microphoneReady}
-            onRequestCamera={media.requestCamera}
-            onRequestMicrophone={media.requestMicrophone}
-            onWorksheetChange={media.setWorksheet}
-            supportsMediaDevices={media.supportsMediaDevices}
-            worksheetAttached={media.worksheetAttached}
-            worksheetName={media.worksheetName}
-            worksheetPreviewUrl={media.worksheetPreviewUrl}
-          />
+      <main className="console-layout">
+        <aside className="console-sidebar">
           <SessionComposer
             draft={draft}
             isLoading={runtimeLoading}
@@ -173,22 +293,46 @@ function App() {
             session={session}
           />
           <MorphologyPanel session={session} />
-        </div>
+        </aside>
 
-        <TranscriptPanel
-          connectionDetail={live.connectionDetail}
-          connectionError={live.connectionError}
-          connectionState={live.connectionState}
-          onClearTranscript={live.clearTranscript}
-          onConnect={live.connect}
-          onDisconnect={live.disconnect}
-          onSendTextTurn={live.sendTextTurn}
-          session={session}
-          transcriptEntries={live.transcriptEntries}
-        />
+        <section className="console-main">
+          <CallStage
+            cameraStream={media.cameraStream}
+            connectionDetail={live.connectionDetail}
+            connectionState={live.connectionState}
+            microphoneActive={microphoneActive}
+            session={session}
+            worksheetName={media.worksheetName}
+            worksheetPreviewUrl={media.worksheetPreviewUrl}
+          />
+
+          <LiveControlTray
+            cameraReady={media.cameraReady}
+            connectionState={live.connectionState}
+            microphoneActive={microphoneActive}
+            microphoneLevel={microphoneLevel}
+            onClearTranscript={live.clearTranscript}
+            onConnect={handleConnect}
+            onDisconnect={handleDisconnect}
+            onStartMicrophone={startMicrophoneTurn}
+            onStopMicrophone={stopMicrophoneTurn}
+            onToggleCamera={() => void handleToggleCamera()}
+            onWorksheetChange={handleWorksheetChange}
+            sessionReady={Boolean(session)}
+            worksheetAttached={media.worksheetAttached}
+          />
+
+          <TranscriptPanel
+            connectionDetail={live.connectionDetail}
+            connectionError={transcriptError}
+            connectionState={live.connectionState}
+            onClearTranscript={live.clearTranscript}
+            onSendTextTurn={live.sendTextTurn}
+            session={session}
+            transcriptEntries={live.transcriptEntries}
+          />
+        </section>
       </main>
     </div>
   );
 }
-
-export default App;

@@ -9,8 +9,6 @@ interface TranscriptPanelProps {
   connectionError: string | null;
   connectionState: LiveConnectionState;
   onClearTranscript: () => void;
-  onConnect: () => void;
-  onDisconnect: () => void;
   onSendTextTurn: (text: string) => boolean;
   session: SessionBootstrapResponse | null;
   transcriptEntries: TranscriptEntry[];
@@ -28,8 +26,6 @@ export function TranscriptPanel({
   connectionError,
   connectionState,
   onClearTranscript,
-  onConnect,
-  onDisconnect,
   onSendTextTurn,
   session,
   transcriptEntries,
@@ -66,22 +62,6 @@ export function TranscriptPanel({
           >
             {CONNECTION_LABELS[connectionState]}
           </span>
-          <button
-            className="secondary-button"
-            disabled={!session || connectionState === "connecting" || connectionState === "connected"}
-            type="button"
-            onClick={onConnect}
-          >
-            Join live
-          </button>
-          <button
-            className="secondary-button"
-            disabled={connectionState !== "connected"}
-            type="button"
-            onClick={onDisconnect}
-          >
-            Leave live
-          </button>
           <button className="secondary-button" type="button" onClick={onClearTranscript}>
             Clear
           </button>

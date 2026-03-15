@@ -243,6 +243,8 @@ async def live_websocket(websocket: WebSocket) -> None:
     }
     turn_buffers: dict[str, dict[str, Any]] = {}
     session_memory: list[dict[str, str]] = []
+    learner_audio_memory_buffers: dict[str, str] = {}
+    committed_learner_turn_ids: set[str] = set()
     tutor_memory_buffers: dict[str, str] = {}
     tutor_audio_turn_ids: set[str] = set()
     turn_first_output_watchdogs: dict[str, asyncio.Task[None]] = {}
@@ -277,6 +279,16 @@ async def live_websocket(websocket: WebSocket) -> None:
         tutor_audio_turn_ids.discard(turn_id)
         if buffered:
             add_assistant_message(session_memory, buffered, turn_id=turn_id)
+
+    def commit_learner_memory(turn_id: str, text: str) -> None:
+        if turn_id in committed_learner_turn_ids:
+            return
+        compact_text = _compact_text(text)
+        if not compact_text:
+            return
+        add_user_message(session_memory, compact_text, turn_id=turn_id)
+        committed_learner_turn_ids.add(turn_id)
+        learner_audio_memory_buffers.pop(turn_id, None)
 
     def cancel_turn_first_output_watchdog(turn_id: str) -> None:
         watchdog = turn_first_output_watchdogs.pop(turn_id, None)
@@ -445,16 +457,24 @@ async def live_websocket(websocket: WebSocket) -> None:
                     turn_id = state["active_generation_turn_id"] or state["last_turn_id"]
                     input_transcription = getattr(server_content, "input_transcription", None)
                     if input_transcription and getattr(input_transcription, "text", None):
+                        learner_text = str(input_transcription.text)
+                        is_input_final = bool(getattr(input_transcription, "finished", False))
                         await emit(
                             ServerTranscriptEvent(
                                 session_id=state["session_id"] or "session-unknown",
                                 turn_id=turn_id,
                                 speaker="learner",
                                 source="input_audio",
-                                text=str(input_transcription.text),
-                                is_final=bool(getattr(input_transcription, "finished", False)),
+                                text=learner_text,
+                                is_final=is_input_final,
                             )
                         )
+                        learner_audio_memory_buffers[turn_id] = _merge_streaming_text(
+                            learner_audio_memory_buffers.get(turn_id, ""),
+                            learner_text,
+                        )
+                        if is_input_final and not turn_buffers.get(turn_id, {}).get("texts"):
+                            commit_learner_memory(turn_id, learner_audio_memory_buffers[turn_id])
 
                     output_transcription = getattr(server_content, "output_transcription", None)
                     if output_transcription and getattr(output_transcription, "text", None):
@@ -718,6 +738,8 @@ async def live_websocket(websocket: WebSocket) -> None:
                 )
                 turn_buffers.clear()
                 session_memory.clear()
+                learner_audio_memory_buffers.clear()
+                committed_learner_turn_ids.clear()
                 tutor_memory_buffers.clear()
                 tutor_audio_turn_ids.clear()
                 for watchdog in turn_first_output_watchdogs.values():
@@ -925,36 +947,32 @@ async def live_websocket(websocket: WebSocket) -> None:
             if isinstance(event, ClientTurnEndEvent):
                 active_turn_id = state["active_generation_turn_id"]
                 if active_turn_id and active_turn_id != event.turn_id:
-                    await emit(
-                        build_server_error_event(
-                            "TURN_IN_PROGRESS",
-                            (
-                                "Tutor is still responding to the previous turn. "
-                                "Wait for completion or send an interrupt."
-                            ),
-                            retryable=True,
-                            session_id=state["session_id"],
-                            detail={
-                                "active_turn_id": active_turn_id,
-                                "incoming_turn_id": event.turn_id,
-                            },
-                        )
-                    )
-                    continue
+                    # Recover from stale in-flight turns so a new learner turn can proceed
+                    # without leaving the UI stuck in a thinking state.
+                    if gemini_connection is not None and hasattr(gemini_connection, "interrupt"):
+                        try:
+                            await gemini_connection.interrupt()
+                        except Exception:
+                            logger.exception("Failed interrupting stale Gemini turn")
+                    mark_turn_completed(active_turn_id)
+                    flush_tutor_memory(active_turn_id)
                 state["last_turn_id"] = event.turn_id
                 turn_buffer = turn_buffers.pop(
                     event.turn_id,
                     {"texts": [], "audio_chunk_count": 0, "image_frame_count": 0},
                 )
+                learner_turn_text = "\n".join(turn_buffer["texts"]).strip()
+                if not learner_turn_text:
+                    learner_turn_text = learner_audio_memory_buffers.get(event.turn_id, "")
                 turn_input = LiveTurnInput(
                     turn_id=event.turn_id,
                     reason=event.reason,
-                    learner_text="\n".join(turn_buffer["texts"]).strip(),
+                    learner_text=learner_turn_text,
                     audio_chunk_count=int(turn_buffer["audio_chunk_count"]),
                     image_frame_count=int(turn_buffer["image_frame_count"]),
                 )
                 if turn_input.learner_text:
-                    add_user_message(session_memory, turn_input.learner_text, turn_id=event.turn_id)
+                    commit_learner_memory(event.turn_id, turn_input.learner_text)
                 plan = await turn_orchestrator.plan_turn(
                     mode=state["mode"],
                     target_text=state["target_text"],
@@ -1110,7 +1128,10 @@ async def live_websocket(websocket: WebSocket) -> None:
                 )
                 if gemini_connection is not None:
                     try:
-                        await gemini_connection.end_turn()
+                        if hasattr(gemini_connection, "interrupt"):
+                            await gemini_connection.interrupt()
+                        else:
+                            await gemini_connection.end_turn()
                     except Exception:
                         logger.exception("Failed forwarding interrupt to Gemini")
                         await emit(

@@ -31,11 +31,10 @@ export function SessionComposer({
     <section className="panel">
       <div className="section-heading">
         <p className="eyebrow">Tutor Session</p>
-        <h2>Seed the first live session</h2>
+        <h2>Prepare the tutor session</h2>
       </div>
       <p className="section-copy">
-        The form mirrors the backend bootstrap payload so we can grow from scaffold to real live
-        session flow without reworking the UI contract.
+        Bootstrap the mode, target passage, and response language before you join the live call.
       </p>
 
       <form className="session-form" onSubmit={onSubmit}>
@@ -82,7 +81,7 @@ export function SessionComposer({
         </label>
 
         <button className="primary-button" disabled={isLoading || isStarting} type="submit">
-          {isStarting ? "Starting session..." : "Start scaffold session"}
+          {isStarting ? "Starting session..." : "Open tutor session"}
         </button>
       </form>
 
@@ -96,4 +95,3 @@ export function SessionComposer({
     </section>
   );
 }
-

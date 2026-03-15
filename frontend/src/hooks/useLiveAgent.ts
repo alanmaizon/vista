@@ -1,8 +1,12 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 
 import {
+  INPUT_AUDIO_MIME_TYPE,
   LIVE_PROTOCOL_VERSION,
+  type ClientAudioInputEvent,
   type ClientHelloEvent,
+  type ClientImageInputEvent,
+  type ClientInterruptEvent,
   type ClientPingEvent,
   type ClientTextInputEvent,
   type ClientTurnEndEvent,
@@ -116,7 +120,9 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
   const intentionalCloseRef = useRef(false);
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const thinkingTurnsRef = useRef<Set<string>>(new Set());
+  const activeTutorTurnIdRef = useRef<string | null>(null);
   const audioTranscriptTurnsRef = useRef<Set<string>>(new Set());
+  const streamedOutputTextTurnsRef = useRef<Set<string>>(new Set());
   const pendingOutputTextByTurnRef = useRef<Map<string, string>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioCursorTimeRef = useRef(0);
@@ -176,6 +182,21 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
         });
         return trimTranscriptEntries(entries);
       });
+    });
+  }
+
+  function dropTutorOutputTextEntries(turnId: string) {
+    startTransition(() => {
+      setTranscriptEntries((current) =>
+        current.filter(
+          (entry) =>
+            !(
+              entry.speaker === "tutor" &&
+              entry.turnId === turnId &&
+              entry.source === "output_text"
+            ),
+        ),
+      );
     });
   }
 
@@ -243,7 +264,9 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
     intentionalCloseRef.current = true;
     stopPingLoop();
     thinkingTurnsRef.current.clear();
+    activeTutorTurnIdRef.current = null;
     audioTranscriptTurnsRef.current.clear();
+    streamedOutputTextTurnsRef.current.clear();
     pendingOutputTextByTurnRef.current.clear();
     if (socketRef.current) {
       socketRef.current.close();
@@ -252,6 +275,23 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
     closeAudioContext();
     setConnectionState("idle");
     setConnectionDetail(session ? "Disconnected from live tutor." : "Start a session to enable live tutor.");
+  }
+
+  function maybeInterruptActiveTutorTurn(socket: WebSocket) {
+    const activeTutorTurnId = activeTutorTurnIdRef.current;
+    if (!activeTutorTurnId) {
+      return;
+    }
+
+    const interruptEvent: ClientInterruptEvent = {
+      type: "client.control.interrupt",
+      protocol_version: LIVE_PROTOCOL_VERSION,
+      turn_id: activeTutorTurnId,
+      reason: "barge_in",
+    };
+
+    socket.send(JSON.stringify(interruptEvent));
+    activeTutorTurnIdRef.current = null;
   }
 
   function connect() {
@@ -324,6 +364,7 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
             setConnectionDetail(payload.detail);
           }
           if (payload.phase === "thinking" && payload.turn_id) {
+            activeTutorTurnIdRef.current = payload.turn_id;
             if (!thinkingTurnsRef.current.has(payload.turn_id)) {
               thinkingTurnsRef.current.add(payload.turn_id);
               appendTranscriptEntry({
@@ -339,6 +380,14 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
         case "server.transcript":
           if (payload.speaker === "tutor") {
             if (payload.source === "output_audio_transcription") {
+              if (
+                !audioTranscriptTurnsRef.current.has(payload.turn_id) &&
+                streamedOutputTextTurnsRef.current.has(payload.turn_id)
+              ) {
+                dropTutorOutputTextEntries(payload.turn_id);
+                streamedOutputTextTurnsRef.current.delete(payload.turn_id);
+                pendingOutputTextByTurnRef.current.delete(payload.turn_id);
+              }
               audioTranscriptTurnsRef.current.add(payload.turn_id);
               upsertTutorTranscript(payload);
               return;
@@ -349,6 +398,10 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
                 payload.turn_id,
                 mergeStreamingText(currentText, payload.text),
               );
+              if (!audioTranscriptTurnsRef.current.has(payload.turn_id)) {
+                streamedOutputTextTurnsRef.current.add(payload.turn_id);
+                upsertTutorTranscript(payload);
+              }
               return;
             }
             upsertTutorTranscript(payload);
@@ -371,10 +424,15 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
             payload.event === "turn_complete" ||
             payload.event === "interrupted"
           ) {
+            if (activeTutorTurnIdRef.current === payload.turn_id) {
+              activeTutorTurnIdRef.current = null;
+            }
+            thinkingTurnsRef.current.delete(payload.turn_id);
             const pendingText = pendingOutputTextByTurnRef.current.get(payload.turn_id);
             if (
               pendingText &&
               !audioTranscriptTurnsRef.current.has(payload.turn_id) &&
+              !streamedOutputTextTurnsRef.current.has(payload.turn_id) &&
               payload.event !== "interrupted"
             ) {
               upsertTutorTranscript({
@@ -386,6 +444,7 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
             }
             pendingOutputTextByTurnRef.current.delete(payload.turn_id);
             audioTranscriptTurnsRef.current.delete(payload.turn_id);
+            streamedOutputTextTurnsRef.current.delete(payload.turn_id);
           }
           return;
         case "server.tool.call":
@@ -410,8 +469,28 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
           });
           return;
         case "server.error":
-          setConnectionError(payload.message);
-          setConnectionState("error");
+          if (payload.code === "TURN_TIMEOUT" || payload.code === "TURN_IN_PROGRESS") {
+            setConnectionDetail(payload.message);
+            const detailTurnId = payload.detail?.turn_id;
+            const activeTurnId = payload.detail?.active_turn_id;
+            if (
+              typeof detailTurnId === "string" &&
+              activeTutorTurnIdRef.current === detailTurnId
+            ) {
+              activeTutorTurnIdRef.current = null;
+              thinkingTurnsRef.current.delete(detailTurnId);
+            }
+            if (
+              typeof activeTurnId === "string" &&
+              activeTutorTurnIdRef.current === activeTurnId
+            ) {
+              activeTutorTurnIdRef.current = null;
+              thinkingTurnsRef.current.delete(activeTurnId);
+            }
+          } else {
+            setConnectionError(payload.message);
+            setConnectionState("error");
+          }
           appendTranscriptEntry({
             speaker: "system",
             text: `Error: ${payload.message}`,
@@ -457,7 +536,9 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
       return false;
     }
 
-    const turnId = `turn-ui-${Date.now()}-${turnCounterRef.current++}`;
+    maybeInterruptActiveTutorTurn(socket);
+
+    const turnId = createTurnId("turn-ui");
     const textEvent: ClientTextInputEvent = {
       type: "client.input.text",
       protocol_version: LIVE_PROTOCOL_VERSION,
@@ -479,6 +560,107 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
       return true;
     } catch {
       setConnectionError("Unable to send learner turn over websocket.");
+      return false;
+    }
+  }
+
+  function createTurnId(prefix = "turn-ui") {
+    return `${prefix}-${Date.now()}-${turnCounterRef.current++}`;
+  }
+
+  function sendAudioChunk(params: {
+    turnId: string;
+    chunkIndex: number;
+    dataBase64: string;
+    isFinalChunk?: boolean;
+    mimeType?: string;
+  }) {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setConnectionError("Join live before sending microphone audio.");
+      return false;
+    }
+
+    if (params.chunkIndex === 0) {
+      maybeInterruptActiveTutorTurn(socket);
+    }
+
+    const audioEvent: ClientAudioInputEvent = {
+      type: "client.input.audio",
+      protocol_version: LIVE_PROTOCOL_VERSION,
+      turn_id: params.turnId,
+      chunk_index: params.chunkIndex,
+      mime_type: params.mimeType ?? INPUT_AUDIO_MIME_TYPE,
+      data_base64: params.dataBase64,
+      is_final_chunk: params.isFinalChunk ?? false,
+    };
+
+    try {
+      socket.send(JSON.stringify(audioEvent));
+      return true;
+    } catch {
+      setConnectionError("Unable to send microphone audio over websocket.");
+      return false;
+    }
+  }
+
+  function sendImageFrame(params: {
+    turnId: string;
+    frameIndex: number;
+    mimeType: "image/jpeg" | "image/png" | "image/webp";
+    dataBase64: string;
+    source: "camera_frame" | "worksheet_upload";
+    width?: number;
+    height?: number;
+    isReference?: boolean;
+  }) {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setConnectionError("Join live before sending image input.");
+      return false;
+    }
+
+    const imageEvent: ClientImageInputEvent = {
+      type: "client.input.image",
+      protocol_version: LIVE_PROTOCOL_VERSION,
+      turn_id: params.turnId,
+      frame_index: params.frameIndex,
+      mime_type: params.mimeType,
+      source: params.source,
+      data_base64: params.dataBase64,
+      width: params.width,
+      height: params.height,
+      is_reference: params.isReference ?? false,
+    };
+
+    try {
+      socket.send(JSON.stringify(imageEvent));
+      return true;
+    } catch {
+      setConnectionError("Unable to send image input over websocket.");
+      return false;
+    }
+  }
+
+  function endTurn(turnId: string, reason: ClientTurnEndEvent["reason"] = "done") {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setConnectionError("Join live before ending a turn.");
+      return false;
+    }
+
+    const turnEndEvent: ClientTurnEndEvent = {
+      type: "client.turn.end",
+      protocol_version: LIVE_PROTOCOL_VERSION,
+      turn_id: turnId,
+      reason,
+    };
+
+    try {
+      socket.send(JSON.stringify(turnEndEvent));
+      return true;
+    } catch {
+      setConnectionError("Unable to close the current turn over websocket.");
       return false;
     }
   }
@@ -518,7 +700,9 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
     setConnectionDetail(session ? "Session ready. Join live to begin." : "Start a session to enable live tutor.");
     intentionalCloseRef.current = true;
     thinkingTurnsRef.current.clear();
+    activeTutorTurnIdRef.current = null;
     audioTranscriptTurnsRef.current.clear();
+    streamedOutputTextTurnsRef.current.clear();
     pendingOutputTextByTurnRef.current.clear();
     stopPingLoop();
     closeAudioContext();
@@ -532,7 +716,9 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
     return () => {
       intentionalCloseRef.current = true;
       thinkingTurnsRef.current.clear();
+      activeTutorTurnIdRef.current = null;
       audioTranscriptTurnsRef.current.clear();
+      streamedOutputTextTurnsRef.current.clear();
       pendingOutputTextByTurnRef.current.clear();
       stopPingLoop();
       closeAudioContext();
@@ -550,7 +736,11 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
     connectionError,
     connectionState,
     disconnect,
+    endTurn,
     sendTextTurn,
+    sendAudioChunk,
+    sendImageFrame,
+    createTurnId,
     transcriptEntries,
   };
 }

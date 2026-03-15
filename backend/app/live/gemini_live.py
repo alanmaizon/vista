@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Awaitable
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -87,6 +88,23 @@ class GeminiLiveConnection:
             response=response,
         )
         await self._session.send_tool_response(function_responses=[function_response])
+
+    async def interrupt(self) -> None:
+        """Best-effort interruption for an in-flight model response."""
+        interrupt_fn = getattr(self._session, "interrupt", None)
+        if callable(interrupt_fn):
+            maybe_awaitable = interrupt_fn()
+            if isinstance(maybe_awaitable, Awaitable):
+                await maybe_awaitable
+            return
+
+        # Fallback: signal activity end when explicit interrupt is unavailable.
+        if self._supports_explicit_activity_end:
+            await self._session.send_realtime_input(activity_end=self._types.ActivityEnd())
+            return
+
+        # Last-resort fallback for older SDKs.
+        await self.end_turn()
 
     async def close(self) -> None:
         await self._context_manager.__aexit__(None, None, None)

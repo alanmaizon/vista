@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.live.bridge import _LiveEventSequencer, _parse_text_tool_call
+from app.live.bridge import _DirectGeminiLiveBridge, _LiveEventSequencer, _parse_text_tool_call
 
 
 def test_parse_text_tool_call_extracts_name_args_and_call_id() -> None:
@@ -31,3 +31,19 @@ def test_live_event_sequencer_reuses_turn_id_until_completion() -> None:
     sequencer.complete_assistant_turn()
     next_turn = sequencer.new_text_event("Next turn", turn_complete=True)
     assert next_turn["turn_id"] != final_text["turn_id"]
+
+
+def test_direct_live_bridge_setup_disables_server_activity_detection() -> None:
+    bridge = _DirectGeminiLiveBridge(
+        model_id="gemini-live-2.5-flash-native-audio",
+        location="us-central1",
+        fallback_location="us-central1",
+        project_id="test-project",
+        system_prompt="Be brief.",
+        skill="MUSIC_LIVE_TUTOR",
+        goal=None,
+    )
+
+    setup = bridge._setup_message("us-central1")
+    aad = setup["setup"]["realtime_input_config"]["automatic_activity_detection"]
+    assert aad["disabled"] is True

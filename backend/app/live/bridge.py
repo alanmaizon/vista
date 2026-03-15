@@ -708,11 +708,11 @@ class _DirectGeminiLiveBridge:
                 },
                 "realtime_input_config": {
                     "automatic_activity_detection": {
-                        "disabled": False,
-                        "start_of_speech_sensitivity": "START_SENSITIVITY_HIGH",
-                        "end_of_speech_sensitivity": "END_SENSITIVITY_HIGH",
-                        "prefix_padding_ms": 20,
-                        "silence_duration_ms": 180,
+                        # The client owns speech endpointing and sends
+                        # `audioStreamEnd` explicitly. Keeping server-side VAD
+                        # enabled as well leads to clipped or fragmented user
+                        # turns in production.
+                        "disabled": True,
                     }
                 },
                 "system_instruction": {

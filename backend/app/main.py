@@ -77,6 +77,7 @@ app.include_router(api_router)
 
 _SECONDS_DURATION_RE = re.compile(r"^(?P<seconds>\d+(?:\.\d+)?)s$")
 _MAX_SESSION_MESSAGE_CHARS = 1200
+_TURN_FIRST_OUTPUT_TIMEOUT_SECONDS = 18.0
 
 
 def _decode_base64_payload(payload: str, *, field_name: str) -> bytes:
@@ -234,6 +235,7 @@ async def live_websocket(websocket: WebSocket) -> None:
     state = {
         "session_id": None,
         "last_turn_id": "turn-initial",
+        "active_generation_turn_id": None,
         "audio_chunk_index": 0,
         "mode": settings.default_tutoring_mode,
         "target_text": None,
@@ -243,6 +245,7 @@ async def live_websocket(websocket: WebSocket) -> None:
     session_memory: list[dict[str, str]] = []
     tutor_memory_buffers: dict[str, str] = {}
     tutor_audio_turn_ids: set[str] = set()
+    turn_first_output_watchdogs: dict[str, asyncio.Task[None]] = {}
 
     gemini_connection: GeminiLiveConnection | None = None
     gemini_receive_task: asyncio.Task[None] | None = None
@@ -265,11 +268,49 @@ async def live_websocket(websocket: WebSocket) -> None:
             finally:
                 gemini_connection = None
 
+        for watchdog in turn_first_output_watchdogs.values():
+            watchdog.cancel()
+        turn_first_output_watchdogs.clear()
+
     def flush_tutor_memory(turn_id: str) -> None:
         buffered = tutor_memory_buffers.pop(turn_id, "")
         tutor_audio_turn_ids.discard(turn_id)
         if buffered:
             add_assistant_message(session_memory, buffered, turn_id=turn_id)
+
+    def cancel_turn_first_output_watchdog(turn_id: str) -> None:
+        watchdog = turn_first_output_watchdogs.pop(turn_id, None)
+        if watchdog is not None:
+            watchdog.cancel()
+
+    def mark_turn_completed(turn_id: str) -> None:
+        cancel_turn_first_output_watchdog(turn_id)
+        if state["active_generation_turn_id"] == turn_id:
+            state["active_generation_turn_id"] = None
+
+    def arm_turn_first_output_watchdog(turn_id: str) -> None:
+        cancel_turn_first_output_watchdog(turn_id)
+
+        async def watchdog() -> None:
+            await asyncio.sleep(_TURN_FIRST_OUTPUT_TIMEOUT_SECONDS)
+            if state["active_generation_turn_id"] != turn_id:
+                return
+            await emit(
+                build_server_error_event(
+                    "TURN_TIMEOUT",
+                    (
+                        "Tutor response timed out for this turn. "
+                        "Try sending the turn again or reconnecting."
+                    ),
+                    retryable=True,
+                    session_id=state["session_id"],
+                    detail={"turn_id": turn_id},
+                )
+            )
+            state["active_generation_turn_id"] = None
+            flush_tutor_memory(turn_id)
+
+        turn_first_output_watchdogs[turn_id] = asyncio.create_task(watchdog())
 
     async def send_tool_response_to_gemini(
         tool_call_id: str,
@@ -401,7 +442,7 @@ async def live_websocket(websocket: WebSocket) -> None:
 
                 server_content = getattr(message, "server_content", None)
                 if server_content is not None:
-                    turn_id = state["last_turn_id"]
+                    turn_id = state["active_generation_turn_id"] or state["last_turn_id"]
                     input_transcription = getattr(server_content, "input_transcription", None)
                     if input_transcription and getattr(input_transcription, "text", None):
                         await emit(
@@ -419,6 +460,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                     if output_transcription and getattr(output_transcription, "text", None):
                         output_text = str(output_transcription.text)
                         is_output_final = bool(getattr(output_transcription, "finished", False))
+                        cancel_turn_first_output_watchdog(turn_id)
                         await emit(
                             ServerTranscriptEvent(
                                 session_id=state["session_id"] or "session-unknown",
@@ -448,6 +490,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                                     getattr(server_content, "generation_complete", False)
                                     or getattr(server_content, "turn_complete", False)
                                 )
+                                cancel_turn_first_output_watchdog(turn_id)
                                 await emit(
                                     ServerTextOutputEvent(
                                         session_id=state["session_id"] or "session-unknown",
@@ -479,6 +522,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                             if inline_data and getattr(inline_data, "data", None):
                                 mime_type = getattr(inline_data, "mime_type", None) or OUTPUT_AUDIO_MIME_TYPE
                                 if mime_type.startswith("audio/"):
+                                    cancel_turn_first_output_watchdog(turn_id)
                                     chunk_index = state["audio_chunk_index"]
                                     state["audio_chunk_index"] += 1
                                     data_base64 = base64.b64encode(inline_data.data).decode("ascii")
@@ -506,6 +550,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                                     )
 
                     if getattr(server_content, "interrupted", False):
+                        mark_turn_completed(turn_id)
                         await emit(
                             ServerTurnEvent(
                                 session_id=state["session_id"] or "session-unknown",
@@ -516,6 +561,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                         )
 
                     if getattr(server_content, "generation_complete", False):
+                        mark_turn_completed(turn_id)
                         await emit(
                             ServerTurnEvent(
                                 session_id=state["session_id"] or "session-unknown",
@@ -527,6 +573,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                         flush_tutor_memory(turn_id)
 
                     if getattr(server_content, "turn_complete", False):
+                        mark_turn_completed(turn_id)
                         await emit(
                             ServerTurnEvent(
                                 session_id=state["session_id"] or "session-unknown",
@@ -663,6 +710,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                 state["session_id"] = event.session_id or f"session-{uuid4().hex[:10]}"
                 state["audio_chunk_index"] = 0
                 state["last_turn_id"] = "turn-initial"
+                state["active_generation_turn_id"] = None
                 state["mode"] = event.mode or settings.default_tutoring_mode
                 state["target_text"] = event.target_text.strip() if event.target_text else None
                 state["preferred_response_language"] = (
@@ -672,6 +720,9 @@ async def live_websocket(websocket: WebSocket) -> None:
                 session_memory.clear()
                 tutor_memory_buffers.clear()
                 tutor_audio_turn_ids.clear()
+                for watchdog in turn_first_output_watchdogs.values():
+                    watchdog.cancel()
+                turn_first_output_watchdogs.clear()
 
                 await emit(
                     ServerStatusEvent(
@@ -872,6 +923,24 @@ async def live_websocket(websocket: WebSocket) -> None:
                 continue
 
             if isinstance(event, ClientTurnEndEvent):
+                active_turn_id = state["active_generation_turn_id"]
+                if active_turn_id and active_turn_id != event.turn_id:
+                    await emit(
+                        build_server_error_event(
+                            "TURN_IN_PROGRESS",
+                            (
+                                "Tutor is still responding to the previous turn. "
+                                "Wait for completion or send an interrupt."
+                            ),
+                            retryable=True,
+                            session_id=state["session_id"],
+                            detail={
+                                "active_turn_id": active_turn_id,
+                                "incoming_turn_id": event.turn_id,
+                            },
+                        )
+                    )
+                    continue
                 state["last_turn_id"] = event.turn_id
                 turn_buffer = turn_buffers.pop(
                     event.turn_id,
@@ -996,9 +1065,12 @@ async def live_websocket(websocket: WebSocket) -> None:
                     )
                 )
                 if gemini_connection is not None:
+                    state["active_generation_turn_id"] = event.turn_id
                     try:
                         await gemini_connection.end_turn()
+                        arm_turn_first_output_watchdog(event.turn_id)
                     except Exception:
+                        mark_turn_completed(event.turn_id)
                         logger.exception("Failed signaling turn end to Gemini")
                         await emit(
                             build_server_error_event(
@@ -1009,9 +1081,17 @@ async def live_websocket(websocket: WebSocket) -> None:
                                 detail={"turn_id": event.turn_id},
                             )
                         )
+                else:
+                    mark_turn_completed(event.turn_id)
                 continue
 
             if isinstance(event, ClientInterruptEvent):
+                interrupt_turn_id = (
+                    event.turn_id
+                    or state["active_generation_turn_id"]
+                    or state["last_turn_id"]
+                )
+                mark_turn_completed(interrupt_turn_id)
                 await emit(
                     ServerStatusEvent(
                         phase="interrupted",
@@ -1023,7 +1103,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                 await emit(
                     ServerTurnEvent(
                         session_id=state["session_id"],
-                        turn_id=event.turn_id or state["last_turn_id"],
+                        turn_id=interrupt_turn_id,
                         event="interrupted",
                         detail="Client requested that current playback or generation stop.",
                     )

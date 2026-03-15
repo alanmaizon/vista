@@ -18,7 +18,11 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMAGE_URI="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${SHORT_SHA}"
+        IMAGE_TAG="${SHORT_SHA}"
+        if [ -z "$${IMAGE_TAG}" ]; then
+          IMAGE_TAG="${BUILD_ID}"
+        fi
+        IMAGE_URI="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:$${IMAGE_TAG}"
         docker build -f backend/Dockerfile -t "$${IMAGE_URI}" .
 
   - id: push-backend-image
@@ -28,7 +32,11 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMAGE_URI="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${SHORT_SHA}"
+        IMAGE_TAG="${SHORT_SHA}"
+        if [ -z "$${IMAGE_TAG}" ]; then
+          IMAGE_TAG="${BUILD_ID}"
+        fi
+        IMAGE_URI="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:$${IMAGE_TAG}"
         docker push "$${IMAGE_URI}"
 
   - id: deploy-cloud-run
@@ -38,7 +46,11 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMAGE_URI="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${SHORT_SHA}"
+        IMAGE_TAG="${SHORT_SHA}"
+        if [ -z "$${IMAGE_TAG}" ]; then
+          IMAGE_TAG="${BUILD_ID}"
+        fi
+        IMAGE_URI="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:$${IMAGE_TAG}"
         RUNTIME_SA_EMAIL="${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com"
 
         auth_flag=(--allow-unauthenticated)

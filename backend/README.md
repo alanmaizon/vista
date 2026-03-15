@@ -29,7 +29,7 @@ backend/app/
 
 ## Endpoints
 
-- `GET /healthz`
+- `GET /health`
 - `GET /api/runtime`
 - `GET /api/live/modes`
 - `POST /api/live/session`

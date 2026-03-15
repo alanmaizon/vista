@@ -141,7 +141,7 @@ def root() -> dict[str, str]:
         "service": settings.app_name,
         "status": "scaffold",
         "docs": "/docs",
-        "health": "/healthz",
+        "health": "/health",
         "runtime": "/api/runtime",
     }
 

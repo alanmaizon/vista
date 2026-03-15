@@ -76,6 +76,9 @@ app.include_router(health_router)
 app.include_router(api_router)
 
 _SECONDS_DURATION_RE = re.compile(r"^(?P<seconds>\d+(?:\.\d+)?)s$")
+_MAX_SESSION_MEMORY_MESSAGES = 24
+_MAX_SESSION_MEMORY_CHARS = 320
+_MAX_SESSION_CONTEXT_MESSAGES = 10
 
 
 def _decode_base64_payload(payload: str, *, field_name: str) -> bytes:
@@ -106,6 +109,83 @@ def _normalize_function_args(raw_args: Any) -> dict[str, Any]:
             return parsed
         return {"raw_args": parsed}
     return {"raw_args": raw_args}
+
+
+def _compact_text(text: str) -> str:
+    return " ".join(text.split()).strip()
+
+
+def _merge_streaming_text(previous_text: str, incoming_text: str) -> str:
+    previous = previous_text.rstrip()
+    incoming = _compact_text(incoming_text)
+
+    if not previous:
+        return incoming
+    if not incoming:
+        return previous
+    if incoming.startswith(previous):
+        return incoming
+    if previous.endswith(incoming):
+        return previous
+    if re.match(r"^[,.;:!?)]", incoming) or re.search(r"[\s([{\"'`-]$", previous):
+        return f"{previous}{incoming}"
+    return f"{previous} {incoming}"
+
+
+def _append_session_memory(
+    memory: list[dict[str, str]],
+    *,
+    speaker: str,
+    turn_id: str,
+    text: str,
+) -> None:
+    compact_text = _compact_text(text)
+    if not compact_text:
+        return
+    memory.append(
+        {
+            "speaker": speaker,
+            "turn_id": turn_id,
+            "text": compact_text[:_MAX_SESSION_MEMORY_CHARS],
+        }
+    )
+    if len(memory) > _MAX_SESSION_MEMORY_MESSAGES:
+        del memory[:-_MAX_SESSION_MEMORY_MESSAGES]
+
+
+def _build_session_context_message(
+    *,
+    history: list[dict[str, str]],
+    mode: str,
+    target_text: str | None,
+    preferred_response_language: str,
+    learner_text: str,
+) -> str:
+    compact_learner_text = _compact_text(learner_text)
+    if not compact_learner_text:
+        return learner_text
+    if not history:
+        return compact_learner_text
+
+    recent_entries = history[-_MAX_SESSION_CONTEXT_MESSAGES:]
+    dialogue_lines = []
+    for item in recent_entries:
+        label = "Learner" if item.get("speaker") == "learner" else "Tutor"
+        dialogue_lines.append(f"- {label}: {item.get('text', '')}")
+    recent_dialogue = "\n".join(dialogue_lines)
+
+    target_line = f"Target passage: {target_text}" if target_text else "Target passage: (none)"
+    return (
+        "[session_context]\n"
+        "Use the recent dialogue context below when answering the learner.\n"
+        f"Tutoring mode: {mode}\n"
+        f"Preferred explanation language: {preferred_response_language}\n"
+        f"{target_line}\n"
+        "Recent dialogue:\n"
+        f"{recent_dialogue}\n"
+        "[/session_context]\n"
+        f"Current learner turn: {compact_learner_text}"
+    )
 
 
 def _build_orchestration_context_payload(
@@ -161,6 +241,9 @@ async def live_websocket(websocket: WebSocket) -> None:
         "preferred_response_language": "English",
     }
     turn_buffers: dict[str, dict[str, Any]] = {}
+    session_memory: list[dict[str, str]] = []
+    tutor_memory_buffers: dict[str, str] = {}
+    tutor_audio_turn_ids: set[str] = set()
 
     gemini_connection: GeminiLiveConnection | None = None
     gemini_receive_task: asyncio.Task[None] | None = None
@@ -182,6 +265,17 @@ async def live_websocket(websocket: WebSocket) -> None:
                 await gemini_connection.close()
             finally:
                 gemini_connection = None
+
+    def flush_tutor_memory(turn_id: str) -> None:
+        buffered = tutor_memory_buffers.pop(turn_id, "")
+        tutor_audio_turn_ids.discard(turn_id)
+        if buffered:
+            _append_session_memory(
+                session_memory,
+                speaker="tutor",
+                turn_id=turn_id,
+                text=buffered,
+            )
 
     async def send_tool_response_to_gemini(
         tool_call_id: str,
@@ -313,12 +407,13 @@ async def live_websocket(websocket: WebSocket) -> None:
 
                 server_content = getattr(message, "server_content", None)
                 if server_content is not None:
+                    turn_id = state["last_turn_id"]
                     input_transcription = getattr(server_content, "input_transcription", None)
                     if input_transcription and getattr(input_transcription, "text", None):
                         await emit(
                             ServerTranscriptEvent(
                                 session_id=state["session_id"] or "session-unknown",
-                                turn_id=state["last_turn_id"],
+                                turn_id=turn_id,
                                 speaker="learner",
                                 source="input_audio",
                                 text=str(input_transcription.text),
@@ -328,17 +423,26 @@ async def live_websocket(websocket: WebSocket) -> None:
 
                     output_transcription = getattr(server_content, "output_transcription", None)
                     if output_transcription and getattr(output_transcription, "text", None):
+                        output_text = str(output_transcription.text)
+                        is_output_final = bool(getattr(output_transcription, "finished", False))
                         await emit(
                             ServerTranscriptEvent(
                                 session_id=state["session_id"] or "session-unknown",
-                                turn_id=state["last_turn_id"],
+                                turn_id=turn_id,
                                 speaker="tutor",
                                 source="output_audio_transcription",
-                                text=str(output_transcription.text),
-                                is_final=bool(getattr(output_transcription, "finished", False)),
+                                text=output_text,
+                                is_final=is_output_final,
                                 interrupted=bool(getattr(server_content, "interrupted", False)),
                             )
                         )
+                        tutor_audio_turn_ids.add(turn_id)
+                        tutor_memory_buffers[turn_id] = _merge_streaming_text(
+                            tutor_memory_buffers.get(turn_id, ""),
+                            output_text,
+                        )
+                        if is_output_final:
+                            flush_tutor_memory(turn_id)
 
                     model_turn = getattr(server_content, "model_turn", None)
                     if model_turn is not None:
@@ -353,7 +457,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                                 await emit(
                                     ServerTextOutputEvent(
                                         session_id=state["session_id"] or "session-unknown",
-                                        turn_id=state["last_turn_id"],
+                                        turn_id=turn_id,
                                         text=tutor_text,
                                         is_final=is_final,
                                     )
@@ -361,7 +465,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                                 await emit(
                                     ServerTranscriptEvent(
                                         session_id=state["session_id"] or "session-unknown",
-                                        turn_id=state["last_turn_id"],
+                                        turn_id=turn_id,
                                         speaker="tutor",
                                         source="output_text",
                                         text=tutor_text,
@@ -369,6 +473,13 @@ async def live_websocket(websocket: WebSocket) -> None:
                                         interrupted=bool(getattr(server_content, "interrupted", False)),
                                     )
                                 )
+                                if turn_id not in tutor_audio_turn_ids:
+                                    tutor_memory_buffers[turn_id] = _merge_streaming_text(
+                                        tutor_memory_buffers.get(turn_id, ""),
+                                        tutor_text,
+                                    )
+                                    if is_final:
+                                        flush_tutor_memory(turn_id)
 
                             inline_data = getattr(part, "inline_data", None)
                             if inline_data and getattr(inline_data, "data", None):
@@ -384,7 +495,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                                     await emit(
                                         ServerAudioOutputEvent(
                                             session_id=state["session_id"] or "session-unknown",
-                                            turn_id=state["last_turn_id"],
+                                            turn_id=turn_id,
                                             chunk_index=chunk_index,
                                             mime_type=mime_type,
                                             data_base64=data_base64,
@@ -396,7 +507,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                                             phase="speaking",
                                             detail=f"Streaming tutor audio chunk {chunk_index}.",
                                             session_id=state["session_id"],
-                                            turn_id=state["last_turn_id"],
+                                            turn_id=turn_id,
                                         )
                                     )
 
@@ -404,7 +515,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                         await emit(
                             ServerTurnEvent(
                                 session_id=state["session_id"] or "session-unknown",
-                                turn_id=state["last_turn_id"],
+                                turn_id=turn_id,
                                 event="interrupted",
                                 detail="Gemini signaled an interrupted generation.",
                             )
@@ -414,21 +525,23 @@ async def live_websocket(websocket: WebSocket) -> None:
                         await emit(
                             ServerTurnEvent(
                                 session_id=state["session_id"] or "session-unknown",
-                                turn_id=state["last_turn_id"],
+                                turn_id=turn_id,
                                 event="generation_complete",
                                 detail="Gemini generation completed for the current turn.",
                             )
                         )
+                        flush_tutor_memory(turn_id)
 
                     if getattr(server_content, "turn_complete", False):
                         await emit(
                             ServerTurnEvent(
                                 session_id=state["session_id"] or "session-unknown",
-                                turn_id=state["last_turn_id"],
+                                turn_id=turn_id,
                                 event="turn_complete",
                                 detail="Gemini turn complete.",
                             )
                         )
+                        flush_tutor_memory(turn_id)
 
                     if getattr(server_content, "waiting_for_input", False):
                         await emit(
@@ -562,6 +675,9 @@ async def live_websocket(websocket: WebSocket) -> None:
                     event.preferred_response_language or "English"
                 )
                 turn_buffers.clear()
+                session_memory.clear()
+                tutor_memory_buffers.clear()
+                tutor_audio_turn_ids.clear()
 
                 await emit(
                     ServerStatusEvent(
@@ -654,19 +770,6 @@ async def live_websocket(websocket: WebSocket) -> None:
                         )
                     )
                     continue
-                try:
-                    await gemini_connection.send_text(event.text)
-                except Exception:
-                    logger.exception("Failed forwarding text input to Gemini")
-                    await emit(
-                        build_server_error_event(
-                            "GEMINI_SEND_TEXT_FAILED",
-                            "Failed forwarding learner text to Gemini Live.",
-                            retryable=True,
-                            session_id=state["session_id"],
-                            detail={"turn_id": event.turn_id},
-                        )
-                    )
                 continue
 
             if isinstance(event, ClientAudioInputEvent):
@@ -787,6 +890,14 @@ async def live_websocket(websocket: WebSocket) -> None:
                     audio_chunk_count=int(turn_buffer["audio_chunk_count"]),
                     image_frame_count=int(turn_buffer["image_frame_count"]),
                 )
+                prior_session_history = list(session_memory)
+                if turn_input.learner_text:
+                    _append_session_memory(
+                        session_memory,
+                        speaker="learner",
+                        turn_id=event.turn_id,
+                        text=turn_input.learner_text,
+                    )
                 plan = await turn_orchestrator.plan_turn(
                     mode=state["mode"],
                     target_text=state["target_text"],
@@ -860,6 +971,33 @@ async def live_websocket(websocket: WebSocket) -> None:
                             turn_id=event.turn_id,
                             tool_name=plan.preflight_tool_name,
                             tool_result=preflight_result_with_meta,
+                        )
+
+                if gemini_connection is not None and turn_input.learner_text:
+                    mode_value = (
+                        state["mode"].value
+                        if hasattr(state["mode"], "value")
+                        else str(state["mode"])
+                    )
+                    learner_payload = _build_session_context_message(
+                        history=prior_session_history,
+                        mode=mode_value,
+                        target_text=state["target_text"],
+                        preferred_response_language=state["preferred_response_language"],
+                        learner_text=turn_input.learner_text,
+                    )
+                    try:
+                        await gemini_connection.send_text(learner_payload)
+                    except Exception:
+                        logger.exception("Failed forwarding learner turn text to Gemini")
+                        await emit(
+                            build_server_error_event(
+                                "GEMINI_SEND_TEXT_FAILED",
+                                "Failed forwarding learner text to Gemini Live.",
+                                retryable=True,
+                                session_id=state["session_id"],
+                                detail={"turn_id": event.turn_id},
+                            )
                         )
 
                 await emit(

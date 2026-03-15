@@ -293,3 +293,84 @@ def test_live_turn_end_runs_orchestration_preflight(monkeypatch) -> None:
     assert any(
         sent_text.startswith("[orchestration_context]") for sent_text in fake_connection.sent_texts
     )
+
+
+def test_live_text_is_forwarded_once_per_closed_turn(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+
+    async def fake_connect_session(*, system_prompt: str, tools):
+        assert "Current tutoring mode:" in system_prompt
+        assert any(tool.name == "parse_passage" for tool in tools)
+        return fake_connection
+
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-memory-1",
+                "mode": "guided_reading",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+        websocket.receive_json()  # ready status
+        websocket.receive_json()  # listening status
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-memory-1",
+                "text": "what is logos?",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-memory-1",
+                "reason": "done",
+            }
+        )
+        _ = [websocket.receive_json() for _ in range(3)]  # closed, orchestration status, thinking status
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-memory-2",
+                "text": "what context?",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-memory-2",
+                "reason": "done",
+            }
+        )
+        _ = [websocket.receive_json() for _ in range(3)]  # closed, orchestration status, thinking status
+
+    assert len(fake_connection.sent_texts) == 2
+    assert fake_connection.sent_texts[0] == "what is logos?"
+    assert "[session_context]" in fake_connection.sent_texts[1]
+    assert "Learner: what is logos?" in fake_connection.sent_texts[1]
+    assert "Current learner turn: what context?" in fake_connection.sent_texts[1]
+    assert fake_connection.end_turn_count == 2

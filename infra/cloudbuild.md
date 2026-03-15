@@ -104,6 +104,8 @@ gcloud builds submit \
 
 `_CORS_ORIGINS` accepts comma or semicolon delimiters. Semicolons are easier with `gcloud builds submit --substitutions` because that flag uses commas between key/value pairs.
 
+`deploy-backend.yaml` maps the same secret to both `TUTOR_GEMINI_API_KEY` and `GEMINI_API_KEY` in Cloud Run, so both the app settings layer and ADK runtime can resolve credentials consistently.
+
 ## 7) Run frontend deploy pipeline
 
 ```bash

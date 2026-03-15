@@ -67,5 +67,5 @@ steps:
           --service-account="$${RUNTIME_SA_EMAIL}" \
           --port=8080 \
           --set-env-vars="TUTOR_ENVIRONMENT=production,TUTOR_GOOGLE_CLOUD_PROJECT=${PROJECT_ID},TUTOR_GOOGLE_CLOUD_LOCATION=${_REGION},TUTOR_USE_GOOGLE_ADK=${_TUTOR_USE_GOOGLE_ADK},TUTOR_CORS_ORIGINS=${_CORS_ORIGINS}" \
-          --set-secrets="TUTOR_GEMINI_API_KEY=TUTOR_GEMINI_API_KEY:latest" \
+          --set-secrets="TUTOR_GEMINI_API_KEY=TUTOR_GEMINI_API_KEY:latest,GEMINI_API_KEY=TUTOR_GEMINI_API_KEY:latest" \
           "$${auth_flag[@]}"

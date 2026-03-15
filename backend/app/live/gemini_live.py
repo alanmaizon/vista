@@ -30,13 +30,21 @@ class GeminiLiveConnection:
     _session: Any
     _supports_explicit_activity_end: bool
     _types: Any
+    _pending_client_content: bool = False
 
     async def receive(self) -> AsyncIterator[Any]:
         async for message in self._session.receive():
             yield message
 
     async def send_text(self, text: str) -> None:
-        await self._session.send_realtime_input(text=text)
+        normalized = text.strip()
+        if not normalized:
+            return
+        await self._session.send_client_content(
+            turns={"role": "user", "parts": [{"text": normalized}]},
+            turn_complete=False,
+        )
+        self._pending_client_content = True
 
     async def send_audio_chunk(
         self,
@@ -58,6 +66,10 @@ class GeminiLiveConnection:
         await self._session.send_realtime_input(media=blob)
 
     async def end_turn(self) -> None:
+        if self._pending_client_content:
+            await self._session.send_client_content(turn_complete=True)
+            self._pending_client_content = False
+            return
         if not self._supports_explicit_activity_end:
             return
         await self._session.send_realtime_input(activity_end=self._types.ActivityEnd())
@@ -163,7 +175,7 @@ class GeminiLiveGateway:
         return GeminiLiveConnection(
             _context_manager=context_manager,
             _session=session,
-            _supports_explicit_activity_end=False,
+            _supports_explicit_activity_end=hasattr(types, "ActivityEnd"),
             _types=types,
         )
 

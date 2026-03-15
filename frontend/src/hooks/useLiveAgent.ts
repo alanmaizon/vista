@@ -142,13 +142,6 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
           return;
         case "server.status":
           setConnectionDetail(payload.detail);
-          appendTranscriptEntry({
-            speaker: "system",
-            text: payload.detail,
-            source: payload.phase,
-            turnId: payload.turn_id ?? null,
-            isFinal: true,
-          });
           return;
         case "server.transcript":
           appendTranscriptEntry({

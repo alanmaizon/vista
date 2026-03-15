@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     google_cloud_location: str = "us-central1"
     gemini_api_key: str | None = None
     gemini_connect_timeout_seconds: float = 8.0
-    gemini_live_model: str = "gemini-live-2.5-flash-preview"
+    gemini_live_model: str = "gemini-2.5-flash-native-audio-latest"
     gemini_response_model: str = "gemini-2.5-flash"
     use_google_adk: bool = True
     default_tutoring_mode: TutorMode = TutorMode.guided_reading

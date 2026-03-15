@@ -28,6 +28,7 @@ class GeminiLiveConnection:
 
     _context_manager: AbstractAsyncContextManager[Any]
     _session: Any
+    _supports_explicit_activity_end: bool
     _types: Any
 
     async def receive(self) -> AsyncIterator[Any]:
@@ -57,6 +58,8 @@ class GeminiLiveConnection:
         await self._session.send_realtime_input(media=blob)
 
     async def end_turn(self) -> None:
+        if not self._supports_explicit_activity_end:
+            return
         await self._session.send_realtime_input(activity_end=self._types.ActivityEnd())
 
     async def send_tool_response(
@@ -160,6 +163,7 @@ class GeminiLiveGateway:
         return GeminiLiveConnection(
             _context_manager=context_manager,
             _session=session,
+            _supports_explicit_activity_end=False,
             _types=types,
         )
 

@@ -15,7 +15,7 @@ This scaffold keeps that shape, while leaving the archival application under `le
 
 ```text
 vista/
-├── backend/          # FastAPI scaffold for session bootstrap, runtime info, and live websocket placeholder
+├── backend/          # FastAPI scaffold for session bootstrap, runtime info, and Gemini Live websocket bridge
 ├── docs/             # Product and architecture notes
 ├── frontend/         # Vite + React + TypeScript scaffold for the tutor session UI
 ├── infra/            # Deployment notes for future Google Cloud work
@@ -28,13 +28,12 @@ vista/
 What exists now:
 
 - A minimal live session UI prepared for microphone, camera, and worksheet image intake
-- A FastAPI backend with runtime metadata, session bootstrap, and a placeholder `/ws/live` endpoint
+- A FastAPI backend with runtime metadata, session bootstrap, and a Gemini Live-backed `/ws/live` bridge with scaffold fallback
 - Skeletal agent layers for prompts, session state, tutoring modes, tool registry, Gemini Live planning, and ADK orchestration
 - Focused documentation explaining the intended architecture and next implementation steps
 
 What is intentionally not implemented yet:
 
-- Real Gemini Live websocket bridging
 - Actual Google ADK orchestration logic
 - Deterministic parsing, grading, or drill generation
 - Persistent storage, auth, or deployment automation
@@ -70,11 +69,10 @@ Or use the helper scripts from the repo root:
 
 ## Next steps
 
-1. Replace the placeholder live websocket with a Gemini Live session bridge or ephemeral-token flow.
-2. Wire the ADK orchestration layer to real tutoring modes and tool execution.
-3. Implement the first deterministic tools: passage parsing, response grading, and micro-drill generation.
-4. Add persistence for session state, learner progress, and uploaded worksheet metadata.
-5. Decide on the first Google Cloud deployment slice, likely backend to Cloud Run and frontend to static hosting or a lightweight edge deploy.
+1. Wire the ADK orchestration layer to real tutoring modes and tool execution.
+2. Implement deterministic tools: passage parsing, response grading, and micro-drill generation.
+3. Add persistence for session state, learner progress, and uploaded worksheet metadata.
+4. Decide on the first Google Cloud deployment slice, likely backend to Cloud Run and frontend to static hosting or a lightweight edge deploy.
 
 For a more detailed breakdown, see `docs/product.md` and `docs/architecture.md`.
-
+For the websocket message contract used by the current live bridge, see `docs/live-event-contract.md`.

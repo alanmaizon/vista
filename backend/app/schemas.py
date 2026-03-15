@@ -27,6 +27,13 @@ class LiveSessionPlan(BaseModel):
     provider: str = "gemini-live"
     model: str
     websocket_path: str
+    protocol_version: str
+    accepted_client_events: list[str] = Field(default_factory=list)
+    emitted_server_events: list[str] = Field(default_factory=list)
+    input_audio_mime_type: str
+    output_audio_mime_type: str
+    accepted_image_mime_types: list[str] = Field(default_factory=list)
+    supports_session_resumption: bool = True
     audio_input: bool = True
     audio_output: bool = True
     image_input: bool = True
@@ -81,6 +88,7 @@ class RuntimeSnapshot(BaseModel):
     google_cloud_project: str | None = None
     google_cloud_location: str
     websocket_path: str
+    live_protocol_version: str
     default_mode: TutorMode
     use_google_adk: bool
     google_adk_available: bool
@@ -88,4 +96,3 @@ class RuntimeSnapshot(BaseModel):
     google_genai_available: bool
     google_genai_detail: str
     tools: list[str] = Field(default_factory=list)
-

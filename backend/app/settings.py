@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     google_cloud_project: str | None = None
     google_cloud_location: str = "us-central1"
+    gemini_api_key: str | None = None
+    gemini_connect_timeout_seconds: float = 8.0
     gemini_live_model: str = "gemini-live-2.5-flash-preview"
     gemini_response_model: str = "gemini-2.5-flash"
     use_google_adk: bool = True
@@ -55,4 +57,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

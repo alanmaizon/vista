@@ -6,7 +6,7 @@ The backend is a small FastAPI service that defines the first stable seams for t
 
 - expose a health endpoint and runtime metadata
 - bootstrap a tutor session with mode, tools, and prompt preview
-- provide a placeholder `/ws/live` websocket for future Gemini Live integration
+- bridge `/ws/live` events to Gemini Live using the shared contract in `backend/app/live/protocol.py`
 - keep agent pieces separated so ADK and tool work can grow without reshaping the app
 
 ## Key modules
@@ -21,7 +21,7 @@ backend/app/
 │   ├── prompts.py         # system prompt builder
 │   └── session_state.py   # session state snapshot scaffold
 ├── live/                  # Gemini Live integration planning layer
-├── main.py                # FastAPI app and websocket placeholder
+├── main.py                # FastAPI app and websocket bridge
 ├── schemas.py             # request / response models
 └── settings.py            # env-driven configuration
 ```
@@ -45,10 +45,17 @@ cp .env.example .env
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+If you want the websocket to connect upstream to Gemini Live instead of scaffold fallback mode, set one of:
+
+- `TUTOR_GEMINI_API_KEY`
+- `GEMINI_API_KEY`
+- `GOOGLE_API_KEY`
+
+Or configure Vertex mode with `TUTOR_GOOGLE_CLOUD_PROJECT`.
+
 ## What is still a stub
 
-- Gemini Live auth and transport
 - ADK agent graph and tool execution
+- deterministic tool execution (parse/grade/drill currently return placeholder tool results)
 - storage, auth, and session persistence
 - production observability
-

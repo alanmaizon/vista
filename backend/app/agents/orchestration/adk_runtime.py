@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...live.gemini_live import GeminiLiveGateway
+from ...live.protocol import LIVE_PROTOCOL_VERSION
 from ...schemas import RuntimeSnapshot, SessionBootstrapRequest, SessionBootstrapResponse
 from ...settings import Settings
 from ..modes import get_mode_definition, list_mode_summaries
@@ -77,6 +78,7 @@ class AncientGreekTutorOrchestrator:
             google_cloud_project=self._settings.google_cloud_project,
             google_cloud_location=self._settings.google_cloud_location,
             websocket_path=self._settings.websocket_path,
+            live_protocol_version=LIVE_PROTOCOL_VERSION,
             default_mode=self._settings.default_tutoring_mode,
             use_google_adk=self._settings.use_google_adk,
             google_adk_available=bool(adk["available"]),
@@ -85,4 +87,3 @@ class AncientGreekTutorOrchestrator:
             google_genai_detail=str(genai["detail"]),
             tools=self._tool_registry.names(),
         )
-

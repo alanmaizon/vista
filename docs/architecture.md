@@ -22,7 +22,7 @@ Backend (FastAPI)
   -> /api/runtime
   -> /api/live/modes
   -> /api/live/session
-  -> /ws/live placeholder
+  -> /ws/live Gemini Live bridge (+ scaffold fallback when credentials are missing)
 
 Agent layers
   -> prompts.py
@@ -30,6 +30,7 @@ Agent layers
   -> modes.py
   -> tools/
   -> live/gemini_live.py
+  -> live/protocol.py
   -> orchestration/adk_runtime.py
 ```
 
@@ -57,11 +58,10 @@ flowchart LR
 - Browser-side preparation for microphone, camera, and worksheet image intake
 - A bootstrap API that returns mode metadata, registered tools, prompt preview, and live session configuration
 - A stable websocket path the frontend can code against immediately
+- A typed websocket contract documented in `docs/live-event-contract.md` and mirrored in backend/frontend source
 
 ## What comes next
 
-1. Replace the placeholder websocket with a Gemini Live bridge.
-2. Build the first ADK orchestration pass around tutoring turns and tool routing.
-3. Implement deterministic outputs for parsing, grading, and drill generation.
-4. Add persistence for session state and learner progress.
-
+1. Build the first ADK orchestration pass around tutoring turns and tool routing.
+2. Implement deterministic outputs for parsing, grading, and drill generation.
+3. Add persistence for session state and learner progress.

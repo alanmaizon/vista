@@ -30,6 +30,13 @@ export interface LiveSessionPlan {
   provider: string;
   model: string;
   websocket_path: string;
+  protocol_version: string;
+  accepted_client_events: string[];
+  emitted_server_events: string[];
+  input_audio_mime_type: string;
+  output_audio_mime_type: string;
+  accepted_image_mime_types: string[];
+  supports_session_resumption: boolean;
   audio_input: boolean;
   audio_output: boolean;
   image_input: boolean;
@@ -82,6 +89,7 @@ export interface RuntimeSnapshot {
   google_cloud_project: string | null;
   google_cloud_location: string;
   websocket_path: string;
+  live_protocol_version: string;
   default_mode: TutorMode;
   use_google_adk: boolean;
   google_adk_available: boolean;
@@ -90,4 +98,3 @@ export interface RuntimeSnapshot {
   google_genai_detail: string;
   tools: string[];
 }
-

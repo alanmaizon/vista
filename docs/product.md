@@ -36,7 +36,6 @@ An Ancient Greek tutor that can hear the learner, inspect a passage or worksheet
 ## Near-term build steps
 
 1. Land a real Gemini Live transport layer.
-2. Decide which parts of the tutor loop should be deterministic tools versus model-native reasoning.
-3. Implement the first passage parser response shape so the UI can render real morphology cards.
+2. Add ADK policy evaluation coverage to validate tool routing decisions across modes.
+3. Implement the first richer parser response shape so the UI can render meaningful morphology cards.
 4. Add turn logging and session playback for debugging.
-

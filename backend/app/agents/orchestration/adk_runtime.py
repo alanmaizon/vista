@@ -1,4 +1,4 @@
-"""ADK orchestration scaffold."""
+"""ADK orchestration runtime and bootstrap metadata."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def google_adk_status() -> dict[str, Any]:
 
 
 class AncientGreekTutorOrchestrator:
-    """Small coordinator that keeps future ADK wiring behind one seam."""
+    """Coordinator for bootstrap/runtime endpoints."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -53,18 +53,18 @@ class AncientGreekTutorOrchestrator:
             live_session=live_session,
             orchestration={
                 "engine": "google-adk",
-                "status": "scaffold",
+                "status": "policy_graph_ready",
                 "adk_ready": google_adk_status()["available"],
                 "loop": [
                     "listen to learner input",
                     "ground against target text or worksheet",
-                    "decide whether to hint, parse, grade, or drill",
+                    "run ADK policy graph to select tool-preflight vs direct-generation",
                     "respond with short spoken tutoring guidance",
                 ],
             },
             next_steps=[
                 "Open the live websocket and exchange a Gemini Live session handshake.",
-                "Convert tool placeholders into executable parse, grade, and drill actions.",
+                "Harden ADK policy prompts with evaluation traces and guardrails.",
                 "Persist transcript turns and worksheet metadata outside the in-memory scaffold.",
             ],
         )

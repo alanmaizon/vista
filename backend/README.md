@@ -7,6 +7,7 @@ The backend is a small FastAPI service that defines the first stable seams for t
 - expose a health endpoint and runtime metadata
 - bootstrap a tutor session with mode, tools, and prompt preview
 - bridge `/ws/live` events to Gemini Live using the shared contract in `backend/app/live/protocol.py`
+- run a turn-end ADK policy graph seam (with deterministic fallback) for tool-preflight routing
 - keep agent pieces separated so ADK and tool work can grow without reshaping the app
 
 ## Key modules
@@ -15,7 +16,7 @@ The backend is a small FastAPI service that defines the first stable seams for t
 backend/app/
 ├── api/                   # HTTP route registration and dependencies
 ├── agents/
-│   ├── orchestration/     # ADK-facing orchestration placeholder
+│   ├── orchestration/     # ADK policy graph runtime + deterministic fallback
 │   ├── tools/             # parse / grade / drill tool definitions
 │   ├── modes.py           # tutoring mode definitions
 │   ├── prompts.py         # system prompt builder
@@ -55,7 +56,7 @@ Or configure Vertex mode with `TUTOR_GOOGLE_CLOUD_PROJECT`.
 
 ## What is still a stub
 
-- ADK agent graph and tool execution
+- ADK policy evaluation/guardrail harness and richer routing coverage
 - deeper deterministic tool logic (current parse/grade/drill execution is intentionally lightweight)
 - storage, auth, and session persistence
 - production observability

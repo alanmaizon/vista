@@ -31,11 +31,12 @@ What exists now:
 - A FastAPI backend with runtime metadata, session bootstrap, and a Gemini Live-backed `/ws/live` bridge with scaffold fallback
 - Skeletal agent layers for prompts, session state, tutoring modes, tool registry, Gemini Live planning, and ADK orchestration
 - Deterministic starter tools for parsing, grading, and drill generation, wired into live tool calls
+- An ADK policy graph seam at `client.turn.end` that chooses tool-preflight or direct-generation flow, with deterministic fallback when ADK cannot run
 - Focused documentation explaining the intended architecture and next implementation steps
 
 What is intentionally not implemented yet:
 
-- Actual Google ADK orchestration logic
+- ADK decision quality evaluation and guardrail tuning
 - Persistent storage, auth, or deployment automation
 
 ## Local development
@@ -69,7 +70,7 @@ Or use the helper scripts from the repo root:
 
 ## Next steps
 
-1. Wire the ADK orchestration layer to real tutoring modes and tool execution.
+1. Add an evaluation harness for ADK policy graph decisions (coverage, regression checks, and safety guardrails).
 2. Improve deterministic tools with richer morphology coverage and structured rubric outputs.
 3. Add persistence for session state, learner progress, and uploaded worksheet metadata.
 4. Decide on the first Google Cloud deployment slice, likely backend to Cloud Run and frontend to static hosting or a lightweight edge deploy.

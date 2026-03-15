@@ -23,6 +23,7 @@ Backend (FastAPI)
   -> /api/live/modes
   -> /api/live/session
   -> /ws/live Gemini Live bridge (+ scaffold fallback when credentials are missing)
+  -> turn-end ADK policy graph (tool preflight vs direct generation)
 
 Agent layers
   -> prompts.py
@@ -60,9 +61,10 @@ flowchart LR
 - A stable websocket path the frontend can code against immediately
 - A typed websocket contract documented in `docs/live-event-contract.md` and mirrored in backend/frontend source
 - Initial deterministic tool executors (`parse_passage`, `grade_attempt`, `generate_drill`) wired to live tool calls
+- A turn-end ADK policy graph seam that can select preflight tools and inject orchestration context into Gemini
 
 ## What comes next
 
-1. Build the first ADK orchestration pass around tutoring turns and tool routing.
+1. Add eval and guardrail coverage for ADK policy decisions across tutoring modes.
 2. Improve deterministic outputs for parsing, grading, and drill generation.
 3. Add persistence for session state and learner progress.

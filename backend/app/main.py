@@ -15,6 +15,7 @@ from uuid import uuid4
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from .agents.orchestration.live_turns import LiveTurnInput, LiveTurnOrchestrator
 from .agents.prompts import build_system_prompt
 from .agents.tools import ToolExecutionError, build_default_tool_registry, execute_tool_call
 from .api.router import api_router
@@ -50,6 +51,7 @@ logger = logging.getLogger("ancient_greek.live")
 settings = get_settings()
 gemini_gateway = GeminiLiveGateway(settings)
 tool_registry = build_default_tool_registry()
+turn_orchestrator = LiveTurnOrchestrator(settings)
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -106,6 +108,20 @@ def _normalize_function_args(raw_args: Any) -> dict[str, Any]:
     return {"raw_args": raw_args}
 
 
+def _build_orchestration_context_payload(
+    *,
+    tool_name: str,
+    tool_result: dict[str, Any],
+    turn_id: str,
+) -> dict[str, Any]:
+    return {
+        "source": "live_turn_orchestrator",
+        "turn_id": turn_id,
+        "tool_name": tool_name,
+        "tool_result": tool_result,
+    }
+
+
 async def send_live_event(
     websocket: WebSocket,
     event: object,
@@ -140,7 +156,11 @@ async def live_websocket(websocket: WebSocket) -> None:
         "session_id": None,
         "last_turn_id": "turn-initial",
         "audio_chunk_index": 0,
+        "mode": settings.default_tutoring_mode,
+        "target_text": None,
+        "preferred_response_language": "English",
     }
+    turn_buffers: dict[str, dict[str, Any]] = {}
 
     gemini_connection: GeminiLiveConnection | None = None
     gemini_receive_task: asyncio.Task[None] | None = None
@@ -184,6 +204,36 @@ async def live_websocket(websocket: WebSocket) -> None:
                     "Failed sending tool response back to Gemini Live.",
                     retryable=True,
                     session_id=state["session_id"],
+                )
+            )
+
+    async def send_orchestration_context_to_gemini(
+        *,
+        turn_id: str,
+        tool_name: str,
+        tool_result: dict[str, Any],
+    ) -> None:
+        if gemini_connection is None:
+            return
+        payload = _build_orchestration_context_payload(
+            tool_name=tool_name,
+            tool_result=tool_result,
+            turn_id=turn_id,
+        )
+        try:
+            await gemini_connection.send_text(
+                "[orchestration_context] "
+                + json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+            )
+        except Exception:
+            logger.exception("Failed forwarding orchestration context to Gemini")
+            await emit(
+                build_server_error_event(
+                    "GEMINI_ORCHESTRATION_CONTEXT_FAILED",
+                    "Failed forwarding orchestration preflight context to Gemini Live.",
+                    retryable=True,
+                    session_id=state["session_id"],
+                    detail={"turn_id": turn_id, "tool_name": tool_name},
                 )
             )
 
@@ -506,6 +556,12 @@ async def live_websocket(websocket: WebSocket) -> None:
                 state["session_id"] = event.session_id or f"session-{uuid4().hex[:10]}"
                 state["audio_chunk_index"] = 0
                 state["last_turn_id"] = "turn-initial"
+                state["mode"] = event.mode or settings.default_tutoring_mode
+                state["target_text"] = event.target_text.strip() if event.target_text else None
+                state["preferred_response_language"] = (
+                    event.preferred_response_language or "English"
+                )
+                turn_buffers.clear()
 
                 await emit(
                     ServerStatusEvent(
@@ -573,6 +629,11 @@ async def live_websocket(websocket: WebSocket) -> None:
 
             if isinstance(event, ClientTextInputEvent):
                 state["last_turn_id"] = event.turn_id
+                turn_buffer = turn_buffers.setdefault(
+                    event.turn_id,
+                    {"texts": [], "audio_chunk_count": 0, "image_frame_count": 0},
+                )
+                turn_buffer["texts"].append(event.text)
                 await emit(
                     ServerTranscriptEvent(
                         session_id=state["session_id"],
@@ -610,6 +671,11 @@ async def live_websocket(websocket: WebSocket) -> None:
 
             if isinstance(event, ClientAudioInputEvent):
                 state["last_turn_id"] = event.turn_id
+                turn_buffer = turn_buffers.setdefault(
+                    event.turn_id,
+                    {"texts": [], "audio_chunk_count": 0, "image_frame_count": 0},
+                )
+                turn_buffer["audio_chunk_count"] += 1
                 if gemini_connection is None:
                     await emit(
                         ServerStatusEvent(
@@ -657,6 +723,11 @@ async def live_websocket(websocket: WebSocket) -> None:
 
             if isinstance(event, ClientImageInputEvent):
                 state["last_turn_id"] = event.turn_id
+                turn_buffer = turn_buffers.setdefault(
+                    event.turn_id,
+                    {"texts": [], "audio_chunk_count": 0, "image_frame_count": 0},
+                )
+                turn_buffer["image_frame_count"] += 1
                 if gemini_connection is None:
                     await emit(
                         ServerStatusEvent(
@@ -705,6 +776,24 @@ async def live_websocket(websocket: WebSocket) -> None:
 
             if isinstance(event, ClientTurnEndEvent):
                 state["last_turn_id"] = event.turn_id
+                turn_buffer = turn_buffers.pop(
+                    event.turn_id,
+                    {"texts": [], "audio_chunk_count": 0, "image_frame_count": 0},
+                )
+                turn_input = LiveTurnInput(
+                    turn_id=event.turn_id,
+                    reason=event.reason,
+                    learner_text="\n".join(turn_buffer["texts"]).strip(),
+                    audio_chunk_count=int(turn_buffer["audio_chunk_count"]),
+                    image_frame_count=int(turn_buffer["image_frame_count"]),
+                )
+                plan = await turn_orchestrator.plan_turn(
+                    mode=state["mode"],
+                    target_text=state["target_text"],
+                    preferred_response_language=state["preferred_response_language"],
+                    turn_input=turn_input,
+                )
+
                 await emit(
                     ServerTurnEvent(
                         session_id=state["session_id"],
@@ -713,6 +802,66 @@ async def live_websocket(websocket: WebSocket) -> None:
                         detail=f"Learner turn ended because: {event.reason}.",
                     )
                 )
+                await emit(
+                    ServerStatusEvent(
+                        phase="tool_running" if plan.preflight_tool_name else "thinking",
+                        detail=f"Turn orchestration ({plan.engine}): {plan.rationale}",
+                        session_id=state["session_id"],
+                        turn_id=event.turn_id,
+                    )
+                )
+
+                if plan.preflight_tool_name is not None:
+                    orchestrator_tool_call_id = f"orch-{event.turn_id}-{uuid4().hex[:8]}"
+                    await emit(
+                        ServerToolCallEvent(
+                            session_id=state["session_id"],
+                            turn_id=event.turn_id,
+                            tool_call_id=orchestrator_tool_call_id,
+                            tool_name=plan.preflight_tool_name,
+                            arguments=plan.preflight_tool_arguments,
+                            status="started",
+                        )
+                    )
+                    try:
+                        preflight_result = execute_tool_call(
+                            plan.preflight_tool_name,
+                            plan.preflight_tool_arguments,
+                        )
+                    except ToolExecutionError as exc:
+                        await emit(
+                            ServerToolResultEvent(
+                                session_id=state["session_id"],
+                                turn_id=event.turn_id,
+                                tool_call_id=orchestrator_tool_call_id,
+                                tool_name=plan.preflight_tool_name,
+                                status="failed",
+                                result={"status": "error", "message": str(exc)},
+                                error="ORCHESTRATION_PREFLIGHT_FAILED",
+                            )
+                        )
+                    else:
+                        preflight_result_with_meta = {
+                            **preflight_result,
+                            "orchestration_engine": plan.engine,
+                            "orchestration_stage": plan.stage,
+                        }
+                        await emit(
+                            ServerToolResultEvent(
+                                session_id=state["session_id"],
+                                turn_id=event.turn_id,
+                                tool_call_id=orchestrator_tool_call_id,
+                                tool_name=plan.preflight_tool_name,
+                                status="completed",
+                                result=preflight_result_with_meta,
+                            )
+                        )
+                        await send_orchestration_context_to_gemini(
+                            turn_id=event.turn_id,
+                            tool_name=plan.preflight_tool_name,
+                            tool_result=preflight_result_with_meta,
+                        )
+
                 await emit(
                     ServerStatusEvent(
                         phase="thinking",
